@@ -29,7 +29,8 @@ Four executables come out of one build.
 | simplecpu-asm | Assembles a source file and burns a ROM. |
 | simplecpu-run | Runs a ROM or source headless and prints the machine state. For tests and scripts. |
 
-simplecpu-cc compiles C to assembly once the compiler is ported.
+simplecpu-cc compiles C to assembly. `simplecpu-cc main.c lib.c -o main.asm`,
+with `-D NAME=VALUE`, `-msoft-mul` and `--rom-header ROM.h`.
 
 Command lines that are settled:
 
@@ -184,12 +185,14 @@ Written new:
 - the command line tools
 - the IDE with its panes
 
+The C compiler is ported. Its tests run doubles and rom_copy through a
+stub GPU in the harness that answers CMD_RAM_MOVE and CMD_COPY only.
+
 Pending, in the order they unblock each other:
 
 - the GPU: screen, text, sprites, world
 - the input device, the APU and the ACP
 - the image and audio decoders for `.image` and `.sample`
-- the C compiler
 - the BASIC interpreter and its ROM
 - the storage device
 - the demos
