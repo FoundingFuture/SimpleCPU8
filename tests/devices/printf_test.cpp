@@ -36,6 +36,15 @@ Bytes floatBytes32(float v) {
           static_cast<uint8_t>(bits)};
 }
 
+// A double as its eight big-endian bytes.
+Bytes floatBytes64(double v) {
+  uint64_t bits;
+  std::memcpy(&bits, &v, sizeof bits);
+  Bytes out;
+  for (int i = 7; i >= 0; i--) out.push_back(static_cast<uint8_t>(bits >> (i * 8)));
+  return out;
+}
+
 const std::string NO = std::string(NO_PARAM);
 
 }  // namespace
@@ -120,6 +129,59 @@ TEST_SUITE("printf, C grammar") {
     CHECK_EQ(fmt("%G", floatBytes32(1234567.0f)), "1.23457E+06");
     CHECK_EQ(fmt("%#g", floatBytes32(1.5f)), "1.50000");
     CHECK_EQ(fmt("%.3g", floatBytes32(100.0f)), "100");
+  }
+
+  TEST_CASE("rounds an exact half up in magnitude, as toFixed did") {
+    // C's printf would give 0.12 and 2 here.
+    CHECK_EQ(fmt("%.2f", floatBytes32(0.125f)), "0.13");
+    CHECK_EQ(fmt("%.2f", floatBytes32(-0.125f)), "-0.13");
+    CHECK_EQ(fmt("%.0f", floatBytes32(2.5f)), "3");
+    CHECK_EQ(fmt("%.0f", floatBytes32(-2.5f)), "-3");
+    CHECK_EQ(fmt("%.0e", floatBytes32(2.5f)), "3e+00");
+    CHECK_EQ(fmt("%.1g", floatBytes32(2.5f)), "3");
+  }
+
+  // Expected strings come from Node 22 running the browser's formatting:
+  // toFixed, toExponential with a two digit exponent, and toPrecision with
+  // its zeros trimmed. They round the exact binary value, so 0.135 gives 0.14
+  // and 1.005 gives 1.00, and they take a true half upward.
+  TEST_CASE("matches JavaScript's toFixed, toExponential and toPrecision") {
+    struct Case {
+      double value;
+      const char* spec;
+      const char* expected;
+    };
+    const Case doubles[] = {
+        {0.125, "%.2lf", "0.13"},         {-0.125, "%.2lf", "-0.13"},     {0.135, "%.2lf", "0.14"},
+        {2.5, "%.0lf", "3"},              {-2.5, "%.0lf", "-3"},          {3.5, "%.0lf", "4"},
+        {0.0005, "%.3lf", "0.001"},       {0.0005, "%.4lf", "0.0005"},    {1.005, "%.2lf", "1.00"},
+        {1.5, "%.0lf", "2"},              {0.5, "%.0lf", "1"},            {123.456, "%.0lf", "123"},
+        {123.456, "%.1lf", "123.5"},      {123.456, "%.2lf", "123.46"},   {123.456, "%.3lf", "123.456"},
+        {123.456, "%.5lf", "123.45600"},  {9.995, "%.2lf", "9.99"},       {9.5, "%.0lf", "10"},
+        {99.5, "%.0lf", "100"},           {0.045, "%.2lf", "0.04"},       {1e-7, "%.6lf", "0.000000"},
+        {0.125, "%.1le", "1.3e-01"},      {1.25, "%.1le", "1.3e+00"},     {2.5, "%.0le", "3e+00"},
+        {9.5, "%.0le", "1e+01"},          {123.456, "%.2le", "1.23e+02"}, {123.456, "%le", "1.234560e+02"},
+        {0.0005, "%.2le", "5.00e-04"},    {1.005, "%.2le", "1.00e+00"},   {0, "%.2le", "0.00e+00"},
+        {0, "%.2lf", "0.00"},             {0.125, "%.2lg", "0.13"},       {2.5, "%.1lg", "3"},
+        {123.456, "%.4lg", "123.5"},      {123.456, "%lg", "123.456"},    {123.456, "%.2lg", "1.2e+02"},
+        {0.0005, "%.1lg", "0.0005"},      {1.005, "%.3lg", "1"},          {9.5, "%.1lg", "1e+01"},
+        {99.5, "%.2lg", "1e+02"},         {0.5, "%.0lg", "0.5"},          {1234567.5, "%.7lg", "1234568"},
+    };
+    for (const Case& c : doubles) {
+      CAPTURE(c.value);
+      CAPTURE(c.spec);
+      CHECK_EQ(fmt(c.spec, floatBytes64(c.value)), c.expected);
+    }
+    // The same through a float32, which is what Math.fround gave Node.
+    const Case singles[] = {
+        {0.125, "%.2f", "0.13"},     {2.5, "%.0f", "3"},           {0.135, "%.2f", "0.14"},
+        {1.005, "%.2f", "1.00"},     {123.456, "%.2f", "123.46"},  {123.456, "%.4f", "123.4560"},
+    };
+    for (const Case& c : singles) {
+      CAPTURE(c.value);
+      CAPTURE(c.spec);
+      CHECK_EQ(fmt(c.spec, floatBytes32(static_cast<float>(c.value))), c.expected);
+    }
   }
 
   TEST_CASE("prints infinities and not a number") {

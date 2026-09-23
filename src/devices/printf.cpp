@@ -1,5 +1,6 @@
 #include "devices/printf.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -188,17 +189,86 @@ std::string padExp(std::string s) {
   return s;
 }
 
-std::string cFormat(const char* fmt, int prec, double v) {
-  char buf[512];
-  std::snprintf(buf, sizeof buf, fmt, prec, v);
-  return buf;
+// The exact decimal expansion of a finite non negative double. C's %f writes
+// it once given enough places for every fractional bit. A double is a 53 bit
+// integer times a power of two, so 53 - e places always suffice.
+std::string exactDecimal(double av) {
+  int e = 0;
+  std::frexp(av, &e);
+  const int places = std::max(0, 53 - e);
+  const int len = std::snprintf(nullptr, 0, "%.*f", places, av);
+  std::string out(static_cast<size_t>(len) + 1, '\0');
+  std::snprintf(out.data(), out.size(), "%.*f", places, av);
+  out.resize(static_cast<size_t>(len));
+  return out;
 }
 
-// JavaScript's toPrecision, built from the C exponential form. JavaScript
+// Add one to a decimal digit string. A carry out of the top grows it.
+void increment(std::string& digits) {
+  for (size_t i = digits.size(); i-- > 0;) {
+    if (digits[i] != '9') {
+      digits[i]++;
+      return;
+    }
+    digits[i] = '0';
+  }
+  digits.insert(digits.begin(), '1');
+}
+
+// Keep the first n digits of an exact expansion, rounding half away from
+// zero. The tail is exact, so its first digit alone decides the direction.
+std::string roundDigits(const std::string& digits, size_t n) {
+  if (digits.size() <= n) return digits + std::string(n - digits.size(), '0');
+  std::string kept = digits.substr(0, n);
+  if (digits[n] >= '5') increment(kept);
+  return kept;
+}
+
+// JavaScript's toFixed: the exact value rounded, a half going up in
+// magnitude. C's printf rounds an exact half to even, so 0.125 with two
+// places gives 0.12 there and 0.13 here.
+std::string toFixed(double av, int p) {
+  const std::string exact = exactDecimal(av);
+  const size_t dot = exact.find('.');
+  const std::string whole = exact.substr(0, dot);
+  const std::string frac = dot == std::string::npos ? "" : exact.substr(dot + 1);
+  const size_t places = static_cast<size_t>(p);
+  std::string digits = roundDigits(whole + frac, whole.size() + places);
+  const size_t split = digits.size() - places;
+  return places == 0 ? digits : digits.substr(0, split) + "." + digits.substr(split);
+}
+
+// JavaScript's toExponential with C's two digit exponent: p digits after the
+// point, a half rounded up in magnitude.
+std::string toExponential(double av, int p) {
+  const std::string exact = exactDecimal(av);
+  const size_t dot = exact.find('.');
+  const size_t whole = dot == std::string::npos ? exact.size() : dot;
+  std::string all = exact.substr(0, whole) + (dot == std::string::npos ? "" : exact.substr(dot + 1));
+  const size_t first = all.find_first_not_of('0');
+  int exp = 0;
+  std::string mantissa;
+  if (first == std::string::npos) {
+    mantissa = std::string(static_cast<size_t>(p) + 1, '0');
+  } else {
+    exp = static_cast<int>(whole) - static_cast<int>(first) - 1;
+    mantissa = roundDigits(all.substr(first), static_cast<size_t>(p) + 1);
+    if (mantissa.size() > static_cast<size_t>(p) + 1) {
+      // The carry made 10.0 out of 9.99: one digit more, one power higher.
+      mantissa.pop_back();
+      exp++;
+    }
+  }
+  char tail[16];
+  std::snprintf(tail, sizeof tail, "e%c%02d", exp < 0 ? '-' : '+', exp < 0 ? -exp : exp);
+  return mantissa.substr(0, 1) + (p > 0 ? "." + mantissa.substr(1) : "") + tail;
+}
+
+// JavaScript's toPrecision, built from the exponential form. JavaScript
 // switches to the exponent form below 1e-6 where C's %g switches below
 // 1e-4, so %g cannot stand in for it.
 std::string toPrecision(double av, int p) {
-  const std::string e = cFormat("%.*e", p - 1, av);
+  const std::string e = toExponential(av, p - 1);
   const size_t epos = e.find('e');
   std::string mantissa = e.substr(0, epos);
   const int exp = std::stoi(e.substr(epos + 1));
@@ -254,12 +324,13 @@ std::string formatFloat(const Spec& s, std::span<const uint8_t> bytes) {
   }
   const char lc = static_cast<char>(upper ? s.conv - 'A' + 'a' : s.conv);
   // DESIGN: the browser used JavaScript's toFixed and toExponential, which
-  // round an exact half upward. C's printf rounds it to even, so 2.5 with no
-  // decimals prints 2 here and 3 there. Every other value agrees.
+  // round an exact half up in magnitude. C's printf rounds it to even, so the
+  // rounding is done here on the exact decimal expansion. Every value agrees
+  // with the browser, ties included.
   if (lc == 'f') {
-    digits = cFormat("%.*f", s.precision.value_or(6), av);
+    digits = toFixed(av, s.precision.value_or(6));
   } else if (lc == 'e') {
-    digits = cFormat("%.*e", s.precision.value_or(6), av);
+    digits = toExponential(av, s.precision.value_or(6));
   } else {
     // g: significant digits, trailing zeros trimmed unless the hash flag.
     const int p = !s.precision ? 6 : *s.precision == 0 ? 1 : *s.precision;
