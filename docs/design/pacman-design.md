@@ -6,8 +6,8 @@ real targeting rules. Dots, power pills, and a set of mazes cycled per level.
 Built so far: the maze, the dots, movement, and every tunnel pair a maze
 declares. Levels cycle. Four ghosts hunt with the arcade's targets, turn blue
 on a power pill, and go home as eyes when eaten. Lives and the sound are in.
-What is still owed is the score display and the HUD strip. This is the design
-record for the whole game.
+The score strip is in, above the maze. This is the design record for the
+whole game.
 
 ## Contents
 
@@ -49,29 +49,37 @@ level ten as at level one is not a game.
 ## The screen
 
 Graphics mode. The maze is 28 by 31 tiles of 8 pixels, so it occupies x 0 to
-223 and y 0 to 247. That leaves two free regions.
+223 and y 8 to 255. The eight rows above it are the score strip, one row of
+the 6 by 8 font. The 32 columns to the right are free.
 
 ```text
   x=0                      224   255
-  +----------------------+-----+
-  |                      | 1UP |   4 characters wide,
-  |        maze          | 0250|   31 rows tall
-  |      28 x 31         |     |
-  |                      | LIFE|
-  +----------------------+-----+
-  |                            |   32 characters, one row, unused
   +----------------------------+
+  | SCORE 00000  LIVES 3  LEVEL 1  one text row, y 0 to 7
+  +----------------------+-----+
+  |                      |     |
+  |        maze          |     |   32 pixels wide,
+  |      28 x 31         |     |   unused
+  |                      |     |
+  +----------------------+-----+
 ```
+
+The game works in maze pixels, where tile row 0 is pixel row 0. The records,
+the tunnel table and the pixel to tile table never see the strip. One byte,
+`mzytop`, is added where a maze pixel reaches the GPU. That is four places.
+The rectangle the walls and cell clears use, the dot, the pill and the sprite
+move. The assembler has no named constant. So the offset is a byte in RAM
+rather than four copies of a literal.
 
 Walls and dots are drawn into video memory once when a level starts, and
 never redrawn. Eating a dot paints an 8 by 8 square of background over it.
 
 Five sprites carry all the motion: Pac-Man is sprite 1 and the ghosts are 2
-to 5. Spare lives are sprites 6 to 8 in the side strip. That is cheaper than
-drawing them, and it reads better than a number.
+to 5.
 
 The printf overlay draws the strip. It rides over graphics and sprites, so
-the score costs no video memory and no sprite.
+the score costs no video memory and no sprite. Its colour is $FC, the default
+palette's yellow, outside the entries the maze fades.
 
 Text mode cannot be used for the maze. `composeFrame` returns before the
 sprite loop in that mode, so sprites would not appear over it.
@@ -520,15 +528,26 @@ table for a difference nobody would name.
 
 ## Scoring and the strip
 
-The strip is four characters wide, so it holds `1UP` and `LIFE` but not
-`SCORE`. Every score in the game is a multiple of ten. So the display shows
-the score divided by ten, with an implied trailing zero. Four digits then
-reach 99,990, past any realistic game.
+Every score in the game is a multiple of ten. So the counter holds the score
+divided by ten in 16 bits. The template prints it with `%04u` and a literal
+trailing 0. The strip starts at `SCORE 00000` and reads 99,990 before the
+field widens by a column.
 
 Dots score 10 and pills 50. Ghosts score 200, 400, 800 and 1600 in sequence.
 
-The bottom row is 32 characters and stays free, in case the score should
-move there later.
+One template prints the whole strip: the score, then `LIVES` and `LEVEL`.
+Its arguments are the game's own bytes. `score`, `lives` and `lvlno` are
+declared together in the template's order, so printf reads the state where it
+lives and the strip cannot disagree with it. `lvlno` counts levels from 1 and
+never wraps. The maze index does, at four, and is not the level.
+
+`hud` runs when a value changes and never from the frame loop. Three routines
+change one: `addscore`, `dieover` and `nextlvl`. A frame that changes nothing
+therefore costs no printf, and a dot costs one print of a dozen `OUT`s. The
+cursor is set on every print, because drawing advances it.
+
+The gaps in the template are sized for the longest strip. A five digit score
+on a three digit level fills 41 of the 42 columns.
 
 ## Game states
 
@@ -632,8 +651,9 @@ second loop is 150 clicks a minute.
 | sound | 13 |
 | revive marks | 5 |
 | strip cache | 6 |
+| maze offset and level number | 2 |
 
-About 1316 bytes of the 65536 available. The scalars are declared first so
+About 1318 bytes of the 65536 available. The scalars are declared first so
 they sit in the zero page, where `addr8` addressing reaches them. The three
 tables are read through a D register, so they can sit anywhere above.
 

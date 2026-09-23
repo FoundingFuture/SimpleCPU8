@@ -119,10 +119,14 @@ Golden parseGolden(const std::string& text) {
   return g;
 }
 
+// pacman is left out. This repository maintains its source, with a score
+// strip the browser copy lacks, so its bytes no longer match the fixture
+// and there is nothing for the fixture to pin. Its assembly is covered by
+// the roms target and the demo test.
 constexpr const char* DEMOS[] = {"audio",  "circle", "cube",   "div16", "div8",     "fly",    "gpu",
                                  "groups", "hanoi",  "input",  "list",  "mandel",   "matrix", "mul16",
-                                 "mul8",   "orbit",  "pacman", "pong",  "random",   "sprite", "star",
-                                 "text",   "textmode", "tunnel", "world"};
+                                 "mul8",   "orbit",  "pong",   "random", "sprite",  "star",   "text",
+                                 "textmode", "tunnel", "world"};
 
 }  // namespace
 
