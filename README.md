@@ -45,7 +45,10 @@ The build burns every example into build/roms. examples/README.md lists
 them. Pac-Man is build/roms/pacman.rom: arrows move, Z fires.
 
 Keys in simplecpu: F1 toggles the CRT look. F2 and F3 turn it down and up.
-F5 powers the machine on again. F11 goes fullscreen. Escape quits.
+F5 powers the machine on again. F11 goes fullscreen. Quit with the
+operating system's gesture: Command-Q on macOS, Alt-F4 or the close button
+elsewhere. Every key reaches the machine, so Escape and Ctrl-C break a
+running BASIC program as they did on the old home computers.
 
 Keys in simplecpu-ide: F7 assembles and F8 burns a ROM. F5 runs or pauses.
 F6 runs one frame. F10 steps an instruction and F11 steps a microcycle.

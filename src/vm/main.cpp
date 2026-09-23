@@ -16,7 +16,10 @@
 //                                          save the window after one second and quit
 //
 // Keys while running: F1 toggles the CRT look, F2 and F3 turn it down and
-// up. F5 powers on again, F11 goes fullscreen and Escape quits.
+// up. F5 powers on again, F11 goes fullscreen. Quitting is the operating
+// system's own gesture: Command-Q on macOS, Alt-F4 or the close button
+// elsewhere. No key is taken from the machine, so Escape and Ctrl-C reach
+// BASIC, which uses both to break a running program.
 
 #include <cctype>
 #include <cstdio>
@@ -179,7 +182,8 @@ int main(int argc, char** argv) {
 
   SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
   InitWindow(SCREEN_W * scale, SCREEN_H * scale, ("SimpleCPU-8: " + title).c_str());
-  SetExitKey(KEY_ESCAPE);
+  // Every key reaches the machine. Quitting belongs to the window.
+  SetExitKey(KEY_NULL);
   SetTargetFPS(fps > 0 ? fps : 60);
 
   // The display owns GL objects, so it is destroyed inside this block,
