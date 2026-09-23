@@ -76,6 +76,17 @@ add_custom_target(roms ALL DEPENDS ${SC8_ROMS})
 # ROM's BAS chunk. It runs in the computer, not headless, so its test lives
 # in tests/vm.
 if(TARGET sc8_basic)
+  # The interpreter's own ROM joins the others, so `simplecpu --rom
+  # build/roms/basic.rom` boots BASIC with a file behind it: SAVE and
+  # DELETE then write that file back. `--basic` boots the same ROM from
+  # inside the executable, with no file to write to.
+  add_custom_command(
+    OUTPUT "${SC8_ROM_DIR}/basic.rom"
+    COMMAND ${CMAKE_COMMAND} -E copy "${SC8_BASIC_ROM}" "${SC8_ROM_DIR}/basic.rom"
+    DEPENDS "${SC8_BASIC_ROM}"
+    COMMENT "Copying basic.rom into roms")
+  add_custom_target(basic_rom_copy ALL DEPENDS "${SC8_ROM_DIR}/basic.rom")
+
   set(SC8_DRIVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/basic-driver")
   set(SC8_DRIVER_ROM "${SC8_ROM_DIR}/basic-driver.rom")
   add_custom_command(

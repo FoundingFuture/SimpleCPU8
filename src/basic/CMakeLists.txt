@@ -13,7 +13,7 @@ set(SC8_BASIC_HEADERS basic.h)
 
 set(SC8_BASIC_ASM "${CMAKE_CURRENT_BINARY_DIR}/basic.asm" CACHE INTERNAL "the assembly simplecpu-cc writes for BASIC")
 set(SC8_BASIC_ROM_H "${CMAKE_CURRENT_BINARY_DIR}/ROM.h")
-set(SC8_BASIC_ROM "${CMAKE_CURRENT_BINARY_DIR}/basic.rom")
+set(SC8_BASIC_ROM "${CMAKE_CURRENT_BINARY_DIR}/basic.rom" CACHE INTERNAL "the BASIC interpreter ROM")
 set(SC8_BASIC_DATA_H "${CMAKE_CURRENT_BINARY_DIR}/basic_rom_data.h")
 
 # The compiler resolves #include "basic.h" by the name it was given on the

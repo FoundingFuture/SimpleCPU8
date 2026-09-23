@@ -41,7 +41,8 @@ simplecpu --rom game.rom --microcode naive
 simplecpu --rom game.rom --crt 0.6
 simplecpu --rom game.rom --no-crt
 simplecpu --basic
-simplecpu --basic hello.bas
+simplecpu --basic hello.bas --run
+simplecpu --rom basic.rom
 simplecpu-asm main.asm -o game.rom --microcode optimal --title "Pac-Man"
 simplecpu-run game.rom --ram 0 16
 ```
@@ -112,6 +113,12 @@ a program on the 256 x 256 screen stays. Two things are new. Programs can be
 saved to and loaded from the ROM by name, so one ROM carries a library. And
 the IDE gets a BASIC editor pane. It saves into the ROM or pushes the text
 into the interpreter's RAM, so `RUN` picks it up.
+
+BASIC boots two ways. `simplecpu --basic` runs the interpreter ROM built
+into the executable, so a SAVE lives only for that session. `simplecpu
+--rom build/roms/basic.rom` boots the same interpreter from a file, and a
+SAVE or DELETE writes that file back. Copy basic.rom to make a workspace
+of your own, and keep as many as you like.
 
 ## The storage device
 
