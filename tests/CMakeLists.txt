@@ -14,3 +14,7 @@ add_subdirectory(asm)
 add_subdirectory(assets)
 add_subdirectory(devices)
 add_subdirectory(cc)
+# The BASIC ROM exists only when the tools that build it do.
+if(TARGET sc8_basic)
+  add_subdirectory(basic)
+endif()

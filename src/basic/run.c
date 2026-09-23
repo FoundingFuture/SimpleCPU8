@@ -1,0 +1,444 @@
+
+#include "basic.h"
+
+int vars[NVARS];
+unsigned char running;
+unsigned int pc;
+unsigned char err;
+int err_line;
+unsigned char loop_back;
+
+static unsigned int gosub[GOSUBMAX];
+static unsigned char ngosub;
+
+static unsigned int for_line[FORMAX];
+static int for_var[FORMAX];
+static int for_to[FORMAX];
+static int for_step[FORMAX];
+static unsigned char nfor;
+
+static char line_buf[LINEMAX];
+
+void rt_error(unsigned char code)
+{
+    if (err == E_OK) err = code;
+    running = 0;
+}
+
+static void say_error(void)
+{
+    term_puts("? ");
+    if (err == E_SYNTAX) term_puts("SYNTAX");
+    else if (err == E_NOLINE) term_puts("NO SUCH LINE");
+    else if (err == E_STACK) term_puts("TOO DEEP");
+    else if (err == E_MEMORY) term_puts("OUT OF MEMORY");
+    else if (err == E_TYPE) term_puts("TYPE");
+    else if (err == E_DIVZERO) term_puts("DIVIDE BY ZERO");
+    else if (err == E_RANGE) term_puts("OUT OF RANGE");
+    else if (err == E_BREAK) term_puts("BREAK");
+    else term_puts("ERROR");
+    if (err != E_BREAK) term_puts(" ERROR");
+    /* The line, when there is one. Not read back out of pc: the first line
+     * of a program sits at offset zero, and testing pc for truth then loses
+     * exactly the line a beginner is most likely to be on.
+     */
+    if (err_line) {
+        term_puts(" IN ");
+        term_putn(err_line);
+    }
+    term_nl();
+    err = E_OK;
+}
+
+/* GOTO and GOSUB name a line. Finding it is a walk, and the walk stops at
+ * the first line that is not below the target because lines are in order.
+ */
+static unsigned int line_at(int n)
+{
+    unsigned int p;
+    p = ed_find(n);
+    if (((prog[p] << 8) | prog[p + 1]) != n) { rt_error(E_NOLINE); return 0; }
+    return p;
+}
+
+static void do_print(void)
+{
+    unsigned char newline;
+    newline = 1;
+    for (;;) {
+        if (lx_tok == T_END) break;
+        if (lx_is(":")) break;
+        if (lx_is(";")) { newline = 0; lx_next(); continue; }
+        if (lx_is(",")) { term_putc(32); newline = 1; lx_next(); continue; }
+        newline = 1;
+        if (lx_tok == T_STR || IS_STRNAME) {
+            str_put(ex_str());
+        } else {
+            term_putn(ex_int());
+        }
+        if (err) return;
+    }
+    if (newline) term_nl();
+}
+
+static void do_input(void)
+{
+    unsigned char is_str;
+    int slot;
+    unsigned char letter;
+
+    if (lx_tok == T_STR) { str_put(lx_str); lx_next(); if (lx_is(";") || lx_is(",")) lx_next(); }
+    term_putc(63);
+    term_putc(32);
+    if (lx_tok != T_NAME) { rt_error(E_SYNTAX); return; }
+    is_str = IS_STRVAR;
+    letter = lx_word[0] - 65;
+    slot = var_slot();
+    lx_next();
+
+    term_readline(line_buf);
+    if (is_str) {
+        svar[letter] = str_from(line_buf);
+    } else {
+        unsigned int i;
+        int v;
+        unsigned char neg;
+        i = 0;
+        v = 0;
+        neg = 0;
+        if (line_buf[0] == 45) { neg = 1; i = 1; }
+        while (line_buf[i] >= 48 && line_buf[i] <= 57) {
+            v = v * 10 + (line_buf[i] - 48);
+            i = i + 1;
+        }
+        if (neg) v = -v;
+        vars[slot] = v;
+    }
+}
+
+/* One statement. Returns 0 when the rest of the line is to be skipped, which
+ * is what a taken GOTO and an untaken IF both want.
+ */
+static unsigned char statement(void)
+{
+    if (lx_tok == T_END) return 1;
+
+    if (lx_is("REM")) { lx_tok = T_END; return 1; }
+    if (lx_is("PRINT")) { lx_next(); do_print(); return 1; }
+    if (lx_is("CLS")) { lx_next(); term_cls(); return 1; }
+    if (lx_is("END") || lx_is("STOP")) { lx_next(); running = 0; return 0; }
+    if (lx_is("INPUT")) { lx_next(); do_input(); return 1; }
+
+    if (lx_is("GOTO")) {
+        lx_next();
+        {
+            unsigned int p;
+            p = line_at(ex_int());
+            if (err) return 0;
+            pc = p;
+            return 0;
+        }
+    }
+
+    if (lx_is("GOSUB")) {
+        lx_next();
+        {
+            unsigned int p;
+            p = line_at(ex_int());
+            if (err) return 0;
+            if (ngosub >= GOSUBMAX) { rt_error(E_STACK); return 0; }
+            /* The return is the NEXT line: a GOSUB is always the last thing
+             * on its line, which is what every small BASIC has assumed.
+             */
+            /* pc is ALREADY the line after this one: rt_run advances it
+             * before the line runs. Adding another record length here
+             * skipped a line and read the wrong record's length to do it.
+             */
+            gosub[ngosub] = pc;
+            ngosub = ngosub + 1;
+            pc = p;
+            return 0;
+        }
+    }
+
+    if (lx_is("RETURN")) {
+        lx_next();
+        if (ngosub == 0) { rt_error(E_STACK); return 0; }
+        ngosub = ngosub - 1;
+        pc = gosub[ngosub];
+        return 0;
+    }
+
+    if (lx_is("IF")) {
+        lx_next();
+        {
+            int cond;
+            cond = ex_int();
+            if (err) return 0;
+            if (lx_is("THEN")) lx_next();
+            if (cond == 0) { lx_tok = T_END; return 1; }
+            /* THEN 100 is a GOTO, which is how BASIC has always read. */
+            if (lx_tok == T_NUM) {
+                unsigned int p;
+                p = line_at(lx_num);
+                if (err) return 0;
+                pc = p;
+                return 0;
+            }
+            return statement();
+        }
+    }
+
+    if (lx_is("FOR")) {
+        lx_next();
+        {
+            int slot;
+            int from;
+            if (lx_tok != T_NAME) { rt_error(E_SYNTAX); return 1; }
+            slot = var_slot();
+            lx_next();
+            if (lx_is("=")) lx_next(); else { rt_error(E_SYNTAX); return 1; }
+            from = ex_int();
+            vars[slot] = from;
+            if (lx_is("TO")) lx_next(); else { rt_error(E_SYNTAX); return 1; }
+            if (nfor >= FORMAX) { rt_error(E_STACK); return 1; }
+            for_var[nfor] = slot;
+            for_to[nfor] = ex_int();
+            for_step[nfor] = 1;
+            if (lx_is("STEP")) { lx_next(); for_step[nfor] = ex_int(); }
+            for_line[nfor] = pc;
+            nfor = nfor + 1;
+            return 1;
+        }
+    }
+
+    if (lx_is("NEXT")) {
+        lx_next();
+        if (lx_tok == T_NAME) lx_next();   /* NEXT I, and the name is ignored */
+        if (nfor == 0) { rt_error(E_STACK); return 1; }
+        {
+            unsigned char t;
+            int v;
+            t = nfor - 1;
+            v = vars[for_var[t]] + for_step[t];
+            vars[for_var[t]] = v;
+            if (for_step[t] >= 0 ? v <= for_to[t] : v >= for_to[t]) {
+                pc = for_line[t];
+                loop_back = 1;
+                /* Back to the line the FOR is on, and past the FOR itself:
+                 * re-running it would reset the counter for ever.
+                 */
+                return 2;
+            }
+            nfor = nfor - 1;
+            return 1;
+        }
+    }
+
+    if (lx_is("LET")) lx_next();
+
+    /* Graphics, so a program can draw. Each is one GPU command. */
+    if (lx_is("COLOR")) { lx_next(); gpu_set_color(ex_int()); return 1; }
+    if (lx_is("PLOT")) {
+        lx_next();
+        {
+            int x;
+            int y;
+            x = ex_int();
+            if (lx_is(",")) lx_next();
+            y = ex_int();
+            gpu_plot(x >> 8, x, y >> 8, y, 255);
+            return 1;
+        }
+    }
+    if (lx_is("MOVE")) {
+        lx_next();
+        {
+            int x;
+            int y;
+            x = ex_int();
+            if (lx_is(",")) lx_next();
+            y = ex_int();
+            gpu_move_to(x >> 8, x, y >> 8, y);
+            return 1;
+        }
+    }
+    if (lx_is("DRAW")) {
+        lx_next();
+        {
+            int x;
+            int y;
+            x = ex_int();
+            if (lx_is(",")) lx_next();
+            y = ex_int();
+            gpu_line_to(x >> 8, x, y >> 8, y);
+            return 1;
+        }
+    }
+    if (lx_is("CIRCLE")) { lx_next(); gpu_circle(ex_int()); return 1; }
+    if (lx_is("PAPER")) { lx_next(); gpu_clear(ex_int()); return 1; }
+    if (lx_is("WAIT")) {
+        lx_next();
+        {
+            int n;
+            n = ex_int();
+            while (n > 0) { wait_frame(); n = n - 1; }
+            return 1;
+        }
+    }
+    if (lx_is("POKE")) {
+        lx_next();
+        {
+            int a;
+            int v;
+            a = ex_int();
+            if (lx_is(",")) lx_next();
+            v = ex_int();
+            poke(a, v);
+            return 1;
+        }
+    }
+
+    /* Anything else has to be an assignment. */
+    if (lx_tok == T_NAME) {
+        unsigned char is_str;
+        int slot;
+        unsigned char letter;
+        is_str = IS_STRVAR;
+        letter = lx_word[0] - 65;
+        slot = var_slot();
+        lx_next();
+        if (!lx_is("=")) { rt_error(E_SYNTAX); return 1; }
+        lx_next();
+        if (is_str) svar[letter] = ex_str();
+        else vars[slot] = ex_int();
+        return 1;
+    }
+
+    rt_error(E_SYNTAX);
+    return 1;
+}
+
+/* Every statement on one line, separated by colons. */
+static void run_line(char *text)
+{
+    unsigned char r;
+    lx_start(text);
+    for (;;) {
+        if (lx_tok == T_END) return;
+        r = statement();
+        if (err || running == 0) return;
+        if (r == 0) return;         /* the statement moved pc itself */
+        if (r == 2) return;         /* NEXT jumped back to the FOR's line */
+        if (lx_is(":")) { lx_next(); continue; }
+        if (lx_tok == T_END) return;
+        rt_error(E_SYNTAX);
+        return;
+    }
+}
+
+/* A NEXT sends us back to the line the FOR is on, and the body has to start
+ * again AFTER the FOR statement. So the FOR's own line is re-read and the
+ * FOR is skipped: it is the one statement that must not run twice.
+ */
+static void run_from_for(char *text)
+{
+    lx_start(text);
+    /* Walk past FOR I = a TO b [STEP c] without acting on it. */
+    if (lx_is("FOR")) {
+        lx_next();
+        if (lx_tok == T_NAME) lx_next();
+        if (lx_is("=")) lx_next();
+        ex_int();
+        if (lx_is("TO")) lx_next();
+        ex_int();
+        if (lx_is("STEP")) { lx_next(); ex_int(); }
+    }
+    for (;;) {
+        if (lx_tok == T_END) return;
+        if (lx_is(":")) { lx_next(); continue; }
+        {
+            unsigned char r;
+            r = statement();
+            if (err || running == 0) return;
+            if (r == 0 || r == 2) return;
+        }
+    }
+}
+
+void rt_run(void)
+{
+    unsigned char from_for;
+    ngosub = 0;
+    nfor = 0;
+    err = E_OK;
+    err_line = 0;
+    running = 1;
+    pc = 0;
+    from_for = 0;
+    loop_back = 0;
+
+    while (running) {
+        unsigned int here;
+        if ((prog[pc] == 0) && (prog[pc + 1] == 0)) break;
+        here = pc;
+        err_line = (prog[pc] << 8) | prog[pc + 1];
+        /* Escape or Ctrl-C stops the program, and says which line it was on. */
+        if (key_break()) {
+            rt_error(E_BREAK);
+            say_error();
+            return;
+        }
+        pc = pc + prog[pc + 2];       /* the default next line */
+        loop_back = 0;
+        if (from_for) {
+            from_for = 0;
+            run_from_for((char *)&prog[here + 3]);
+        } else {
+            run_line((char *)&prog[here + 3]);
+        }
+        if (err) { say_error(); return; }
+        /* NEXT says so itself rather than being guessed at from pc: a GOTO
+         * back to the line a FOR is on looks identical otherwise.
+         */
+        if (loop_back) from_for = 1;
+    }
+    running = 0;
+    err_line = 0;
+}
+
+/* A line typed at the prompt. A number in front stores it, anything else
+ * runs now, which is what makes BASIC feel like BASIC.
+ */
+void rt_line(char *text)
+{
+    unsigned int i;
+    int n;
+
+    i = 0;
+    while (text[i] == 32) i = i + 1;
+    if (text[i] >= 48 && text[i] <= 57) {
+        n = 0;
+        while (text[i] >= 48 && text[i] <= 57) {
+            n = n * 10 + (text[i] - 48);
+            i = i + 1;
+        }
+        while (text[i] == 32) i = i + 1;
+        ed_store(n, &text[i]);
+        if (err) say_error();
+        return;
+    }
+
+    err = E_OK;
+    err_line = 0;
+    lx_start(&text[i]);
+    if (lx_is("RUN")) { rt_run(); return; }
+    if (lx_is("LIST")) { ed_list(); return; }
+    if (lx_is("NEW")) { ed_new(); str_init(); term_puts("READY"); term_nl(); return; }
+
+    running = 1;
+    pc = 0;
+    run_line(&text[i]);
+    running = 0;
+    if (err) say_error();
+}
