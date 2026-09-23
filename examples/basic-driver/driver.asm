@@ -1,13 +1,13 @@
 ; A BASIC extension in assembly: the !HELLO command.
 ;
 ; BASIC's bang statement hands the rest of its line to the routine whose
-; slot is DOKEd into the vector at $8000, with D1 at the text. This driver
+; slot is DOKEd into the vector at $0000, with D1 at the text. This driver
 ; sits at slot $F000, apart from the interpreter, so the ROM holds the
 ; interpreter in one PROG segment and the driver in another. It answers
 ; !HELLO by writing a greeting on the text screen and returns A = 1. Any
 ; other word returns A = 0, and BASIC tries the storage driver next.
 ;
-; Install it from BASIC with DOKE 32768, 61440 (that is $8000 and $F000).
+; Install it from BASIC with DOKE 0, 61440 (the vector, and slot $F000).
 ; The program in demo.bas does exactly that, then calls !HELLO.
 
 .org $F000

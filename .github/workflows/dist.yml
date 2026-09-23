@@ -1,0 +1,47 @@
+# The six distributions: macOS, Linux and Windows, each on arm64 and
+# x86_64. Every job runs ./d on a host of its own kind, so nothing is
+# cross compiled. macOS builds one architecture per job here, so each
+# archive holds a plain binary; ./d on a Mac builds a universal one.
+name: dist
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14,        arch: arm64,  name: macos-arm64 }
+          - { os: macos-13,        arch: x86_64, name: macos-x86_64 }
+          - { os: ubuntu-24.04,     arch: x86_64, name: linux-x86_64 }
+          - { os: ubuntu-24.04-arm, arch: arm64,  name: linux-arm64 }
+          - { os: windows-2022,     arch: x86_64, name: windows-x86_64 }
+          - { os: windows-11-arm,   arch: arm64,  name: windows-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux packages raylib builds against
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libxcursor-dev libxinerama-dev libxkbcommon-dev
+      - name: Ninja on macOS
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Distribution
+        shell: bash
+        run: ./d --arch ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simplecpu-${{ matrix.name }}
+          path: dist/*.tar.gz
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: simplecpu-${{ matrix.name }}-zip
+          path: dist/*.zip

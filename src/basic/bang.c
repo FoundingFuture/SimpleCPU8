@@ -21,17 +21,23 @@ void bang_init(void)
     asm("RET");
     asm("__bang_init_body:");
     asm("LD D2 <- &__bang_pass");
-    asm("LD [$8000] <- D2");
+    asm("LD [$0000] <- D2");
+    /* The pointers a program or a driver reads: where the program, the
+     * variables and the heap live. Fixed for the life of the ROM.
+     */
+    doke(SYS_PROG, (unsigned int)prog);
+    doke(SYS_VARS, (unsigned int)vars);
+    doke(SYS_HEAP, (unsigned int)heap);
 }
 
 static unsigned char bang_call(char *text)
 {
     poke(BANG_TEXT, ((unsigned int)text) >> 8);
     poke(BANG_TEXT + 1, ((unsigned int)text) & 255);
-    asm("LD D2 <- [$8000]");
-    asm("LD D1 <- [$8002]");
+    asm("LD D2 <- [$0000]");
+    asm("LD D1 <- [$0002]");
     asm("JSR D2");
-    asm("LD D1 <- $8004");
+    asm("LD D1 <- $0004");
     asm("LD [D1] <- A");
     asm("LD D1 <- [__sp]");
     return peek(BANG_RESULT);

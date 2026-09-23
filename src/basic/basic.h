@@ -98,7 +98,6 @@ unsigned int ex_str(void);
 
 /* strings.c: the heap and its collector. */
 extern unsigned char heap[HEAPMAX];
-extern unsigned int heap_top;
 extern unsigned int svar[NSTRS];
 
 void str_init(void);
@@ -113,7 +112,6 @@ void str_collect(void);
 
 /* edit.c: the stored program. */
 extern unsigned char prog[PROGMAX];
-extern unsigned int prog_len;
 
 void ed_new(void);
 void ed_store(int line, char *text);
@@ -122,10 +120,6 @@ void ed_list(void);
 
 /* run.c: statements. */
 extern int vars[NVARS];
-extern unsigned char running;
-extern unsigned int pc;        /* offset of the line being run */
-extern unsigned char err;
-extern int err_line;
 extern unsigned char loop_back;
 
 #define E_OK      0
@@ -147,18 +141,49 @@ void rt_line(char *text);
 void rt_error(unsigned char code);
 int var_slot(void);
 
-/* bang.c: the extension chain behind the bang statement.
+/* The system page: the first 32 bytes of the zero page, which the compiler
+ * leaves alone (-zp-reserve 32). Every address is fixed and documented in
+ * docs/basic-system-page.md, so a program reaches BASIC's state with PEEK,
+ * POKE, DEEK and DOKE, and a driver in assembly finds the vector. Words are
+ * big-endian, the way DOKE stores them. The old home computers kept their
+ * pointers this way, and so does this one.
  *
- * The system area is a page of RAM no C global reaches, at a fixed address
- * so a driver in assembly can find it. BANG_VEC holds the handler's
- * instruction slot, big-endian, the way DOKE stores a word. BANG_TEXT holds
- * the address of the statement's text while a handler runs, for a driver
- * that has lost D1. BANG_RESULT is where the dispatcher parks A.
+ * The globals below LIVE here: the macros are the variables.
  */
-#define SYS_AREA    0x8000
-#define BANG_VEC    0x8000
-#define BANG_TEXT   0x8002
-#define BANG_RESULT 0x8004
+#define SYS_BANG_VEC    0x00  /* word: the bang handler's instruction slot */
+#define SYS_BANG_TEXT   0x02  /* word: the statement's text while a handler runs */
+#define SYS_BANG_RESULT 0x04  /* byte: what the handler left in A */
+#define SYS_COL         0x05  /* byte: cursor column, 0 to 41 */
+#define SYS_ROW         0x06  /* byte: cursor row, 0 to 31 */
+#define SYS_KEY         0x07  /* byte: the last key pressed, 0 when none yet */
+#define SYS_PROG        0x08  /* word: where the stored program starts */
+#define SYS_PROG_LEN    0x0A  /* word: its length in bytes */
+#define SYS_VARS        0x0C  /* word: the integer variables, 11 words per letter: A, A0 to A9 */
+#define SYS_HEAP        0x0E  /* word: where the string heap starts */
+#define SYS_HEAP_TOP    0x10  /* word: bytes of it in use */
+#define SYS_ERR         0x12  /* byte: the last error code, 0 for none */
+#define SYS_ERR_LINE    0x13  /* word: the line it happened on, -1 in direct mode */
+#define SYS_RUNNING     0x15  /* byte: 1 while a program runs */
+#define SYS_PC          0x16  /* word: offset of the line being run */
+#define SYS_FRAME       0x18  /* reserved for a frame counter copy */
+#define SYS_END         0x20  /* the first byte the compiler may use */
+
+/* A word into the page, high byte first, the way DOKE stores one. */
+#define doke(a, v)  (poke((a), (unsigned int)(v) >> 8), poke((a) + 1, (unsigned int)(v) & 255))
+
+#define BANG_VEC    SYS_BANG_VEC
+#define BANG_TEXT   SYS_BANG_TEXT
+#define BANG_RESULT SYS_BANG_RESULT
+
+#define cx        (*(unsigned char *)SYS_COL)
+#define cy        (*(unsigned char *)SYS_ROW)
+#define last_key  (*(unsigned char *)SYS_KEY)
+#define prog_len  (*(unsigned int *)SYS_PROG_LEN)
+#define heap_top  (*(unsigned int *)SYS_HEAP_TOP)
+#define err       (*(unsigned char *)SYS_ERR)
+#define err_line  (*(int *)SYS_ERR_LINE)
+#define running   (*(unsigned char *)SYS_RUNNING)
+#define pc        (*(unsigned int *)SYS_PC)
 
 void bang_init(void);
 void bang_run(char *text);

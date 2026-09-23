@@ -6,7 +6,6 @@
  * mean nothing at all.
  */
 unsigned char heap[HEAPMAX];
-unsigned int heap_top;
 unsigned int svar[NSTRS];
 
 /* Where a temporary lives while an expression is being worked out. The

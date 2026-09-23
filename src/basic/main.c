@@ -21,7 +21,7 @@ int main(void)
         term_putc(62);
         term_readline(input);
         rt_line(input);
-        if (running == 0 && err == E_OK) { term_puts("READY"); term_nl(); }
+        if (running == 0) { term_puts("READY"); term_nl(); }
     }
     return 0;
 }

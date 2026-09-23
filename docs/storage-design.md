@@ -163,14 +163,15 @@ was running.
 
 ## The vector
 
-BASIC keeps a system area at $8000. No C global reaches that page and the
-C stack never comes down to it. Three words there belong to the chain.
+BASIC keeps a system page in the first 32 bytes of the zero page, which
+the compiler leaves alone. docs/basic-system-page.md lists all of it.
+Three items there belong to the chain.
 
 | Address | Name | Holds |
 |---|---|---|
-| $8000 | BANG_VEC | the handler's instruction slot, high byte first |
-| $8002 | BANG_TEXT | the address of the statement's text while a handler runs |
-| $8004 | BANG_RESULT | the byte the handler left in A, parked by the dispatcher |
+| $0000 | BANG_VEC | the handler's instruction slot, high byte first |
+| $0002 | BANG_TEXT | the address of the statement's text while a handler runs |
+| $0004 | BANG_RESULT | the byte the handler left in A, parked by the dispatcher |
 
 A word here is big-endian, like every word on this machine. DOKE and DEEK
 read and write it that way. The vector holds an instruction slot, not a
@@ -196,14 +197,14 @@ On return, by `RET`:
   zero page after the call.
 
 A routine may use the hardware stack in balance. It may not touch the zero
-page, which is BASIC's register file. It may not write RAM below $8000
-other than through the address in D1. The screen at $FAC0 is for printing.
+page past the system page, which is BASIC's register file. It may not write
+BASIC's RAM other than through the address in D1 and the system page. The screen at $FAC0 is for printing.
 
 BASIC's dispatch, in src/basic/bang.c:
 
 ```asm
-        LD D2 <- [$8000]
-        LD D1 <- [$8002]
+        LD D2 <- [$0000]
+        LD D1 <- [$0002]
         JSR D2
         LD D1 <- $8004
         LD [D1] <- A
@@ -218,17 +219,17 @@ know, with D1 restored from BANG_TEXT.
 
 ```asm
 install:
-        LD D2 <- [$8000]
+        LD D2 <- [$0000]
         LD [next] <- D2
         LD D2 <- &entry
-        LD [$8000] <- D2
+        LD [$0000] <- D2
         RET
 
 entry:
         LD A <- [D1]
         SUB A <- 66              ; is the text "B..."?
         JZ mine
-        LD D1 <- [$8002]
+        LD D1 <- [$0002]
         LD D2 <- [next]
         JMP D2                   ; pass it down the chain
 mine:
@@ -244,8 +245,8 @@ From BASIC the same installation is two statements. The driver's code has
 to be in program memory and its `next` word known:
 
 ```basic
-DOKE 40000, DEEK(32768)
-DOKE 32768, 4660
+DOKE 40000, DEEK(0)
+DOKE 0, 4660
 ```
 
 The first keeps the old vector at the driver's next word. The second
@@ -254,7 +255,7 @@ driver's listing.
 
 `PEEK(a)` reads a byte, `DEEK(a)` a big-endian word, `POKE a, v` writes a
 byte and `DOKE a, v` a word. A BASIC integer is signed 16 bits, so the
-address $8000 is 32768 on the way in and -32768 out of DEEK.
+address $F000 is 61440 on the way in and -4096 out of DEEK.
 
 ## The storage driver
 
@@ -302,10 +303,10 @@ existing design.
   describes. The default handler is a two instruction routine inside
   bang_init, jumped over on entry. The compiler drops a function nothing
   calls, so the routine cannot be one.
-- The vector sits at $8000. The compiler places every global by weight and
-  moves them when the program changes. So no C variable has a fixed
-  address. BASIC's globals end near $4A00 and the C stack starts at $FAC0.
-  The page at $8000 belongs to nobody.
+- The vector sits at $0000, in the system page. The compiler places every
+  global by weight and moves them when the program changes. So no C
+  variable has a fixed address. The page is reserved from the compiler
+  with -zp-reserve 32, and the vector is its first word.
 - The statement takes the whole line. A colon inside a name would
   otherwise split a command in two.
 - The name is passed by address, through a hi and lo pair, as the ACP

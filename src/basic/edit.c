@@ -6,7 +6,6 @@
  * lost by using it as the terminator.
  */
 unsigned char prog[PROGMAX];
-unsigned int prog_len;
 
 void ed_new(void)
 {

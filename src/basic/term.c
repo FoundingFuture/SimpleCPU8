@@ -1,8 +1,6 @@
 
 #include "basic.h"
 
-static unsigned char cx;
-static unsigned char cy;
 
 /* One key of pushback. The run loop looks at every key for a break, and a
  * key that is not one has to go back, or a program polling INKEY$ would lose
@@ -19,7 +17,9 @@ unsigned char key_get(void)
 {
     unsigned char k;
     if (pushed) { k = pushed; pushed = 0; return k; }
-    return io_key();
+    k = io_key();
+    if (k && io_key_is_up(k) == 0) last_key = io_key_code(k);
+    return k;
 }
 
 /* Did a break key just arrive? Escape, or Ctrl-C, which a terminal has

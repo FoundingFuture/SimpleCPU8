@@ -667,10 +667,10 @@ TEST_SUITE("the bang statement") {
   TEST_CASE("powers on with a routine in the vector") {
     auto s = boot();
     settle(*s);
-    const int vec = (s->m->ram[0x8000] << 8) | s->m->ram[0x8001];
+    const int vec = (s->m->ram[0] << 8) | s->m->ram[1];
     CHECK(vec != 0);
-    type(*s, "PRINT DEEK(32768)");
-    CHECK(has(after(text(*s), "DEEK(32768)"), std::to_string(vec > 32767 ? vec - 65536 : vec)));
+    type(*s, "PRINT DEEK(0)");
+    CHECK(has(after(text(*s), "DEEK(0)"), std::to_string(vec > 32767 ? vec - 65536 : vec)));
   }
 }
 
@@ -776,5 +776,73 @@ TEST_SUITE("the storage driver") {
     type(*s, "!SAVE \"\"");
     CHECK(has(text(*s), "BAD NAME ERROR"));
     CHECK(s->slots.empty());
+  }
+}
+
+// The system page: BASIC's own state at fixed zero page addresses, so a
+// program reads and writes it with the peek family and a driver in assembly
+// finds it. docs/basic-system-page.md is the table these pin.
+TEST_SUITE("the system page") {
+  TEST_CASE("the cursor position lives at 5 and 6") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PRINT PEEK(5), PEEK(6)");
+    // The column is 0 after the newline PRINT ends with. The row is the
+    // line after the one the command was typed on.
+    const std::string t = after(text(*s), "PEEK(6)");
+    CHECK(has(t, "0"));
+    // The prompt is back on screen by now, so the column is 1, past the
+    // greater-than sign.
+    CHECK_EQ(s->m->ram[5], 1);
+    CHECK(s->m->ram[6] > 2);
+  }
+
+  TEST_CASE("the last key pressed lives at 7") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PRINT PEEK(7)");
+    // Enter, code 13, was the last key of the line just typed.
+    CHECK(has(after(text(*s), "PEEK(7)"), "13"));
+  }
+
+  TEST_CASE("the program and its length are at 8 and 10") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 PRINT 1");
+    const int prog = (s->m->ram[8] << 8) | s->m->ram[9];
+    const int len = (s->m->ram[10] << 8) | s->m->ram[11];
+    CHECK(prog > 0x20);
+    CHECK(len > 0);
+    type(*s, "NEW");
+    // An empty program is its three byte end marker.
+    CHECK_EQ((s->m->ram[10] << 8) | s->m->ram[11], 3);
+  }
+
+  TEST_CASE("the variables are reachable through the pointer at 12") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "A=1234");
+    type(*s, "PRINT DEEK(DEEK(12))");
+    CHECK(has(after(text(*s), "DEEK(12))"), "1234"));
+    const int vars = (s->m->ram[12] << 8) | s->m->ram[13];
+    CHECK_EQ((s->m->ram[static_cast<size_t>(vars)] << 8) | s->m->ram[static_cast<size_t>(vars + 1)], 1234);
+    // A letter owns eleven slots: the bare name, then A0 to A9. So B is
+    // slot 11, at 22 bytes in.
+    type(*s, "DOKE DEEK(12)+22, 77");
+    CHECK_EQ(s->m->ram[static_cast<size_t>(vars + 23)], 77);
+    type(*s, "PRINT B");
+    CHECK(has(after(text(*s), "PRINT B"), "77"));
+  }
+
+  TEST_CASE("the error code and line are at 18 and 19") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 GOTO 999");
+    type(*s, "RUN");
+    CHECK_EQ(s->m->ram[0x12], 2);  // E_NOLINE
+    CHECK_EQ((s->m->ram[0x13] << 8) | s->m->ram[0x14], 10);
+    // The next command clears it.
+    type(*s, "PRINT 1");
+    CHECK_EQ(s->m->ram[0x12], 0);
   }
 }

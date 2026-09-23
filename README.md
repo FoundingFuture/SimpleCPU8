@@ -20,6 +20,20 @@ the X11 development packages raylib builds against: on Debian and Ubuntu,
 libxinerama-dev`.
 
 ```bash
+./c            # release build into build/release
+./c --debug    # debug build into build/debug, its own CMake cache
+./c --clean    # remove the build directory and configure again
+./c --test     # run the tests after the build
+./r            # boot BASIC from the release build
+./r pacman     # run build/release/roms/pacman.rom
+./r --ide      # the IDE
+./d            # a distribution for this machine's OS under dist/
+```
+
+The scripts are bash and run on macOS, Linux and Windows under Git Bash.
+They call the CMake presets below, which work on their own too:
+
+```bash
 cmake --preset default
 cmake --build --preset default
 ctest --preset default
@@ -54,12 +68,24 @@ break a running BASIC program, as they did on the old home computers.
 Keys in simplecpu-ide: F7 assembles and F8 burns a ROM. F5 runs or pauses.
 F6 runs one frame. F10 steps an instruction and F11 steps a microcycle.
 
+## Distributions
+
+`./d` builds the release version and packs the five programs, every
+example ROM, the example sources and the docs into
+`dist/simplecpu-<version>-<os>-<arch>`, as a tar.gz or a zip. On a Mac it
+builds a universal binary by default and `--arch arm64` or `--arch x86_64`
+picks one. Linux and Windows build their own architecture. The six
+distributions, macOS, Linux and Windows on arm64 and x86_64, come from
+.github/workflows/dist.yml, which runs `./d` on a host of each kind on
+every version tag.
+
 ## Layout
 
 ```text
 CMakeLists.txt      the project
 CMakePresets.json   configure, build and test presets
-cmake/              FetchContent pins, warning flags, the text embedder
+c, r, d            build, run and distribute (see below)
+cmake/              FetchContent pins, warning flags, the embedders
 src/                every source file, one directory per layer
 tests/              doctest suites, one per library
 docs/               the design record and the standalone notes

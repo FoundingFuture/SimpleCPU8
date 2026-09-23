@@ -2,10 +2,6 @@
 #include "basic.h"
 
 int vars[NVARS];
-unsigned char running;
-unsigned int pc;
-unsigned char err;
-int err_line;
 unsigned char loop_back;
 
 static unsigned int gosub[GOSUBMAX];
@@ -51,7 +47,9 @@ static void say_error(void)
         term_putn(err_line);
     }
     term_nl();
-    err = E_OK;
+    /* The code stays in SYS_ERR until the next command, so a program can
+     * read what went wrong. rt_line clears it on the way in.
+     */
 }
 
 /* GOTO and GOSUB name a line. Finding it is a walk, and the walk stops at
@@ -437,6 +435,11 @@ void rt_line(char *text)
     unsigned int i;
     int n;
 
+    /* A new command starts clean. The previous error stayed readable in
+     * SYS_ERR until now.
+     */
+    err = E_OK;
+    err_line = 0;
     i = 0;
     while (text[i] == 32) i = i + 1;
     if (text[i] >= 48 && text[i] <= 57) {
@@ -451,8 +454,6 @@ void rt_line(char *text)
         return;
     }
 
-    err = E_OK;
-    err_line = 0;
     lx_start(&text[i]);
     if (lx_is("RUN")) { rt_run(); return; }
     if (lx_is("LIST")) { ed_list(); return; }
