@@ -1,0 +1,28 @@
+// Helpers the pane files share: the render target the screen pane shows,
+// std::string backed text inputs, and hex formatting.
+#pragma once
+
+#include <string>
+
+#include "imgui.h"
+#include "raylib.h"
+
+namespace sc8::panes {
+
+// One render target the screen pane shows through Dear ImGui. Drawing
+// through the CRT shader has to happen in raylib's own pass. The frame
+// is rendered there first and the pane shows the result.
+constexpr int PANE_SIDE = 768;
+RenderTexture2D& target();
+
+// A multiline or single line text input over a std::string. The string
+// keeps spare capacity, so a resize callback grows it as the text grows.
+bool inputMultiline(const char* id, std::string& text, ImVec2 size, ImGuiInputTextFlags flags = 0);
+bool inputLine(const char* label, std::string& text, const char* hint = "", ImGuiInputTextFlags flags = 0);
+
+std::string hex(unsigned v, int digits);
+
+// A color as 0xRRGGBB to ImGui's packed form.
+ImU32 rgb(unsigned c, int alpha = 255);
+
+}  // namespace sc8::panes

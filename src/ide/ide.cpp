@@ -1,6 +1,8 @@
 #include "ide/ide.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -11,8 +13,10 @@
 #include "rlImGui.h"
 
 #include "assets/assets.h"
+#include "basic/basic_rom.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
+#include "ide/panes.h"
 
 namespace fs = std::filesystem;
 
@@ -31,29 +35,75 @@ done:   LD [result] <- A
 result: db 0xEE
 )";
 
-// One render target the screen pane shows through Dear ImGui. Drawing
-// through the CRT shader has to happen in raylib's own pass, so the frame
-// is rendered here first and the pane shows the result.
-constexpr int PANE_SIDE = 768;
+// The ladder of the browser's speed menu. Slow speeds stretch the tick so
+// the label is literally true: at 0.5 the machine executes one instruction
+// every two seconds.
+const Speed LADDER[] = {
+    {"trace microcode", "trace", 3, 0, true},
+    {"0.5 instr/s", "0.5", 0.5, 0, false},
+    {"2 instr/s", "2", 2, 0, false},
+    {"10 instr/s", "10", 10, 0, false},
+    {"60 instr/s", "60", 60, 0, false},
+    {"1k instr/s", "1000", 1000, 0, false},
+    {"100k instr/s", "100000", 100000, 0, false},
+    {"30 fps", "f30", 0, 30, false},
+    {"60 fps", "f60", 0, 60, false},
+    {"120 fps", "f120", 0, 120, false},
+    {"MAX", "max", 0, 0, false},
+};
 
-RenderTexture2D& target() {
-  static RenderTexture2D rt = LoadRenderTexture(PANE_SIDE, PANE_SIDE);
-  return rt;
+// The worker ignored the fast-frame latch above this rate, where real
+// frames arrive on their own.
+constexpr double FAST_FRAME_MAX_IPS = 1000;
+
+// Whether a run at this speed keeps the machine's record of what it did.
+// The browser's trace.ts is not in the reference tree. This is the rule
+// its worker comments describe. The watchable half of the ladder traces.
+// The fast half runs lean, and the screen is what those speeds exist for.
+bool tracedRun(const Speed& s) {
+  if (s.micro) return true;
+  return s.ips > 0 && s.ips <= FAST_FRAME_MAX_IPS;
 }
 
-int textCallback(ImGuiInputTextCallbackData* data) {
-  if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
-    auto* s = static_cast<std::string*>(data->UserData);
-    s->resize(static_cast<size_t>(data->BufTextLen));
-    data->Buf = s->data();
+using panes::hex;
+
+// The disassembly of one instruction for a ROM that came without source.
+// The canonical name with its operand placeholder filled in.
+std::string disassemble(const Instr& in) {
+  const OpDef* def = opByCode(in.op);
+  if (!def) return "?? $" + hex(in.op, 2) + " $" + hex(in.operand, 4);
+  std::string text(def->name);
+  auto replace = [&](std::string_view word, const std::string& with) {
+    const size_t at = text.find(word);
+    if (at == std::string::npos) return false;
+    text.replace(at, word.size(), with);
+    return true;
+  };
+  switch (def->operand) {
+    case OperandKind::None: break;
+    case OperandKind::Imm8: replace("imm8", std::to_string(in.operand & 0xff)); break;
+    case OperandKind::Addr8: replace("addr8", "$" + hex(in.operand & 0xff, 2)); break;
+    case OperandKind::Disp8:
+      if (!replace("disp8", std::to_string(in.operand & 0xff))) replace("n]", std::to_string(in.operand & 0xff) + "]");
+      break;
+    case OperandKind::Imm16: replace("imm16", "$" + hex(in.operand, 4)); break;
+    case OperandKind::Addr16: replace("addr16", "$" + hex(in.operand, 4)); break;
+    case OperandKind::Target: text += " $" + hex(in.operand, 4); break;
+    case OperandKind::Port: text += " $" + hex(in.operand >> 8, 2); break;
+    case OperandKind::PortImm: text += " $" + hex(in.operand >> 8, 2) + ", $" + hex(in.operand & 0xff, 2); break;
   }
-  return 0;
+  return text;
 }
 
 }  // namespace
 
+std::span<const Speed> speedLadder() { return LADDER; }
+
 Ide::Ide() : source_(DEFAULT_SOURCE) {
   source_.reserve(1 << 16);
+  basicText_.reserve(1 << 14);
+  customText_.reserve(1 << 15);
+  audio_.start();
   assembleSource();
 }
 
@@ -62,9 +112,19 @@ void Ide::open(const std::string& path) {
     loadRomFile(path);
     return;
   }
+  if (fs::path(path).extension() == ".bas") {
+    std::ifstream in(path);
+    if (!in) {
+      note("cannot read " + path);
+      return;
+    }
+    basicText_.assign(std::istreambuf_iterator<char>(in), {});
+    basicPath_ = path;
+    return;
+  }
   std::ifstream in(path);
   if (!in) {
-    messages_.push_back("cannot read " + path);
+    note("cannot read " + path);
     return;
   }
   source_.assign(std::istreambuf_iterator<char>(in), {});
@@ -73,22 +133,46 @@ void Ide::open(const std::string& path) {
   assembleSource();
 }
 
+void Ide::setLevel(Level level) { level_ = level; }
+
+bool Ide::setSpeed(const std::string& value) {
+  for (size_t i = 0; i < std::size(LADDER); i++) {
+    if (value == LADDER[i].value) {
+      speed_ = static_cast<int>(i);
+      return true;
+    }
+  }
+  return false;
+}
+
 void Ide::loadRomFile(const std::string& path) {
   std::ifstream in(path, std::ios::binary);
   if (!in) {
-    messages_.push_back("cannot read " + path);
+    note("cannot read " + path);
     return;
   }
   std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
   CartridgeResult r = decodeCartridge(bytes);
   if (!r.cartridge) {
-    messages_.push_back(path + ": " + r.error);
+    note(path + ": " + r.error);
     return;
   }
   romPath_ = path;
-  computer_.insert(std::move(*r.cartridge));
-  running_ = false;
-  messages_.push_back("loaded " + path + ", microcode " + computer_.microcodeName());
+  loadCartridge(std::move(*r.cartridge), path);
+}
+
+// A cartridge from a file has no source, so the listing shows a
+// disassembly. The slot list mirrors the ROM's BAS chunk for the BASIC
+// pane. The machine's own cartridge is left alone once inserted.
+void Ide::loadCartridge(Cartridge cart, const std::string& what) {
+  setRunning(false);
+  basicSlots_ = cart.basic;
+  basicDirty_ = false;
+  haveSource_ = false;
+  computer_.insert(std::move(cart));
+  pushBreakpoints();
+  rebuildListing();
+  note("loaded " + what + ", microcode " + computer_.microcodeName());
 }
 
 void Ide::assembleSource() {
@@ -99,133 +183,384 @@ void Ide::assembleSource() {
     if (!f) return std::nullopt;
     return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
   };
-  // A conversion that lost something is worth a line in the messages pane,
-  // the way the browser's asset card carried its note.
+  // A conversion that lost something is worth a line in the messages
+  // pane. The browser's asset card carried the same note.
   std::vector<std::string> notes;
   assets.loadImage = [&](std::string_view name) {
-    std::string note;
-    auto img = loadImageFile(dir / fs::path(name), &note);
-    if (!note.empty()) notes.push_back(std::string(name) + ": " + note);
+    std::string n;
+    auto img = loadImageFile(dir / fs::path(name), &n);
+    if (!n.empty()) notes.push_back(std::string(name) + ": " + n);
     return img;
   };
   assets.loadSample = [&](std::string_view name) {
-    std::string note;
-    auto pcm = loadSampleFile(dir / fs::path(name), &note);
-    if (!note.empty()) notes.push_back(std::string(name) + ": " + note);
+    std::string n;
+    auto pcm = loadSampleFile(dir / fs::path(name), &n);
+    if (!n.empty()) notes.push_back(std::string(name) + ": " + n);
     return pcm;
   };
   assembled_ = assemble(source_, &assets);
   assembledOk_ = assembled_.errors.empty();
   messages_ = std::move(notes);
-  for (const AsmError& e : assembled_.errors) {
-    messages_.push_back("line " + std::to_string(e.line) + ": " + e.message);
-  }
+  for (const AsmError& e : assembled_.errors) note("line " + std::to_string(e.line) + ": " + e.message);
+  haveSource_ = true;
   if (assembledOk_) {
+    setRunning(false);
     Cartridge c = assembled_.cartridge();
     c.microcode = computer_.microcodeName();
+    c.basic = basicSlots_;
     computer_.insert(std::move(c));
-    running_ = false;
-    messages_.push_back("assembled: " + std::to_string(assembled_.program.size()) + " instructions, " +
-                        std::to_string(assembled_.ramLength) + " bytes of .ram, " +
-                        std::to_string(assembled_.cart.size()) + " bytes of .data");
+    pushBreakpoints();
+    note("assembled: " + std::to_string(assembled_.program.size()) + " instructions, " +
+         std::to_string(assembled_.ramLength) + " bytes of .ram, " + std::to_string(assembled_.cart.size()) +
+         " bytes of .data");
   }
+  rebuildListing();
 }
 
 void Ide::burnRom() {
-  if (!assembledOk_) {
-    messages_.push_back("fix the assembly errors before burning");
+  if (!assembledOk_ || !haveSource_) {
+    note("fix the assembly errors before burning");
     return;
   }
   fs::path out = sourcePath_.empty() ? fs::path("out.rom") : fs::path(sourcePath_).replace_extension(".rom");
   Cartridge c = assembled_.cartridge();
   c.microcode = computer_.microcodeName();
+  c.basic = basicSlots_;
   std::vector<uint8_t> bytes = encodeCartridge(c);
   std::ofstream o(out, std::ios::binary);
   o.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-  messages_.push_back(o ? "burned " + out.string() + " (" + std::to_string(bytes.size()) + " bytes)"
-                        : "cannot write " + out.string());
+  if (o) {
+    basicDirty_ = false;
+    note("burned " + out.string() + " (" + std::to_string(bytes.size()) + " bytes)");
+  } else {
+    note("cannot write " + out.string());
+  }
 }
 
-void Ide::update() {
-  // Pace the machine like simplecpu does, then render the screen once.
-  if (running_) {
-    owed_ += static_cast<double>(GetFrameTime()) * fps_;
-    int frames = 0;
-    while (owed_ >= 1.0 && frames < 8) {
-      if (!computer_.runFrame()) running_ = false;
-      owed_ -= 1.0;
-      frames++;
+void Ide::saveSource() {
+  if (sourcePath_.empty()) sourcePath_ = "main.asm";
+  std::ofstream o(sourcePath_);
+  o << source_;
+  note(o ? "saved " + sourcePath_ : "cannot write " + sourcePath_);
+}
+
+// The listing model: one line per source line, or one per instruction
+// when the ROM came without source. A .ram line that starts with a label
+// of RAM kind gets the label. The pane offers it for the watch list.
+void Ide::rebuildListing() {
+  listing_.clear();
+  if (!haveSource_) {
+    const auto& prog = computer_.cartridge().program;
+    for (size_t i = 0; i < prog.size(); i++) {
+      listing_.push_back({disassemble(prog[i]), static_cast<int>(i), std::nullopt, ""});
     }
-    if (owed_ > 8.0) owed_ = 0.0;
+    return;
   }
+  size_t pos = 0;
+  int lineNo = 0;
+  while (pos <= source_.size()) {
+    const size_t nl = source_.find('\n', pos);
+    const std::string text = source_.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
+    pos = nl == std::string::npos ? source_.size() + 1 : nl + 1;
+    lineNo++;
+    ListLine line{text, std::nullopt, std::nullopt, ""};
+    if (auto it = assembled_.lineToInstr.find(lineNo); it != assembled_.lineToInstr.end()) line.instr = it->second;
+    if (auto it = assembled_.ramLineAddr.find(lineNo); it != assembled_.ramLineAddr.end()) {
+      line.ramAddr = it->second;
+      const size_t colon = text.find(':');
+      if (colon != std::string::npos) {
+        std::string name = text.substr(0, colon);
+        while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
+        auto lab = assembled_.labels.find(name);
+        if (lab != assembled_.labels.end() && lab->second.kind == Label::Kind::Ram) line.label = name;
+      }
+    }
+    listing_.push_back(std::move(line));
+  }
+}
+
+// ---- running
+
+void Ide::setRunning(bool on) {
+  running_ = on;
+  owed_ = 0.0;
+  tick_ = 0.0;
+  const Speed& s = LADDER[static_cast<size_t>(speed_)];
+  if (on) {
+    computer_.setTrace(tracedRun(s));
+    // Real frames drive the frame-locked rates and MAX. The trace speed
+    // is for watching. So the latch applies to paced runs only.
+    computer_.setFastFrame(fastFrameLatch_ && !s.micro && s.fps == 0 && s.ips > 0 && s.ips <= FAST_FRAME_MAX_IPS);
+  } else {
+    // Back to stepping: the machine records again, and the latch applies
+    // whatever the last run speed. Stepping is watching.
+    computer_.setTrace(true);
+    computer_.setFastFrame(fastFrameLatch_);
+  }
+}
+
+// One host frame of running, the worker's four starters folded into the
+// frame loop. Each branch stops the run when the machine stopped. A
+// breakpoint stops it too.
+void Ide::pace() {
+  const Speed& s = LADDER[static_cast<size_t>(speed_)];
+  const double dt = static_cast<double>(GetFrameTime());
+  auto stopped = [&](bool exhausted) {
+    if (!exhausted && !computer_.hitBreakpoint) return false;
+    setRunning(false);
+    if (computer_.hitBreakpoint) note("stopped at breakpoint, PC " + hex(computer_.machine().pc, 4));
+    return true;
+  };
+  if (s.micro) {
+    // One row per tick, so every row is drawn, never skipped.
+    tick_ += dt;
+    const double period = 1.0 / s.ips;
+    if (tick_ < period) return;
+    tick_ = 0.0;
+    const uint64_t done = computer_.runMicroBudget(1);
+    stopped(done < 1);
+  } else if (s.fps > 0) {
+    // Owed frames come from real elapsed time times the target rate,
+    // capped at about a second of catch-up.
+    owed_ += dt * s.fps;
+    if (owed_ > s.fps) owed_ = s.fps;
+    while (owed_ >= 1.0) {
+      const uint64_t done = computer_.runToNextFrame();
+      owed_ -= 1.0;
+      if (stopped(computer_.machine().status != Status::Running)) return;
+      if (done == 0) break;  // nothing advanced: avoid a busy spin
+    }
+  } else if (s.ips <= 0) {
+    // MAX: no counting at all, a wall clock budget inside the host frame.
+    const double until = GetTime() + 0.012;
+    constexpr uint64_t CHUNK = 20000;
+    while (GetTime() < until) {
+      const uint64_t done = computer_.runBudget(CHUNK);
+      if (stopped(done < CHUNK)) return;
+    }
+  } else {
+    owed_ += dt * s.ips;
+    if (owed_ > s.ips) owed_ = s.ips;
+    const auto n = static_cast<uint64_t>(std::floor(owed_));
+    if (n == 0) return;
+    owed_ -= static_cast<double>(n);
+    const uint64_t done = computer_.runBudget(n);
+    stopped(done < n);
+  }
+}
+
+void Ide::stepInstruction() {
+  setRunning(false);
+  computer_.machine().instructionStep();
+}
+
+void Ide::stepMicro() {
+  setRunning(false);
+  if (computer_.microcodeInspectable()) computer_.machine().microStep();
+  else note("the optimal set is sealed: it runs whole instructions only");
+}
+
+void Ide::runOneFrame() {
+  setRunning(false);
+  computer_.runToNextFrame();
+  if (computer_.hitBreakpoint) note("stopped at breakpoint, PC " + hex(computer_.machine().pc, 4));
+}
+
+void Ide::powerOn() {
+  setRunning(false);
+  computer_.powerOn();
+}
+
+void Ide::selectMicrocode(const std::string& name) {
+  setRunning(false);
+  mcErrors_ = computer_.selectMicrocode(name);
+  if (!mcErrors_.empty()) {
+    note("microcode: " + std::to_string(mcErrors_.size()) + " error(s), the set was not applied");
+    return;
+  }
+  pushBreakpoints();
+  selectedSection_ = 0;
+  // The trace speed needs readable rows, which the sealed set hides.
+  if (!computer_.microcodeInspectable() && LADDER[static_cast<size_t>(speed_)].micro) speed_ = 1;
+}
+
+void Ide::toggleBreakpoint(int instr) {
+  const auto pc = static_cast<uint16_t>(instr);
+  if (!breakpoints_.erase(pc)) breakpoints_.insert(pc);
+  pushBreakpoints();
+}
+
+// The computer holds a new machine after every power on. The set lives
+// here and is pushed after each one.
+void Ide::pushBreakpoints() {
+  computer_.setBreakpoints(std::vector<uint16_t>(breakpoints_.begin(), breakpoints_.end()));
+}
+
+// ---- the host frame
+
+void Ide::update() {
+  // The keyboard belongs to the machine only while the screen pane has it
+  // and the machine runs. Otherwise the editor owns the keys and the
+  // machine sees everything released.
+  if (screenHasKeys_ && running_) keyboard_.poll(computer_.input());
+  else keyboard_.releaseAll(computer_.input());
+  typeIntoMachine();
+  if (running_) pace();
+  // The chip renders on its own clock, so a tune plays on while the CPU
+  // sits paused.
+  computer_.pumpAudio(audio_);
   screen_.upload(computer_.frame());
-  BeginTextureMode(target());
+  BeginTextureMode(panes::target());
   ClearBackground(BLACK);
-  screen_.draw(0, 0, PANE_SIDE, PANE_SIDE, display);
+  screen_.draw(0, 0, panes::PANE_SIDE, panes::PANE_SIDE, display);
   EndTextureMode();
 }
 
-// The first run has no imgui.ini, so the panes get a layout here: source
-// on the left, the screen top right with the machine under it, the tools
-// along the bottom. A saved layout wins on every later run.
-void Ide::defaultLayout(unsigned dockspace) {
+// Each level owns a dockspace with a fixed id. imgui.ini keeps three
+// layouts, so a rearrangement inside one level survives a switch. The
+// hidden levels are submitted with KeepAliveOnly. That keeps their
+// windows docked while they are not drawn.
+void Ide::frame() {
+  static const ImGuiID IDS[3] = {ImHashStr("sc8-level-edit"), ImHashStr("sc8-level-run"),
+                                 ImHashStr("sc8-level-microcode")};
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  const int active = static_cast<int>(level_);
+  for (int i = 0; i < 3; i++) {
+    if (i != active) ImGui::DockSpaceOverViewport(IDS[i], vp, ImGuiDockNodeFlags_KeepAliveOnly);
+  }
+  const ImGuiID dockspace = ImGui::DockSpaceOverViewport(IDS[active], vp, ImGuiDockNodeFlags_PassthruCentralNode);
+  if (!layoutBuilt_[active]) {
+    layoutBuilt_[active] = true;
+    buildLayout(level_, dockspace);
+  }
+  menuBar();
+  shortcuts();
+  screenHasKeys_ = false;
+  switch (level_) {
+    case Level::Edit:
+      sourcePane();
+      basicPane();
+      messagesPane();
+      manualPane();
+      break;
+    case Level::Run:
+      screenPane();
+      registersPane("Registers##run");
+      memoryPane();
+      breakpointsPane();
+      listingPane("Listing##run");
+      messagesPane();
+      break;
+    case Level::Microcode:
+      datapathPane();
+      flowPane();
+      microcodePane();
+      listingPane("Listing##micro");
+      registersPane("Registers##micro");
+      messagesPane();
+      break;
+  }
+}
+
+// The first run of a level has no saved layout, so the panes get one
+// here. A saved layout wins on every later run: the node then has splits
+// and is left alone.
+void Ide::buildLayout(Level level, unsigned dockspace) {
   ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspace);
   if (!node || !node->IsLeafNode()) return;
   ImGui::DockBuilderRemoveNode(dockspace);
   ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
   ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
-  ImGuiID left, right, rightTop, rightBottom, bottom, bottomA, bottomB;
-  ImGui::DockBuilderSplitNode(dockspace, ImGuiDir_Down, 0.28f, &bottom, &left);
-  ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.42f, &right, &left);
-  ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.38f, &rightBottom, &rightTop);
-  ImGui::DockBuilderSplitNode(bottom, ImGuiDir_Right, 0.5f, &bottomB, &bottomA);
-  ImGui::DockBuilderDockWindow("Source", left);
-  ImGui::DockBuilderDockWindow("Screen", rightTop);
-  ImGui::DockBuilderDockWindow("Machine", rightBottom);
-  ImGui::DockBuilderDockWindow("Microcode", bottomA);
-  ImGui::DockBuilderDockWindow("ROM", bottomB);
-  ImGui::DockBuilderDockWindow("Messages", bottomB);
-  ImGui::DockBuilderFinish(dockspace);
-}
-
-void Ide::frame() {
-  const ImGuiID dockspace = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
-  if (!layoutDone_) {
-    layoutDone_ = true;
-    defaultLayout(dockspace);
+  ImGuiID left = dockspace, right, bottom, mid, midBottom, rightBottom;
+  switch (level) {
+    case Level::Edit:
+      // The editor on the left with the messages under it. The manual on
+      // the right, where a reader keeps it open.
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.38f, &right, &left);
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.22f, &bottom, &left);
+      ImGui::DockBuilderDockWindow("Source", left);
+      ImGui::DockBuilderDockWindow("BASIC", left);
+      ImGui::DockBuilderDockWindow("Messages", bottom);
+      ImGui::DockBuilderDockWindow("Manual", right);
+      break;
+    case Level::Run:
+      // The screen large in the middle, the registers and the run
+      // controls under it. The listing on the left, memory on the right.
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.24f, &right, &left);
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.60f, &mid, &left);
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Down, 0.26f, &midBottom, &mid);
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.30f, &bottom, &left);
+      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.30f, &rightBottom, &right);
+      ImGui::DockBuilderDockWindow("Listing##run", left);
+      ImGui::DockBuilderDockWindow("Breakpoints", bottom);
+      ImGui::DockBuilderDockWindow("Screen", mid);
+      ImGui::DockBuilderDockWindow("Registers##run", midBottom);
+      ImGui::DockBuilderDockWindow("Memory", right);
+      ImGui::DockBuilderDockWindow("Messages", rightBottom);
+      break;
+    case Level::Microcode:
+      // The datapath large with the flow under it. The listing and the
+      // registers on the left, the rows on the right.
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.28f, &right, &left);
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.62f, &mid, &left);
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Down, 0.40f, &midBottom, &mid);
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.34f, &bottom, &left);
+      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.20f, &rightBottom, &right);
+      ImGui::DockBuilderDockWindow("Listing##micro", left);
+      ImGui::DockBuilderDockWindow("Registers##micro", bottom);
+      ImGui::DockBuilderDockWindow("Datapath", mid);
+      ImGui::DockBuilderDockWindow("Flow", midBottom);
+      ImGui::DockBuilderDockWindow("Microcode", right);
+      ImGui::DockBuilderDockWindow("Messages", rightBottom);
+      break;
   }
-  menuBar();
-  sourcePane();
-  machinePane();
-  screenPane();
-  microcodePane();
-  romPane();
-  messagesPane();
+  ImGui::DockBuilderFinish(dockspace);
 }
 
 void Ide::menuBar() {
   if (!ImGui::BeginMainMenuBar()) return;
   if (ImGui::BeginMenu("File")) {
     if (ImGui::MenuItem("Assemble", "F7")) assembleSource();
+    if (ImGui::MenuItem("Save source", "Ctrl+S")) saveSource();
     if (ImGui::MenuItem("Burn ROM", "F8")) burnRom();
+    ImGui::Separator();
+    if (ImGui::MenuItem("Boot the BASIC ROM")) {
+      CartridgeResult r = decodeCartridge(std::vector<uint8_t>(basicRom().begin(), basicRom().end()));
+      if (r.cartridge) {
+        romPath_.clear();
+        loadCartridge(std::move(*r.cartridge), "the BASIC ROM");
+      } else {
+        note("BASIC ROM: " + r.error);
+      }
+    }
+    ImGui::EndMenu();
+  }
+  if (ImGui::BeginMenu("Level")) {
+    if (ImGui::MenuItem("Edit", "F1", level_ == Level::Edit)) setLevel(Level::Edit);
+    if (ImGui::MenuItem("Run", "F2", level_ == Level::Run)) setLevel(Level::Run);
+    if (ImGui::MenuItem("Microcode", "F3", level_ == Level::Microcode)) setLevel(Level::Microcode);
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Run")) {
-    if (ImGui::MenuItem(running_ ? "Pause" : "Run", "F5")) running_ = !running_;
-    if (ImGui::MenuItem("Step instruction", "F10")) computer_.machine().instructionStep();
-    if (ImGui::MenuItem("Step microcycle", "F11")) computer_.machine().microStep();
-    if (ImGui::MenuItem("Run one frame", "F6")) computer_.runFrame();
-    if (ImGui::MenuItem("Power on", "Shift+F5")) {
-      computer_.powerOn();
-      running_ = false;
+    if (ImGui::MenuItem(running_ ? "Pause" : "Run", "F5")) setRunning(!running_);
+    if (ImGui::MenuItem("Step instruction", "F10")) stepInstruction();
+    if (ImGui::MenuItem("Step microcycle", "F11", false, computer_.microcodeInspectable())) stepMicro();
+    if (ImGui::MenuItem("Run one frame", "F6")) runOneFrame();
+    if (ImGui::MenuItem("Power on", "Shift+F5")) powerOn();
+    ImGui::Separator();
+    if (ImGui::BeginMenu("Speed")) {
+      for (size_t i = 0; i < std::size(LADDER); i++) {
+        const bool enabled = !LADDER[i].micro || computer_.microcodeInspectable();
+        if (ImGui::MenuItem(LADDER[i].label, nullptr, speed_ == static_cast<int>(i), enabled)) {
+          speed_ = static_cast<int>(i);
+          if (running_) setRunning(true);
+        }
+      }
+      ImGui::EndMenu();
     }
     ImGui::Separator();
     for (const char* name : {"@naive", "@optimal"}) {
-      if (ImGui::MenuItem(name, nullptr, computer_.microcodeName() == name)) {
-        computer_.selectMicrocode(name);
-        computer_.powerOn();
-        running_ = false;
-      }
+      if (ImGui::MenuItem(name, nullptr, computer_.microcodeName() == name)) selectMicrocode(name);
     }
     ImGui::EndMenu();
   }
@@ -240,157 +575,28 @@ void Ide::menuBar() {
     ImGui::EndMenu();
   }
   ImGui::EndMainMenuBar();
+}
 
+void Ide::shortcuts() {
+  if (ImGui::IsKeyPressed(ImGuiKey_F1)) setLevel(Level::Edit);
+  if (ImGui::IsKeyPressed(ImGuiKey_F2)) setLevel(Level::Run);
+  if (ImGui::IsKeyPressed(ImGuiKey_F3)) setLevel(Level::Microcode);
   if (ImGui::IsKeyPressed(ImGuiKey_F7)) assembleSource();
   if (ImGui::IsKeyPressed(ImGuiKey_F8)) burnRom();
   if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
-    if (ImGui::GetIO().KeyShift) {
-      computer_.powerOn();
-      running_ = false;
-    } else {
-      running_ = !running_;
-    }
+    if (ImGui::GetIO().KeyShift) powerOn();
+    else setRunning(!running_);
   }
-  if (ImGui::IsKeyPressed(ImGuiKey_F6)) computer_.runFrame();
-  if (ImGui::IsKeyPressed(ImGuiKey_F10)) computer_.machine().instructionStep();
-  if (ImGui::IsKeyPressed(ImGuiKey_F11)) computer_.machine().microStep();
-}
-
-void Ide::sourcePane() {
-  ImGui::Begin("Source");
-  ImGui::TextUnformatted(sourcePath_.empty() ? "(unsaved)" : sourcePath_.c_str());
-  ImGui::SameLine();
-  if (ImGui::SmallButton("Assemble")) assembleSource();
-  ImGui::SameLine();
-  if (ImGui::SmallButton("Burn ROM")) burnRom();
-  const ImVec2 size(-1.0f, -1.0f);
-  ImGui::InputTextMultiline("##source", source_.data(), source_.capacity() + 1, size,
-                            ImGuiInputTextFlags_CallbackResize | ImGuiInputTextFlags_AllowTabInput,
-                            textCallback, &source_);
-  ImGui::End();
-}
-
-void Ide::machinePane() {
-  ImGui::Begin("Machine");
-  const Machine& m = computer_.machine();
-  ImGui::Text("status  %s", std::string(statusName(m.status)).c_str());
-  if (m.crash) ImGui::TextWrapped("%s", m.crash->message.c_str());
-  ImGui::Text("PC %04X   A %02X   D1 %04X   D2 %04X   SP %04X", m.pc, m.acc, m.d1, m.d2, m.sp);
-  ImGui::Text("flags  %c %c %c %c", m.flags.n ? 'N' : 'n', m.flags.v ? 'V' : 'v', m.flags.z ? 'Z' : 'z',
-              m.flags.c ? 'C' : 'c');
-  ImGui::Text("latches  A %02X  B %02X   IR %02X %04X", m.aLatch, m.bLatch, m.irOp, m.irOperand);
-  ImGui::Text("cycles %llu   instructions %llu   frame %llu", static_cast<unsigned long long>(m.cycles),
-              static_cast<unsigned long long>(m.instructions), static_cast<unsigned long long>(computer_.frameCounter()));
-  if (m.lastMicro && computer_.microcodeInspectable()) {
-    ImGui::Text("micro  %s row %d: %s", m.lastMicro->op.c_str(), m.lastMicro->row,
-                rowText(m.lastMicro->signals).c_str());
-  } else if (m.lastMicro) {
-    ImGui::TextDisabled("micro  %s (sealed)", m.lastMicro->op.c_str());
-  }
-  if (m.lastBus) {
-    static const char* KINDS[] = {"fetch", "ram-read", "ram-write", "stack-read", "stack-write", "io-read", "io-write"};
-    ImGui::Text("bus  %s %04X <- %02X", KINDS[static_cast<int>(m.lastBus->kind)], m.lastBus->addr, m.lastBus->data);
-  }
-  ImGui::Separator();
-  if (ImGui::Button(running_ ? "Pause" : "Run")) running_ = !running_;
-  ImGui::SameLine();
-  if (ImGui::Button("Step")) computer_.machine().instructionStep();
-  ImGui::SameLine();
-  if (ImGui::Button("Microstep")) computer_.machine().microStep();
-  ImGui::SameLine();
-  if (ImGui::Button("Frame")) computer_.runFrame();
-  ImGui::SameLine();
-  if (ImGui::Button("Power on")) {
-    computer_.powerOn();
-    running_ = false;
-  }
-  ImGui::SliderInt("fps", &fps_, 1, 240);
-
-  ImGui::Separator();
-  ImGui::TextUnformatted("zero page");
-  for (int row = 0; row < 16; row++) {
-    std::string line;
-    char buf[8];
-    std::snprintf(buf, sizeof buf, "%02X: ", row * 16);
-    line += buf;
-    for (int col = 0; col < 16; col++) {
-      std::snprintf(buf, sizeof buf, "%02X ", m.ram[static_cast<size_t>(row * 16 + col)]);
-      line += buf;
-    }
-    ImGui::TextUnformatted(line.c_str());
-  }
-  ImGui::End();
-}
-
-void Ide::screenPane() {
-  ImGui::Begin("Screen");
-  const ImVec2 avail = ImGui::GetContentRegionAvail();
-  const float side = std::max(64.0f, std::min(avail.x, avail.y));
-  // A render texture is stored upside down, so the source rectangle flips it.
-  const Rectangle src{0, 0, static_cast<float>(PANE_SIDE), -static_cast<float>(PANE_SIDE)};
-  rlImGuiImageRect(&target().texture, static_cast<int>(side), static_cast<int>(side), src);
-  ImGui::End();
-}
-
-void Ide::microcodePane() {
-  ImGui::Begin("Microcode");
-  ImGui::Text("set: %s", computer_.microcodeName().c_str());
-  if (!computer_.microcodeInspectable()) {
-    ImGui::TextWrapped("The optimal set is sealed. It runs and can be raced, never read. Select @naive or a "
-                       "custom set to trace, step and edit rows.");
-    ImGui::End();
-    return;
-  }
-  const Machine& m = computer_.machine();
-  const auto& sections = m.microcode().sections();
-  const std::string current = m.lastMicro ? m.lastMicro->op : "";
-  if (ImGui::BeginListBox("##sections", ImVec2(180, -1))) {
-    for (size_t i = 0; i < sections.size(); i++) {
-      const bool live = sections[i].name == current;
-      if (ImGui::Selectable((sections[i].name + (live ? "  <" : "")).c_str(), selectedSection_ == static_cast<int>(i))) {
-        selectedSection_ = static_cast<int>(i);
-      }
-    }
-    ImGui::EndListBox();
-  }
-  ImGui::SameLine();
-  ImGui::BeginGroup();
-  if (selectedSection_ >= 0 && selectedSection_ < static_cast<int>(sections.size())) {
-    const auto& s = sections[static_cast<size_t>(selectedSection_)];
-    ImGui::Text("%s: %zu row%s", s.name.c_str(), s.rows.size(), s.rows.size() == 1 ? "" : "s");
-    for (size_t r = 0; r < s.rows.size(); r++) {
-      const bool live = m.lastMicro && m.lastMicro->op == s.name && m.lastMicro->row == static_cast<int>(r);
-      if (live) ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "%02zu  %s", r + 1, rowText(s.rows[r]).c_str());
-      else ImGui::Text("%02zu  %s", r + 1, rowText(s.rows[r]).c_str());
-    }
-  }
-  ImGui::EndGroup();
-  ImGui::End();
-}
-
-void Ide::romPane() {
-  ImGui::Begin("ROM");
-  const Cartridge& c = computer_.cartridge();
-  ImGui::TextUnformatted(romPath_.empty() ? "(from the source pane)" : romPath_.c_str());
-  ImGui::Text("program %zu instructions", c.program.size());
-  ImGui::Text("ram image %zu bytes", c.ram.size());
-  ImGui::Text("data %zu bytes", c.data.size());
-  ImGui::Text("microcode %s", c.microcode.empty() ? "@naive" : (c.microcode[0] == '@' ? c.microcode.c_str() : "custom"));
-  for (const auto& [k, v] : c.meta) ImGui::Text("%s: %s", k.c_str(), v.c_str());
-  if (!c.assets.empty() && ImGui::TreeNodeEx("assets", ImGuiTreeNodeFlags_DefaultOpen)) {
-    for (const RomAsset& a : c.assets) ImGui::Text("%-8s %-20s at %6u  %u bytes", a.kind.c_str(), a.name.c_str(), a.offset, a.size);
-    ImGui::TreePop();
-  }
-  if (!c.basic.empty() && ImGui::TreeNodeEx("BASIC programs", ImGuiTreeNodeFlags_DefaultOpen)) {
-    for (const auto& [name, text] : c.basic) ImGui::Text("%-16s %zu bytes", name.c_str(), text.size());
-    ImGui::TreePop();
-  }
-  ImGui::End();
+  if (ImGui::IsKeyPressed(ImGuiKey_F6)) runOneFrame();
+  if (ImGui::IsKeyPressed(ImGuiKey_F10)) stepInstruction();
+  if (ImGui::IsKeyPressed(ImGuiKey_F11)) stepMicro();
+  if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) saveSource();
 }
 
 void Ide::messagesPane() {
   ImGui::Begin("Messages");
   for (const std::string& msg : messages_) ImGui::TextWrapped("%s", msg.c_str());
+  if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
   ImGui::End();
 }
 
