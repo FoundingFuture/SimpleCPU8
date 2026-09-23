@@ -144,6 +144,33 @@ The Microcode level respects the seal. On `@optimal` the lanes still light
 from the bus events and register writes the machine reports, but the rows
 stay hidden.
 
+The levels are built. Each level owns a Dear ImGui dockspace with a fixed
+id. imgui.ini keeps three layouts, so a rearrangement inside one level
+survives a switch. The hidden levels are submitted with KeepAliveOnly. A
+pane both Run and Microcode show, the listing and the registers, has one
+window name per level. F1, F2 and F3 switch the level, as does the Level
+menu. The CRT toggle sits in the Display menu and has no key.
+
+The Run level's speed choice is the browser's ladder. Trace microcode
+comes first, then 0.5, 2, 10, 60, 1k and 100k instructions per second.
+Then 30, 60 and 120 frames per second, then MAX. The pacing folds worker.ts into the host
+frame loop. Tracing is on for the trace speed and up to 1k instructions
+per second, off above. The fast-frame latch is a double click on the Frame
+button and applies to the paced speeds up to 1k.
+
+The Edit level carries a BASIC pane beside the source. Save into ROM adds
+or replaces a named slot in the cartridge's basic list. A session opened
+from a .rom rewrites that file. Any other session carries the slots into
+the next burn. Push to RAM waits for the storage device. Until then it
+types the text through the input device's key queue, two events per
+character. It pauses while more than 32 are queued. The machine has to run
+for the interpreter to read the lines.
+
+The manual pane ports the instruction pages and the device reference
+tables. Cycle counts come from the shipped sets, plus a column for the
+loaded set when it is the user's own. The section prose of the browser's
+manual is not ported.
+
 ## Source layout
 
 Everything under src/. One library per layer, one executable per program.
