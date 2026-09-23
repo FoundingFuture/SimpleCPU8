@@ -7,6 +7,7 @@
 #include "devices/apu_ports.h"
 #include "devices/gpu_ports.h"
 #include "devices/input_ports.h"
+#include "devices/storage_ports.h"
 
 namespace sc8 {
 
@@ -32,9 +33,11 @@ struct Registry {
     add(gpu::ALIASES, Port);
     add(apu::PORTS, Port);
     add(acp::PORTS, Port);
+    add(storage::PORTS, Port);
     add(gpu::CMDS, Command);
     add(apu::CMDS, Command);
     add(acp::CMDS, Command);
+    add(storage::CMDS, Command);
     add(input::PORTS, System);
     add(input::BUTTONS, System);
     add(input::MODS, System);
@@ -44,6 +47,7 @@ struct Registry {
     add(gpu::WORLD_FLAGS, System);
     add(acp::FMTS, System);
     add(acp::FLAG_BITS, System);
+    add(storage::STATUS, System);
   }
 };
 

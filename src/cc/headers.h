@@ -40,6 +40,7 @@ std::optional<std::vector<std::string_view>> gpuArgsOf(std::string_view cmd);
 std::string gpuHeader();
 std::string apuHeader();
 std::string acpHeader();
+std::string storageHeader();
 std::string ioHeader();
 std::string romHeader();
 std::string sysHeader();

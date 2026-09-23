@@ -90,6 +90,21 @@ static int fn_call(void)
         if (lx_is("(")) { lx_next(); if (lx_is(")")) lx_next(); }
         return io_pad();
     }
+    if (lx_is("PEEK")) {
+        lx_next();
+        if (lx_is("(")) lx_next();
+        a = ex_int();
+        if (lx_is(")")) lx_next();
+        return peek(a);
+    }
+    /* The word DOKE stores, so a driver's vector reads back as it was set. */
+    if (lx_is("DEEK")) {
+        lx_next();
+        if (lx_is("(")) lx_next();
+        a = ex_int();
+        if (lx_is(")")) lx_next();
+        return (peek(a) << 8) | peek(a + 1);
+    }
     if (lx_is("POINT")) {
         lx_next();
         if (lx_is("(")) lx_next();

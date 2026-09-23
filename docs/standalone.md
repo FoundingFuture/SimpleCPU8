@@ -104,7 +104,8 @@ into the interpreter's RAM, so `RUN` picks it up.
 A fifth device on the bus, on ports $50 to $5F. It gives the running
 machine a way to read and write the ROM's BAS chunk. The commands are LOAD,
 SAVE, DELETE and CATALOG over named slots. simplecpu writes the ROM file back on SAVE and DELETE.
-The port map and command set are open until the BASIC port starts.
+The port map, the commands and the status byte are settled in
+docs/storage-design.md. src/devices/storage.h is the device.
 
 ## The bang extension chain
 
@@ -126,6 +127,11 @@ On the Oric, every disc system before Sedoric required the bang prefix. The
 Sedoric manual documents the sibling `]` vector at #2F9, set with DOKE. The
 ROM disassemblies reachable online do not show the bang handler. So the
 Oric vector address itself is not confirmed from a primary source.
+
+Here the vector is the word at $8000, big-endian, holding the handler's
+instruction slot. docs/storage-design.md has the handler contract, the
+dispatch and a driver written in assembly. BASIC gained DOKE, DEEK and
+PEEK beside POKE so a driver can install itself from the prompt.
 
 ## IDE levels
 
@@ -197,7 +203,9 @@ output for each demo matches the browser project's golden bytes.
 The BASIC interpreter is ported as a ROM built from the C sources in
 src/basic. The function sc8::basicRom() hands the bytes to the virtual
 computer. The tests in tests/basic boot the ROM into a headless machine.
-The GPU, the ACP, the APU and the input device sit on its bus.
+The GPU, the ACP, the APU, the storage device and the input device sit on
+its bus in the tests. The bang statement and the storage driver are in
+src/basic/bang.c and src/basic/store.c.
 
 Pending, in the order they unblock each other:
 
@@ -205,4 +213,4 @@ Pending, in the order they unblock each other:
 - the input device, the APU and the ACP
 - the image and audio decoders for `.image` and `.sample`
 - the --basic switch of simplecpu, booting sc8::basicRom()
-- the storage device
+- the storage device in the virtual computer, attached to the cartridge

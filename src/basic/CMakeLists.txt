@@ -1,14 +1,14 @@
 # The BASIC interpreter: C for the machine, compiled at build time by the
 # tools built in this same tree.
 #
-#   simplecpu-cc   the seven C files -> basic.asm and ROM.h
+#   simplecpu-cc   the nine C files -> basic.asm and ROM.h
 #   simplecpu-asm  basic.asm -> basic.rom, optimal microcode, title BASIC
 #   EmbedBinary    basic.rom -> basic_rom_data.h
 #
 # sc8_basic wraps the embedded bytes as sc8::basicRom(), so the virtual
 # computer boots BASIC with no file beside the executable.
 
-set(SC8_BASIC_SOURCES main.c term.c lex.c expr.c strings.c edit.c run.c)
+set(SC8_BASIC_SOURCES main.c term.c lex.c expr.c strings.c edit.c run.c bang.c store.c)
 set(SC8_BASIC_HEADERS basic.h)
 
 set(SC8_BASIC_ASM "${CMAKE_CURRENT_BINARY_DIR}/basic.asm")
@@ -18,7 +18,8 @@ set(SC8_BASIC_DATA_H "${CMAKE_CURRENT_BINARY_DIR}/basic_rom_data.h")
 
 # The compiler resolves #include "basic.h" by the name it was given on the
 # command line. So the files are passed by bare name from this directory.
-# The first file holds main, as the browser project passed them.
+# The first file holds main, as the browser project passed them. bang.c and
+# store.c are new here: the bang statement and the storage driver.
 add_custom_command(
   OUTPUT "${SC8_BASIC_ASM}" "${SC8_BASIC_ROM_H}"
   COMMAND $<TARGET_FILE:simplecpu-cc> ${SC8_BASIC_SOURCES} ${SC8_BASIC_HEADERS}

@@ -1,5 +1,5 @@
 
-// build: cc -o basic main.c term.c lex.c expr.c strings.c edit.c run.c
+// build: cc -o basic main.c term.c lex.c expr.c strings.c edit.c run.c bang.c store.c
 
 #include "basic.h"
 
@@ -10,6 +10,7 @@ int main(void)
     term_init();
     str_init();
     ed_new();
+    bang_init();
 
     term_puts("SimpleCPU-8 BASIC");
     term_nl();

@@ -2,9 +2,10 @@
 
 The BASIC interpreter runs on the CPU. It is written in the machine's own C
 dialect and compiled by simplecpu-cc. So this directory holds C sources, not
-C++. The files are the browser project's, extracted from
+C++. Seven of the files are the browser project's, extracted from
 packages/ui/src/basic/ with extract.mjs. The script writes each TypeScript
-string constant to a file with its exact value.
+string constant to a file with its exact value. bang.c and store.c are new
+in this tree.
 
 ## Files
 
@@ -17,7 +18,9 @@ string constant to a file with its exact value.
 | expr.c | Expression evaluation, numbers and strings. |
 | strings.c | The string heap and the string functions. |
 | edit.c | The program store: insert, replace, delete and list lines. |
-| run.c | The statements: RUN, GOTO, GOSUB, FOR, IF, PRINT, the break check. |
+| run.c | The statements: RUN, GOTO, GOSUB, FOR, IF, PRINT, POKE, DOKE, the break check. |
+| bang.c | The bang statement and its vector at $8000. See docs/storage-design.md. |
+| store.c | The storage driver: LOAD, SAVE, DELETE and CATALOG through the storage device. |
 | basic_rom.h, basic_rom.cpp | sc8::basicRom(), the embedded ROM bytes. |
 | extract.mjs | The extraction script. Needs Node 22 with --experimental-strip-types. |
 
@@ -25,7 +28,7 @@ string constant to a file with its exact value.
 
 CMakeLists.txt runs three custom commands in the build tree, in order:
 
-1. simplecpu-cc compiles the seven C files, passed by bare name from this
+1. simplecpu-cc compiles the nine C files, passed by bare name from this
    directory so `#include "basic.h"` resolves, into basic.asm and ROM.h.
 2. simplecpu-asm burns basic.asm into basic.rom with the optimal microcode
    and the title BASIC.

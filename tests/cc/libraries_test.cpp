@@ -9,6 +9,7 @@
 #include "devices/acp_ports.h"
 #include "devices/apu_ports.h"
 #include "devices/gpu_ports.h"
+#include "devices/storage_ports.h"
 #include "harness.h"
 
 using namespace sc8;
@@ -37,6 +38,7 @@ TEST_SUITE("every command has a wrapper") {
   TEST_CASE("covers every command in gpu.h") { coversEvery("gpu.h", "gpu", gpu::CMDS); }
   TEST_CASE("covers every command in apu.h") { coversEvery("apu.h", "apu", apu::CMDS); }
   TEST_CASE("covers every command in acp.h") { coversEvery("acp.h", "acp", acp::CMDS); }
+  TEST_CASE("covers every command in storage.h") { coversEvery("storage.h", "sto", storage::CMDS); }
 
   TEST_CASE("names no command the machine does not have") {
     std::set<std::string> real;

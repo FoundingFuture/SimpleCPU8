@@ -36,6 +36,10 @@ static void say_error(void)
     else if (err == E_DIVZERO) term_puts("DIVIDE BY ZERO");
     else if (err == E_RANGE) term_puts("OUT OF RANGE");
     else if (err == E_BREAK) term_puts("BREAK");
+    else if (err == E_BANG) term_puts("UNKNOWN ! COMMAND");
+    else if (err == E_NOTFOUND) term_puts("NOT FOUND");
+    else if (err == E_STOFULL) term_puts("STORAGE FULL");
+    else if (err == E_BADNAME) term_puts("BAD NAME");
     else term_puts("ERROR");
     if (err != E_BREAK) term_puts(" ERROR");
     /* The line, when there is one. Not read back out of pc: the first line
@@ -124,6 +128,10 @@ static unsigned char statement(void)
     if (lx_tok == T_END) return 1;
 
     if (lx_is("REM")) { lx_tok = T_END; return 1; }
+    /* The bang statement takes the whole rest of the line, colons and all:
+     * what a driver makes of its text is the driver's business.
+     */
+    if (lx_is("!")) { bang_run(&lx_text[lx_pos]); lx_tok = T_END; return 1; }
     if (lx_is("PRINT")) { lx_next(); do_print(); return 1; }
     if (lx_is("CLS")) { lx_next(); term_cls(); return 1; }
     if (lx_is("END") || lx_is("STOP")) { lx_next(); running = 0; return 0; }
@@ -295,6 +303,20 @@ static unsigned char statement(void)
             if (lx_is(",")) lx_next();
             v = ex_int();
             poke(a, v);
+            return 1;
+        }
+    }
+    /* A word, high byte first, the way every word on this machine is. */
+    if (lx_is("DOKE")) {
+        lx_next();
+        {
+            int a;
+            int v;
+            a = ex_int();
+            if (lx_is(",")) lx_next();
+            v = ex_int();
+            poke(a, v >> 8);
+            poke(a + 1, v);
             return 1;
         }
     }

@@ -5,6 +5,7 @@
 #include <gpu.h>
 #include <io.h>
 #include <sys.h>
+#include <storage.h>
 
 /* The screen is mapped at the top of RAM, and the C stack starts just below
  * it and grows down, so the two never meet.
@@ -136,10 +137,35 @@ extern unsigned char loop_back;
 #define E_DIVZERO 6
 #define E_RANGE   7
 #define E_BREAK   8
+#define E_BANG    9
+#define E_NOTFOUND 10
+#define E_STOFULL 11
+#define E_BADNAME 12
 
 void rt_run(void);
 void rt_line(char *text);
 void rt_error(unsigned char code);
 int var_slot(void);
+
+/* bang.c: the extension chain behind the bang statement.
+ *
+ * The system area is a page of RAM no C global reaches, at a fixed address
+ * so a driver in assembly can find it. BANG_VEC holds the handler's
+ * instruction slot, big-endian, the way DOKE stores a word. BANG_TEXT holds
+ * the address of the statement's text while a handler runs, for a driver
+ * that has lost D1. BANG_RESULT is where the dispatcher parks A.
+ */
+#define SYS_AREA    0x8000
+#define BANG_VEC    0x8000
+#define BANG_TEXT   0x8002
+#define BANG_RESULT 0x8004
+
+void bang_init(void);
+void bang_run(char *text);
+
+/* store.c: the storage driver, the chain's built-in link. */
+#define TEXTMAX  8192
+
+unsigned char sto_bang(char *text);
 
 #endif

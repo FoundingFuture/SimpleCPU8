@@ -7,7 +7,8 @@
 // Session, which compiled the seven C files on every boot. Here the ROM is
 // compiled once at build time and comes from sc8::basicRom(). The Session
 // below wires the device chain the browser's did: Gpu, then the Acp, then
-// the Apu, then the InputBus.
+// the Apu, then the InputBus, with the Storage device between the Apu and
+// the InputBus, which the browser never had.
 
 #include <doctest.h>
 
@@ -25,6 +26,7 @@
 #include "devices/apu.h"
 #include "devices/gpu.h"
 #include "devices/input.h"
+#include "devices/storage.h"
 
 using namespace sc8;
 
@@ -48,7 +50,12 @@ struct Session {
 
   Cartridge cart;
   InputBus input;
-  Apu apu{&input};
+  // The slots the storage device works on, standing in for the cartridge's
+  // basic list, and how many times it said they changed.
+  BasicSlots slots;
+  int changes = 0;
+  Storage storage{&input};
+  Apu apu{&storage};
   Acp acp{&apu};
   Gpu gpu;
   std::unique_ptr<Machine> m;
@@ -73,6 +80,9 @@ struct Session {
     m->countAccesses = false;
     gpu.attachRam(m->ram.data());
     acp.attachRam(m->ram.data());
+    storage.powerOn();
+    storage.attachRam(m->ram.data());
+    storage.attach(&slots, [this] { changes++; });
     m->ram.fill(0);
     std::copy(cart.ram.begin(), cart.ram.end(), m->ram.begin());
   }
@@ -609,5 +619,162 @@ TEST_SUITE("it can draw, which is why the GPU is on the bus") {
     // Graphics mode is off while text mode is up. The proof is the command
     // reaching the device: the frame the GPU composes has the pixel.
     CHECK(s->m->status == Status::Running);
+  }
+}
+
+TEST_SUITE("memory is reachable a byte or a word at a time") {
+  TEST_CASE("POKE and PEEK a byte") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "POKE 40000,77");
+    type(*s, "PRINT PEEK(40000)");
+    CHECK(has(after(text(*s), "PEEK(40000)"), "77"));
+    CHECK(s->m->ram[40000] == 77);
+  }
+
+  // A word is big-endian, the way the machine stores every word and the
+  // way an assembly driver reads the vector.
+  TEST_CASE("DOKE and DEEK a word, high byte first") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "DOKE 40000,4660");
+    type(*s, "PRINT DEEK(40000)");
+    CHECK(s->m->ram[40000] == 0x12);
+    CHECK(s->m->ram[40001] == 0x34);
+    CHECK(has(after(text(*s), "DEEK(40000)"), "4660"));
+  }
+}
+
+TEST_SUITE("the bang statement") {
+  TEST_CASE("says when nobody knows the command") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "!FROB");
+    CHECK(has(text(*s), "UNKNOWN ! COMMAND ERROR"));
+  }
+
+  TEST_CASE("reports the unknown command from a program, with its line") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 !FROB");
+    type(*s, "RUN", 8000000);
+    const std::string t = text(*s);
+    CHECK(has(t, "UNKNOWN ! COMMAND ERROR IN 10"));
+  }
+
+  // The vector holds the default routine's slot after boot, so a driver has
+  // a next to keep. Zero would mean the chain ends in a jump to slot 0.
+  TEST_CASE("powers on with a routine in the vector") {
+    auto s = boot();
+    settle(*s);
+    const int vec = (s->m->ram[0x8000] << 8) | s->m->ram[0x8001];
+    CHECK(vec != 0);
+    type(*s, "PRINT DEEK(32768)");
+    CHECK(has(after(text(*s), "DEEK(32768)"), std::to_string(vec > 32767 ? vec - 65536 : vec)));
+  }
+}
+
+TEST_SUITE("the storage driver") {
+  TEST_CASE("saves, and the slot holds the listing") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 PRINT \"HI\"");
+    type(*s, "20 END");
+    type(*s, "!SAVE \"A\"");
+    REQUIRE(s->slots.size() == 1);
+    CHECK(s->slots[0].first == "A");
+    CHECK(s->slots[0].second == "10 PRINT \"HI\"\n20 END\n");
+    CHECK(s->changes == 1);
+    CHECK_FALSE(has(text(*s), "ERROR"));
+  }
+
+  TEST_CASE("loads what it saved after NEW") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 PRINT \"HI\"");
+    type(*s, "!SAVE \"A\"");
+    type(*s, "NEW");
+    type(*s, "!LOAD \"A\"");
+    type(*s, "LIST");
+    const std::string t = text(*s);
+    CHECK(has(after(t, "!LOAD"), "10 PRINT \"HI\""));
+    type(*s, "RUN");
+    CHECK(has(after(text(*s), "RUN"), "HI"));
+  }
+
+  TEST_CASE("loads a slot the host wrote, as the IDE's editor would") {
+    auto s = boot();
+    s->slots.emplace_back("DEMO", "10 FOR I=1 TO 2\r\n20 PRINT I*7\r\n30 NEXT I\r\n");
+    settle(*s);
+    type(*s, "!LOAD \"DEMO\"");
+    type(*s, "RUN", 8000000);
+    CHECK(inOrder(after(text(*s), "RUN"), {"7", "14"}));
+  }
+
+  TEST_CASE("replaces the program it had") {
+    auto s = boot();
+    s->slots.emplace_back("B", "10 PRINT \"NEW\"\n");
+    settle(*s);
+    type(*s, "10 PRINT \"OLD\"");
+    type(*s, "20 PRINT \"KEEP\"");
+    type(*s, "!LOAD \"B\"");
+    type(*s, "LIST");
+    const std::string t = after(text(*s), "!LOAD");
+    CHECK(has(t, "10 PRINT \"NEW\""));
+    CHECK_FALSE(has(t, "KEEP"));
+  }
+
+  TEST_CASE("lists the names in the catalog") {
+    auto s = boot();
+    s->slots.emplace_back("ONE", "10 END\n");
+    s->slots.emplace_back("TWO", "10 END\n");
+    settle(*s);
+    type(*s, "!CATALOG");
+    const auto scr = screen(*s);
+    // The two names on their own rows, right after the echoed command.
+    size_t row = 0;
+    while (row < scr.size() && scr[row] != ">!CATALOG") row++;
+    REQUIRE(row + 2 < scr.size());
+    CHECK(scr[row + 1] == "ONE");
+    CHECK(scr[row + 2] == "TWO");
+  }
+
+  TEST_CASE("deletes one and leaves the other") {
+    auto s = boot();
+    s->slots.emplace_back("ONE", "10 END\n");
+    s->slots.emplace_back("TWO", "10 END\n");
+    settle(*s);
+    type(*s, "!DELETE \"ONE\"");
+    REQUIRE(s->slots.size() == 1);
+    CHECK(s->slots[0].first == "TWO");
+    CHECK(s->changes == 1);
+    type(*s, "!CATALOG");
+    const std::string t = after(text(*s), "!CATALOG");
+    CHECK(has(t, "TWO"));
+    CHECK_FALSE(has(t, "ONE"));
+  }
+
+  TEST_CASE("says NOT FOUND for a slot the cartridge lacks") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "!LOAD \"NOPE\"");
+    CHECK(has(text(*s), "NOT FOUND ERROR"));
+    CHECK(s->changes == 0);
+  }
+
+  TEST_CASE("wants a quoted name") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "!SAVE A");
+    CHECK(has(text(*s), "SYNTAX ERROR"));
+    CHECK(s->slots.empty());
+  }
+
+  TEST_CASE("refuses a name the device refuses") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "!SAVE \"\"");
+    CHECK(has(text(*s), "BAD NAME ERROR"));
+    CHECK(s->slots.empty());
   }
 }

@@ -5,6 +5,7 @@
 #include "devices/acp_ports.h"
 #include "devices/apu_ports.h"
 #include "devices/gpu_ports.h"
+#include "devices/storage_ports.h"
 
 namespace sc8::cc {
 
@@ -285,6 +286,48 @@ std::string acpHeader() {
   return guard("acp.h", out);
 }
 
+std::string storageHeader() {
+  std::vector<std::string> out = banner("storage.h", "The storage device, on ports $50 to $5F.");
+  out.push_back("");
+  out.push_back("/* A slot is named by a NUL terminated string in RAM, and its text");
+  out.push_back(" * moves through a block in RAM. LOAD and CATALOG take the room the");
+  out.push_back(" * block has, NUL included, and write nothing when it is short. Read");
+  out.push_back(" * sto_status() after a command: STO_OK, STO_NOT_FOUND, STO_FULL or");
+  out.push_back(" * STO_BAD_NAME. sto_len() is how many bytes the last command moved.");
+  out.push_back(" */");
+  out.push_back(std::string("#define sto_load(block, name, room) \\\n    (out(STO_ADDR_HI, ((unsigned int)(block)) >> 8), \\\n") +
+                "     out(STO_ADDR_LO, ((unsigned int)(block)) & 255), \\\n" +
+                "     out(STO_NAME_HI, ((unsigned int)(name)) >> 8), \\\n" +
+                "     out(STO_NAME_LO, ((unsigned int)(name)) & 255), \\\n" +
+                "     out(STO_LEN_HI, ((unsigned int)(room)) >> 8), \\\n" +
+                "     out(STO_LEN_LO, ((unsigned int)(room)) & 255), \\\n" +
+                "     out(STO_CMD, STO_LOAD))");
+  out.push_back("");
+  out.push_back(std::string("#define sto_save(block, name) \\\n    (out(STO_ADDR_HI, ((unsigned int)(block)) >> 8), \\\n") +
+                "     out(STO_ADDR_LO, ((unsigned int)(block)) & 255), \\\n" +
+                "     out(STO_NAME_HI, ((unsigned int)(name)) >> 8), \\\n" +
+                "     out(STO_NAME_LO, ((unsigned int)(name)) & 255), \\\n" +
+                "     out(STO_CMD, STO_SAVE))");
+  out.push_back("");
+  out.push_back(std::string("#define sto_delete(name) \\\n    (out(STO_NAME_HI, ((unsigned int)(name)) >> 8), \\\n") +
+                "     out(STO_NAME_LO, ((unsigned int)(name)) & 255), \\\n" +
+                "     out(STO_CMD, STO_DELETE))");
+  out.push_back("");
+  out.push_back(std::string("#define sto_catalog(block, room) \\\n    (out(STO_ADDR_HI, ((unsigned int)(block)) >> 8), \\\n") +
+                "     out(STO_ADDR_LO, ((unsigned int)(block)) & 255), \\\n" +
+                "     out(STO_LEN_HI, ((unsigned int)(room)) >> 8), \\\n" +
+                "     out(STO_LEN_LO, ((unsigned int)(room)) & 255), \\\n" +
+                "     out(STO_CMD, STO_CATALOG))");
+  out.push_back("");
+  out.push_back("/* The three reads. No command, just a port. */");
+  out.push_back(macro("sto_status", {}, "in(STO_STATUS)"));
+  out.push_back("");
+  out.push_back(macro("sto_count", {}, "in(STO_COUNT)"));
+  out.push_back("");
+  out.push_back(macro("sto_len", {}, "((((unsigned int)in(STO_LEN_HI)) << 8) | in(STO_LEN_LO))"));
+  return guard("storage.h", out);
+}
+
 std::string ioHeader() {
   std::vector<std::string> out = banner("io.h", "The controller and the keyboard, on ports $20 and $21.");
   out.push_back("");
@@ -408,6 +451,7 @@ const std::map<std::string, std::string>& headers() {
       {"gpu.h", gpuHeader()},
       {"apu.h", apuHeader()},
       {"acp.h", acpHeader()},
+      {"storage.h", storageHeader()},
       {"io.h", ioHeader()},
       {"sys.h", sysHeader()},
       {"rom.h", romHeader()},
