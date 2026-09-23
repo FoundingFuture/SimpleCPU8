@@ -460,6 +460,13 @@ class Assembler {
       std::string line(trim(raw));
       if (line.empty()) continue;
 
+      // The three sections may each open more than once, so a second source
+      // appended to a first can add code, RAM and data of its own. Offsets
+      // carry on where the section left off.
+      if (line == ".code") {
+        section = Section::Code;
+        continue;
+      }
       if (line == ".ram") {
         section = Section::Ram;
         continue;

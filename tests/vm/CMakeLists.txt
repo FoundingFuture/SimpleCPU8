@@ -9,3 +9,9 @@ if(TARGET sc8_basic)
   target_link_libraries(sc8_vm_tests PRIVATE sc8::basic)
   target_compile_definitions(sc8_vm_tests PRIVATE SC8_HAVE_BASIC=1)
 endif()
+
+# The driver example's ROM, for the boot test that types into it.
+target_compile_definitions(sc8_vm_tests PRIVATE SC8_ROM_DIR="${CMAKE_BINARY_DIR}/roms")
+if(TARGET basic_driver_rom)
+  add_dependencies(sc8_vm_tests basic_driver_rom)
+endif()

@@ -71,8 +71,13 @@ runs are unloaded. A fetch from one crashes with an illegal program address,
 the way a fetch past the end does. The ROM stores one PROG chunk per run,
 each with its first slot. So a driver sits at a known slot apart from the
 program that calls it. A BASIC bang handler is one such driver, reached
-through a vector set with DOKE. A ROM built from several sources is the
-next step. Today one source holds every run.
+through a vector set with DOKE. simplecpu-asm takes more than one source
+on its command line. Each starts in the code section, and `.code`, `.ram`
+and `.data` may each open again, with offsets carrying on. So
+`simplecpu-asm basic.asm driver.asm` burns the interpreter and a driver into
+one ROM. examples/basic-driver is the worked example: the interpreter at
+slot 0, a driver at slot $F000, and a BASIC program in the BAS chunk that
+DOKEs the vector and calls the driver.
 
 During development `.file('x.bin')`, `.image('x.png')` and `.sample('x.wav')`
 read from the directory of the source file. Burning copies the bytes into

@@ -71,3 +71,29 @@ TEST_SUITE("basic boot") {
   }
 }
 #endif
+
+#if SC8_HAVE_BASIC && defined(SC8_ROM_DIR)
+#include <fstream>
+#include <iterator>
+
+TEST_CASE("the driver example answers !HELLO from a second PROG segment") {
+  std::ifstream in(std::string(SC8_ROM_DIR) + "/basic-driver.rom", std::ios::binary);
+  REQUIRE_MESSAGE(in, "basic-driver.rom is not built");
+  std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
+  CartridgeResult r = decodeCartridge(bytes);
+  REQUIRE_MESSAGE(r.cartridge, r.error);
+  CHECK_EQ(r.cartridge->program[0xF000].op, opByName("LD A <- [D1]+")->op);
+  CHECK_EQ(r.cartridge->program[0xEFFF].op, UNLOADED_OP);
+  REQUIRE_EQ(r.cartridge->basic.size(), 1u);
+  CHECK_EQ(r.cartridge->basic[0].first, "DEMO");
+
+  Computer c;
+  c.setSeed(1);
+  c.insert(std::move(*r.cartridge));
+  c.typeText("!LOAD \"DEMO\"\nRUN\n");
+  runFrames(c, 150);
+  const std::string screen = screenText(c.machine());
+  CHECK_MESSAGE(screen.find("HELLO FROM ASSEMBLY") != std::string::npos, screen);
+  CHECK_MESSAGE(screen.find("THE DRIVER ANSWERED") != std::string::npos, screen);
+}
+#endif

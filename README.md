@@ -36,7 +36,13 @@ build/src/tools/simplecpu-asm examples/hello/hello.asm --title "List sum"
 build/src/vm/simplecpu --rom examples/hello/hello.rom --fps 60
 build/src/ide/simplecpu-ide examples/hello/hello.asm
 build/src/tools/simplecpu-run examples/hello/hello.rom --ram 0 4
+build/src/vm/simplecpu --basic
+build/src/vm/simplecpu --basic hello.bas --run
+build/src/vm/simplecpu --rom build/roms/pacman.rom --fps 60
 ```
+
+The build burns every example into build/roms. examples/README.md lists
+them. Pac-Man is build/roms/pacman.rom: arrows move, Z fires.
 
 Keys in simplecpu: F1 toggles the CRT look. F2 and F3 turn it down and up.
 F5 powers the machine on again. F11 goes fullscreen. Escape quits.

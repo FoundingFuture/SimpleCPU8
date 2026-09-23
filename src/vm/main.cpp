@@ -6,6 +6,8 @@
 //   simplecpu --basic                      boot into the BASIC interpreter
 //   simplecpu --basic hello.bas            boot BASIC and load the program
 //   simplecpu --basic hello.bas --run      load it and run it
+//   simplecpu --rom x.rom --type 'RUN\n'    type text into the machine after
+//                                          boot; \n is Enter
 //   simplecpu --rom game.rom --microcode naive
 //   simplecpu --rom game.rom --crt 0.6     CRT look at 60 percent
 //   simplecpu --rom game.rom --no-crt      the plain scaled picture
@@ -43,7 +45,8 @@ int usage() {
   std::fprintf(stderr,
                "usage: simplecpu --rom FILE.rom [--fps N | --max] [--microcode naive|optimal]\n"
                "                 [--crt S | --no-crt] [--scale N] [--title T]\n"
-               "       simplecpu --basic [FILE.bas [--run]]\n");
+               "       simplecpu --basic [FILE.bas [--run]]\n"
+               "       ... [--type TEXT] [--screenshot FILE.png]\n");
   return 2;
 }
 
@@ -81,7 +84,7 @@ std::string romTitle(const Cartridge& c, const std::string& fallback) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string romPath, basicPath, microcode, title, screenshot;
+  std::string romPath, basicPath, microcode, title, screenshot, typedExtra;
   bool basic = false, maxSpeed = false, runBasic = false;
   int fps = 60, scale = 3;
   DisplaySettings display;
@@ -102,6 +105,19 @@ int main(int argc, char** argv) {
     } else if (a == "--fps") fps = std::stoi(next());
     else if (a == "--max") maxSpeed = true;
     else if (a == "--run") runBasic = true;
+    else if (a == "--type") {
+      std::string t = next();
+      std::string out;
+      for (size_t k = 0; k < t.size(); k++) {
+        if (t[k] == '\\' && k + 1 < t.size() && t[k + 1] == 'n') {
+          out += '\n';
+          k++;
+        } else {
+          out += t[k];
+        }
+      }
+      typedExtra += out;
+    }
     else if (a == "--microcode") microcode = next();
     else if (a == "--crt") display.setStrength(std::stof(next()));
     else if (a == "--no-crt") display.enabled = false;
@@ -157,6 +173,7 @@ int main(int argc, char** argv) {
   }
   computer.insert(std::move(*cart));
   computer.setRomPath(romPath);
+  typed += typedExtra;
   if (!typed.empty()) computer.typeText(typed);
   if (title.empty()) title = basic ? "BASIC" : romTitle(computer.cartridge(), romPath);
 

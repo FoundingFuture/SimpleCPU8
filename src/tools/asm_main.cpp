@@ -5,11 +5,16 @@
 //   simplecpu-asm main.asm --microcode optimal
 //   simplecpu-asm main.asm --title "Pac-Man" --author "Eddie"
 //   simplecpu-asm main.asm --listing        prints labels and sizes
+//   simplecpu-asm basic.asm driver.asm      several sources, one ROM: each
+//                                           file starts in the code section
+//   simplecpu-asm main.asm --bas DEMO=demo.bas
+//                                           puts a BASIC program in the ROM
 //
 // .file, .image and .sample resolve relative to the source file's directory.
 // An image is decoded and fitted to the screen, audio becomes 8 bit mono at
 // 8 kHz. A conversion that lost something says so on stderr.
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -44,8 +49,9 @@ int usage() {
 }  // namespace
 
 int main(int argc, char** argv) {
-  fs::path source;
+  std::vector<fs::path> sources;
   fs::path out;
+  std::vector<std::pair<std::string, std::string>> basicSlots;
   std::string microcode = "@naive";
   std::vector<std::pair<std::string, std::string>> meta;
   bool listing = false;
@@ -79,21 +85,58 @@ int main(int argc, char** argv) {
     } else if (a == "--title") meta.emplace_back("title", next());
     else if (a == "--author") meta.emplace_back("author", next());
     else if (a == "--listing") listing = true;
+    else if (a == "--bas") {
+      const std::string spec = next();
+      const size_t eq = spec.find('=');
+      if (eq == std::string::npos) {
+        std::fprintf(stderr, "--bas takes NAME=file.bas\n");
+        return 2;
+      }
+      std::ifstream in(spec.substr(eq + 1));
+      if (!in) {
+        std::fprintf(stderr, "cannot read %s\n", spec.substr(eq + 1).c_str());
+        return 1;
+      }
+      basicSlots.emplace_back(spec.substr(0, eq), std::string(std::istreambuf_iterator<char>(in), {}));
+    }
     else if (a == "-h" || a == "--help") return usage();
     else if (!a.empty() && a[0] == '-') {
       std::fprintf(stderr, "unknown option %s\n", a.c_str());
       return usage();
-    } else if (source.empty()) source = a;
-    else return usage();
+    } else sources.push_back(a);
   }
-  if (source.empty()) return usage();
+  if (sources.empty()) return usage();
 
-  std::ifstream in(source);
-  if (!in) {
-    std::fprintf(stderr, "cannot read %s\n", source.string().c_str());
-    return 1;
+  // Several sources become one text, each starting in the code section.
+  // Errors report the file and its own line, so the map from combined
+  // line to file is kept.
+  std::string text;
+  struct Span {
+    int firstLine;
+    fs::path file;
+  };
+  std::vector<Span> spans;
+  int lineCount = 0;
+  for (const fs::path& source : sources) {
+    std::ifstream in(source);
+    if (!in) {
+      std::fprintf(stderr, "cannot read %s\n", source.string().c_str());
+      return 1;
+    }
+    std::string part(std::istreambuf_iterator<char>(in), {});
+    if (!part.empty() && part.back() != '\n') part += '\n';
+    spans.push_back({lineCount + 1, source});
+    text += ".code\n" + part;
+    lineCount += 1 + static_cast<int>(std::count(part.begin(), part.end(), '\n'));
   }
-  const std::string text(std::istreambuf_iterator<char>(in), {});
+  auto where = [&](int line) -> std::string {
+    const Span* s = &spans.front();
+    for (const Span& sp : spans) {
+      if (sp.firstLine <= line) s = &sp;
+    }
+    return s->file.string() + ":" + std::to_string(line - s->firstLine);
+  };
+  const fs::path source = sources.front();
   const fs::path dir = source.parent_path();
 
   Assets assets;
@@ -118,7 +161,7 @@ int main(int argc, char** argv) {
 
   Assembled a = assemble(text, &assets);
   for (const AsmError& e : a.errors) {
-    std::fprintf(stderr, "%s:%d: %s\n", source.string().c_str(), e.line, e.message.c_str());
+    std::fprintf(stderr, "%s: %s\n", where(e.line).c_str(), e.message.c_str());
   }
   if (!a.errors.empty()) return 1;
 
@@ -137,6 +180,7 @@ int main(int argc, char** argv) {
   Cartridge c = a.cartridge();
   c.microcode = microcode;
   c.meta = meta;
+  c.basic = basicSlots;
   if (out.empty()) out = fs::path(source).replace_extension(".rom");
   std::vector<uint8_t> bytes = encodeCartridge(c);
   std::ofstream o(out, std::ios::binary);

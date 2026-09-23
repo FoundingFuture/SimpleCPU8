@@ -70,3 +70,20 @@ foreach(dir IN LISTS SC8_EXAMPLE_DIRS)
 endforeach()
 
 add_custom_target(roms ALL DEPENDS ${SC8_ROMS})
+
+# The driver example builds from two sources: the interpreter's assembly,
+# which src/basic generates, and the driver. demo.bas rides along in the
+# ROM's BAS chunk. It runs in the computer, not headless, so its test lives
+# in tests/vm.
+if(TARGET sc8_basic)
+  set(SC8_DRIVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/basic-driver")
+  set(SC8_DRIVER_ROM "${SC8_ROM_DIR}/basic-driver.rom")
+  add_custom_command(
+    OUTPUT "${SC8_DRIVER_ROM}"
+    COMMAND $<TARGET_FILE:simplecpu-asm> "${SC8_BASIC_ASM}" "${SC8_DRIVER_DIR}/driver.asm"
+            -o "${SC8_DRIVER_ROM}" --microcode optimal --title "BASIC driver"
+            --bas "DEMO=${SC8_DRIVER_DIR}/demo.bas"
+    DEPENDS simplecpu-asm "${SC8_BASIC_ASM}" "${SC8_DRIVER_DIR}/driver.asm" "${SC8_DRIVER_DIR}/demo.bas"
+    COMMENT "Burning basic-driver.rom")
+  add_custom_target(basic_driver_rom ALL DEPENDS "${SC8_DRIVER_ROM}")
+endif()
