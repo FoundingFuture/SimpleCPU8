@@ -180,7 +180,9 @@ Ported from the TypeScript project, with their tests:
 Written new:
 
 - the ROM format and the device constant registry
-- the virtual computer with frame pacing
+- the virtual computer with frame pacing, its session tests ported from
+  session.test.ts into tests/vm
+- the keyboard map from main.ts
 - the display, the CRT shader and the audio output
 - the command line tools
 - the IDE with its panes

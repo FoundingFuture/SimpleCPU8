@@ -19,7 +19,7 @@ struct Audio::Impl {
   std::atomic<size_t> head{0};  // next write
   std::atomic<size_t> tail{0};  // next read
   ma_device device{};
-  float gain = 0.4f;
+  float gain = 1.0f;
 
   size_t queued() const { return (head.load() + CAPACITY - tail.load()) % CAPACITY; }
 

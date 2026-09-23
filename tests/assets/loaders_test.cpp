@@ -21,7 +21,7 @@ namespace {
 
 using Bytes = std::vector<uint8_t>;
 
-const Bytes MACHINE = default332();
+const Bytes MACHINE = machinePalette();
 
 // A fresh directory under the system temp for each test, removed after.
 struct TempDir {

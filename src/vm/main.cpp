@@ -13,7 +13,7 @@
 //                                          save the window after one second and quit
 //
 // Keys while running: F1 toggles the CRT look, F2 and F3 turn it down and
-// up, F5 resets, F11 fullscreen, Escape quits.
+// up. F5 powers on again, F11 goes fullscreen and Escape quits.
 
 #include <cstdio>
 #include <fstream>
@@ -26,6 +26,7 @@
 #include "vm/audio.h"
 #include "vm/computer.h"
 #include "vm/display.h"
+#include "vm/keys.h"
 
 using namespace sc8;
 
@@ -113,53 +114,65 @@ int main(int argc, char** argv) {
   SetExitKey(KEY_ESCAPE);
   SetTargetFPS(fps > 0 ? fps : 60);
 
-  Audio audio;
-  audio.start();
-  Display screen;
-  if (!screen.shaderReady()) std::fprintf(stderr, "simplecpu: the CRT shader did not compile, showing the plain picture\n");
+  // The display owns GL objects, so it is destroyed inside this block,
+  // before CloseWindow takes the context away.
+  {
+    Audio audio;
+    audio.start();
+    Display screen;
+    if (!screen.shaderReady()) std::fprintf(stderr, "simplecpu: the CRT shader did not compile, showing the plain picture\n");
 
-  double owed = 0.0;
-  float strength = 0.5f;
-  int hostFrames = 0;
-  while (!WindowShouldClose()) {
-    if (!screenshot.empty() && ++hostFrames == 60) {
-      TakeScreenshot(screenshot.c_str());
-      break;
-    }
-    if (IsKeyPressed(KEY_F1)) display.enabled = !display.enabled;
-    if (IsKeyPressed(KEY_F2)) display.setStrength(strength = std::max(0.0f, strength - 0.1f));
-    if (IsKeyPressed(KEY_F3)) display.setStrength(strength = std::min(1.0f, strength + 0.1f));
-    if (IsKeyPressed(KEY_F5)) computer.powerOn();
-    if (IsKeyPressed(KEY_F11)) ToggleFullscreen();
-
-    // Frame-locked pacing: owed frames come from real elapsed time times
-    // the target rate, so a game animates the same on any host. MAX runs
-    // the core flat out on a wall clock budget instead.
-    if (maxSpeed) {
-      const double until = GetTime() + 0.012;
-      while (GetTime() < until && computer.runFrame()) {
+    double owed = 0.0;
+    float strength = 0.5f;
+    int hostFrames = 0;
+    while (!WindowShouldClose()) {
+      if (!screenshot.empty() && ++hostFrames == 60) {
+        // raylib's TakeScreenshot drops the directory, so export by hand.
+        Image shot = LoadImageFromScreen();
+        ExportImage(shot, screenshot.c_str());
+        UnloadImage(shot);
+        break;
       }
-    } else {
-      owed += static_cast<double>(GetFrameTime()) * fps;
-      int frames = 0;
-      while (owed >= 1.0 && frames < 8) {
-        computer.runFrame();
-        owed -= 1.0;
-        frames++;
-      }
-      if (owed > 8.0) owed = 0.0;  // a stall is forgiven, not caught up
-    }
+      if (IsKeyPressed(KEY_F1)) display.enabled = !display.enabled;
+      if (IsKeyPressed(KEY_F2)) display.setStrength(strength = std::max(0.0f, strength - 0.1f));
+      if (IsKeyPressed(KEY_F3)) display.setStrength(strength = std::min(1.0f, strength + 0.1f));
+      if (IsKeyPressed(KEY_F5)) computer.powerOn();
+      if (IsKeyPressed(KEY_F11)) ToggleFullscreen();
+      pollKeyboard(computer.input());
 
-    screen.upload(computer.frame());
-    BeginDrawing();
-    ClearBackground(BLACK);
-    screen.draw(0, 0, GetScreenWidth(), GetScreenHeight(), display);
-    const Machine& m = computer.machine();
-    if (m.status != Status::Running) {
-      const std::string text = std::string(statusName(m.status)) + (m.crash ? ": " + m.crash->message : "");
-      DrawText(text.c_str(), 12, GetScreenHeight() - 28, 20, RAYWHITE);
+      // Frame-locked pacing, the worker's rule. Owed frames come from real
+      // elapsed time times the target rate, capped at about a second of
+      // catch-up. A game then animates the same on any host. MAX runs the
+      // core flat out on a wall clock budget per host frame instead.
+      if (maxSpeed) {
+        const double until = GetTime() + 0.012;
+        while (GetTime() < until && computer.runInstructions(20000)) {
+        }
+      } else {
+        owed += static_cast<double>(GetFrameTime()) * fps;
+        if (owed > fps) owed = fps;
+        while (owed >= 1.0) {
+          const uint64_t done = computer.runToNextFrame();
+          owed -= 1.0;
+          if (computer.machine().status != Status::Running) break;
+          if (done == 0) break;  // nothing advanced: avoid a busy spin
+        }
+      }
+      // The chip renders on its own clock, so a tune plays on while the CPU
+      // sits halted.
+      computer.pumpAudio(audio);
+
+      screen.upload(computer.frame());
+      BeginDrawing();
+      ClearBackground(BLACK);
+      screen.draw(0, 0, GetScreenWidth(), GetScreenHeight(), display);
+      const Machine& m = computer.machine();
+      if (m.status != Status::Running) {
+        const std::string text = std::string(statusName(m.status)) + (m.crash ? ": " + m.crash->message : "");
+        DrawText(text.c_str(), 12, GetScreenHeight() - 28, 20, RAYWHITE);
+      }
+      EndDrawing();
     }
-    EndDrawing();
   }
 
   CloseWindow();

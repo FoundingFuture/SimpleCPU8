@@ -13,7 +13,7 @@ namespace {
 using Rgb = std::array<int, 3>;
 using Rgba = std::array<int, 4>;
 
-const std::vector<uint8_t> MACHINE = default332();
+const std::vector<uint8_t> MACHINE = machinePalette();
 
 // Build a tiny image from a list of RGB triples, one pixel per color, with
 // index 0 reserved for transparency the way decodeImage reserves it.
@@ -161,7 +161,7 @@ TEST_CASE("deriveLabel prefixes a leading digit") {
 }
 
 TEST_CASE("deriveLabel appends pal for a palette") {
-  CHECK(deriveLabel("cat.png", SubItemKind::Palette, NONE) == "catpal");
+  CHECK(deriveLabel("cat.png", SubItemKind::PaletteBlob, NONE) == "catpal");
 }
 
 TEST_CASE("deriveLabel leaves the other kinds unsuffixed") {
@@ -183,14 +183,14 @@ TEST_CASE("deriveLabel keeps a dotted name's full stem apart from the extension"
 
 TEST_CASE("directiveLine writes each kind to its own directive") {
   CHECK(directiveLine("cat", SubItemKind::Pixels, "cat.png") == "cat:    .image('cat.png')");
-  CHECK(directiveLine("catpal", SubItemKind::Palette, "cat.png") == "catpal: .palette('cat.png')");
+  CHECK(directiveLine("catpal", SubItemKind::PaletteBlob, "cat.png") == "catpal: .palette('cat.png')");
   CHECK(directiveLine("boom", SubItemKind::Sample, "boom.wav") == "boom:   .sample('boom.wav')");
   CHECK(directiveLine("song", SubItemKind::File, "song.mid") == "song:   .file('song.mid')");
 }
 
 TEST_CASE("directiveLine puts the directive at the editor's mnemonic column") {
   CHECK(directiveLine("cat", SubItemKind::Pixels, "cat.png").find(".image") == MNEM_COL);
-  CHECK(directiveLine("catpal", SubItemKind::Palette, "cat.png").find(".palette") == MNEM_COL);
+  CHECK(directiveLine("catpal", SubItemKind::PaletteBlob, "cat.png").find(".palette") == MNEM_COL);
 }
 
 TEST_CASE("directiveLine gives a long label its own single space") {
@@ -264,7 +264,7 @@ TEST_CASE("sub-items offers pixels and palette for a unique palette") {
   const auto items = subItemsForImage(image({{1, 2, 3}}, {1}), MACHINE);
   REQUIRE(items.size() == 2);
   CHECK(items[0].kind == SubItemKind::Pixels);
-  CHECK(items[1].kind == SubItemKind::Palette);
+  CHECK(items[1].kind == SubItemKind::PaletteBlob);
   CHECK(items[1].bytes.size() == 768);
 }
 
@@ -359,7 +359,7 @@ TEST_CASE("placedAssets finds each asset and the kinds already placed") {
   const auto placed = placedAssets(
       "        HLT\n.data\ncat:    .image('cat.png')\ncatpal: .palette('cat.png')\n"
       "boom:   .sample('boom.wav')\ntune:   .file('song.mid')");
-  CHECK(placed.at("cat.png") == Kinds{SubItemKind::Pixels, SubItemKind::Palette});
+  CHECK(placed.at("cat.png") == Kinds{SubItemKind::Pixels, SubItemKind::PaletteBlob});
   CHECK(placed.at("boom.wav") == Kinds{SubItemKind::Sample});
   CHECK(placed.at("song.mid") == Kinds{SubItemKind::File});
 }
@@ -454,11 +454,11 @@ TEST_CASE("placedRefusal turns plural when two directives hold the asset") {
   // An image that ships its own palette sits in .data twice, under two
   // labels. Telling the user to remove "that line" leaves the second one
   // in place and the next delete refuses again.
-  CHECK(placedRefusal("cat.png", {SubItemKind::Pixels, SubItemKind::Palette}) ==
+  CHECK(placedRefusal("cat.png", {SubItemKind::Pixels, SubItemKind::PaletteBlob}) ==
         "cat.png is still placed by .image, .palette in .data. Remove those lines first.");
 }
 
 TEST_CASE("placedRefusal lists the directives in the order the source placed them") {
-  CHECK(placedRefusal("cat.png", {SubItemKind::Palette, SubItemKind::Pixels}).find(".palette, .image") !=
+  CHECK(placedRefusal("cat.png", {SubItemKind::PaletteBlob, SubItemKind::Pixels}).find(".palette, .image") !=
         std::string::npos);
 }

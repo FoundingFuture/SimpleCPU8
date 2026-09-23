@@ -28,7 +28,9 @@ class Audio {
   // How many samples wait in the buffer, so the pump knows when to render.
   size_t queued() const;
 
-  float gain = 0.4f;  // headroom, so a dense mix does not clip
+  // Unity. The headroom for a dense mix is the APU's master gain.
+  // Computer sets that to the browser's MASTER_GAIN, so a ROM sounds the same.
+  float gain = 1.0f;
 
  private:
   struct Impl;

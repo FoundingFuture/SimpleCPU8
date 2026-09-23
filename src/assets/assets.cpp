@@ -13,6 +13,7 @@
 
 #include "assets/decoders.h"
 #include "devices/apu_ports.h"
+#include "devices/gpu.h"
 #include "devices/gpu_ports.h"
 
 namespace sc8 {
@@ -27,17 +28,9 @@ uint8_t byteAt(const std::vector<uint8_t>& v, size_t i) { return i < v.size() ? 
 
 }  // namespace
 
-std::vector<uint8_t> default332() {
-  std::vector<uint8_t> pal(768);
-  for (int i = 0; i < 256; i++) {
-    const int r = (i >> 5) & 7;
-    const int g = (i >> 2) & 7;
-    const int b = i & 3;
-    pal[static_cast<size_t>(i) * 3] = static_cast<uint8_t>(std::lround(r * 255.0 / 7));
-    pal[static_cast<size_t>(i) * 3 + 1] = static_cast<uint8_t>(std::lround(g * 255.0 / 7));
-    pal[static_cast<size_t>(i) * 3 + 2] = static_cast<uint8_t>(std::lround(b * 255.0 / 3));
-  }
-  return pal;
+std::vector<uint8_t> machinePalette() {
+  const Palette pal = default332();
+  return std::vector<uint8_t>(pal.begin(), pal.end());
 }
 
 std::map<uint32_t, uint8_t> paletteIndex(const std::vector<uint8_t>& palette) {
@@ -92,7 +85,7 @@ std::string deriveLabel(std::string_view fileName, SubItemKind kind, const std::
   }
   if (base.empty() || allUnderscore) base = "asset";
   if (base[0] >= '0' && base[0] <= '9') base = "_" + base;
-  if (kind == SubItemKind::Palette) base += "pal";
+  if (kind == SubItemKind::PaletteBlob) base += "pal";
   if (!taken.contains(base)) return base;
   for (int n = 2;; n++) {
     const std::string candidate = base + std::to_string(n);
@@ -103,7 +96,7 @@ std::string deriveLabel(std::string_view fileName, SubItemKind kind, const std::
 std::string_view directiveFor(SubItemKind kind) {
   switch (kind) {
     case SubItemKind::Pixels: return ".image";
-    case SubItemKind::Palette: return ".palette";
+    case SubItemKind::PaletteBlob: return ".palette";
     case SubItemKind::Sample: return ".sample";
     case SubItemKind::File: return ".file";
   }
@@ -137,7 +130,7 @@ void eachCodeLine(std::string_view source, F&& f) {
 }
 
 std::optional<SubItemKind> kindByDirective(std::string_view word) {
-  for (const SubItemKind k : {SubItemKind::Pixels, SubItemKind::Palette, SubItemKind::Sample, SubItemKind::File}) {
+  for (const SubItemKind k : {SubItemKind::Pixels, SubItemKind::PaletteBlob, SubItemKind::Sample, SubItemKind::File}) {
     if (directiveFor(k).substr(1) == word) return k;
   }
   return std::nullopt;
@@ -220,7 +213,7 @@ std::vector<SubItem> subItemsForImage(const DecodedImage& img, const std::vector
   std::vector<SubItem> items;
   items.push_back({SubItemKind::Pixels, std::move(c.pixels),
                    c.blackMerge ? std::optional<std::string>(BLACK_MERGE_NOTE) : std::nullopt});
-  if (!c.onPalette) items.push_back({SubItemKind::Palette, std::move(c.palette), std::nullopt});
+  if (!c.onPalette) items.push_back({SubItemKind::PaletteBlob, std::move(c.palette), std::nullopt});
   return items;
 }
 
@@ -474,7 +467,7 @@ std::optional<ImageAsset> loadImageFile(const std::filesystem::path& path, std::
   const std::optional<Rgba> rgba = decodeImageFile(path.string());
   if (!rgba) return std::nullopt;
 
-  const std::vector<uint8_t> machine = default332();
+  const std::vector<uint8_t> machine = machinePalette();
   DecodedReport decoded = decodeRgba(rgba->bytes, rgba->width, rgba->height, machine);
   // buildAsset in main.ts: the decode's own note leads, then any black
   // merge the classification found.

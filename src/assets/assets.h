@@ -21,17 +21,16 @@
 
 namespace sc8 {
 
-// The machine palette, 3-3-2 packed: three bits of red, three of green,
-// two of blue, each channel scaled to 0..255. The GPU owns this table in
-// the browser version. It lives here until the GPU is ported, at which
-// point the GPU should become its one home.
-std::vector<uint8_t> default332();
+// The machine palette as a vector, the shape the conversions take. The GPU
+// is its one home: this reads the GPU's table rather than keeping a copy.
+std::vector<uint8_t> machinePalette();
 
 // The editor's mnemonic column. The formatter owns it in the browser
 // version. It lives here until the editor's formatter is ported.
 constexpr size_t MNEM_COL = 8;
 
-enum class SubItemKind { Pixels, Palette, Sample, File };
+// PaletteBlob rather than Palette, which is the GPU's type for the table.
+enum class SubItemKind { Pixels, PaletteBlob, Sample, File };
 
 // DecodedImage in assets.ts. The assembler's ImageAsset already has the
 // same four fields, so the port reuses it rather than carrying two names

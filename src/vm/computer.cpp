@@ -1,28 +1,64 @@
 #include "vm/computer.h"
 
 #include <algorithm>
+#include <chrono>
 
 #include "core/mcparse.h"
+#include "vm/audio.h"
 #include "vm/display.h"
 
 namespace sc8 {
 
-Computer::Computer() : microcode_(buildNaive()), machine_(std::make_unique<Machine>(std::vector<Instr>{}, microcode_, &bus_)) {
+Computer::Computer()
+    : microcode_(buildNaive()),
+      apu_(&input_),
+      acp_(&apu_),
+      gpu_([this] { return machine_ ? machine_->cycles : 0; }, &acp_, [this] { return drawSeed(); }) {
+  apu_.setMasterGain(MASTER_GAIN);
   frame_.assign(static_cast<size_t>(SCREEN_W * SCREEN_H * 4), 0);
+  newMachine();
 }
 
 Computer::~Computer() = default;
 
+// The worker's seed: the wall clock mixed with a run counter, so two power
+// ons inside one millisecond still differ. A fixed seed wins when set.
+uint32_t Computer::drawSeed() {
+  if (fixedSeed_) return *fixedSeed_;
+  using namespace std::chrono;
+  const auto ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+  seedRuns_++;
+  return static_cast<uint32_t>(ms) ^ (seedRuns_ * 0x9e3779b1u);
+}
+
 void Computer::insert(Cartridge cart) {
   cart_ = std::move(cart);
   if (!cart_.microcode.empty()) selectMicrocode(cart_.microcode);
+  gpu_.attachCart(cart_.data);
+  apu_.attachCart(cart_.data);
   powerOn();
 }
 
-void Computer::powerOn() {
-  machine_ = std::make_unique<Machine>(cart_.program, microcode_, &bus_);
+// Every new machine hands its RAM to the GPU and the ACP. The GPU reads
+// it for text mode and the ACP writes it. The session did this after each
+// new Machine. Forgetting it is the classic bug, so it lives here.
+void Computer::newMachine() {
+  machine_ = std::make_unique<Machine>(cart_.program, microcode_, &gpu_);
+  machine_->setTrace(traceOn_);
+  gpu_.attachRam(machine_->ram.data());
+  acp_.attachRam(machine_->ram.data());
   std::copy(cart_.ram.begin(), cart_.ram.end(), machine_->ram.begin());
-  bus_.log.clear();
+  lastDisplayKey_.clear();
+}
+
+// The session's restart: the screen and the chip power on fresh along
+// with the .ram image. The ACP keeps its state, as it did there. A new
+// machine stands in for reset plus image load. A fresh machine is the
+// same thing with the stack and the counters cleared too.
+void Computer::powerOn() {
+  gpu_.powerOn();
+  apu_.powerOn();
+  newMachine();
 }
 
 void Computer::reset() { machine_->reset(); }
@@ -44,48 +80,108 @@ std::vector<std::string> Computer::selectMicrocode(const std::string& name) {
     microcode_ = std::move(p.microcode);
   }
   microcodeName_ = n;
-  machine_->setMicrocode(microcode_);
+  // Swapping microcode replaces the machine: a restart, per the design.
+  gpu_.powerOn();
+  newMachine();
   return {};
 }
 
-bool Computer::runFrame() {
-  const uint64_t target = (machine_->cycles / CYCLES_PER_FRAME + 1) * CYCLES_PER_FRAME;
-  while (machine_->status == Status::Running && machine_->cycles < target) {
-    machine_->instructionStep();
+void Computer::setTrace(bool on) {
+  traceOn_ = on;
+  machine_->setTrace(on);
+}
+
+void Computer::setFastFrame(bool on, std::optional<double> gapMs) {
+  gpu_.fastFrame = on;
+  if (gapMs) gpu_.fastFrameGapMs = *gapMs;
+}
+
+void Computer::setBreakpoints(const std::vector<uint16_t>& pcs) { breakpoints_ = std::set<uint16_t>(pcs.begin(), pcs.end()); }
+
+uint64_t Computer::runBudget(uint64_t n) {
+  Machine& m = *machine_;
+  hitBreakpoint = false;
+  const uint64_t start = m.instructions;
+  if (breakpoints_.empty()) {
+    m.run(n);
+    return m.instructions - start;
   }
-  return machine_->status == Status::Running;
+  for (uint64_t i = 0; i < n; i++) {
+    if (!m.instructionStep()) break;
+    if (breakpoints_.count(m.pc)) {
+      hitBreakpoint = true;
+      break;
+    }
+  }
+  return m.instructions - start;
+}
+
+uint64_t Computer::runMicroBudget(uint64_t n) {
+  Machine& m = *machine_;
+  hitBreakpoint = false;
+  uint64_t steps = 0;
+  uint64_t prevInstr = m.instructions;
+  for (uint64_t i = 0; i < n; i++) {
+    if (!m.microStep()) break;
+    steps++;
+    if (m.instructions != prevInstr) {
+      prevInstr = m.instructions;
+      if (breakpoints_.count(m.pc)) {
+        hitBreakpoint = true;
+        break;
+      }
+    }
+  }
+  return steps;
+}
+
+uint64_t Computer::runToNextFrame(uint64_t maxInstr) {
+  Machine& m = *machine_;
+  hitBreakpoint = false;
+  const uint64_t start = m.instructions;
+  const int64_t f0 = gpu_.frame();
+  for (uint64_t i = 0; i < maxInstr; i++) {
+    if (!m.instructionStep()) break;
+    if (breakpoints_.count(m.pc)) {
+      hitBreakpoint = true;
+      break;
+    }
+    if (gpu_.frame() != f0) break;
+  }
+  return m.instructions - start;
+}
+
+bool Computer::runFrame() {
+  runToNextFrame();
+  return machine_->status == Status::Running && !hitBreakpoint;
 }
 
 bool Computer::runInstructions(uint64_t n) {
-  machine_->run(n);
-  return machine_->status == Status::Running;
+  runBudget(n);
+  return machine_->status == Status::Running && !hitBreakpoint;
 }
 
-// A 3-3-2 palette test card with a bar that walks with the frame counter,
-// so the pipeline from machine to shader can be seen working before the
-// GPU arrives.
+void Computer::pumpAudio(Audio& audio) {
+  constexpr size_t BLOCK = static_cast<size_t>(apu::AUDIO_RATE * AUDIO_MS / 1000);
+  constexpr size_t LOW = static_cast<size_t>(apu::AUDIO_RATE * AUDIO_AHEAD_LOW_MS / 1000);
+  constexpr size_t HIGH = static_cast<size_t>(apu::AUDIO_RATE * AUDIO_AHEAD_HIGH_MS / 1000);
+  if (!apu_.audioActive()) return;
+  if (audio.queued() >= LOW) return;
+  audioBlock_.resize(BLOCK);
+  // The worker pulled a block every AUDIO_MS on a timer. A host frame is
+  // the timer here. It refills to the high mark in one go, then rests
+  // until the buffer drains to the low mark.
+  while (apu_.audioActive() && audio.queued() < HIGH) {
+    apu_.render(audioBlock_);
+    audio.push(audioBlock_);
+  }
+}
+
 const std::vector<uint8_t>& Computer::frame() {
-  const uint64_t f = frameCounter();
-  for (int y = 0; y < SCREEN_H; y++) {
-    for (int x = 0; x < SCREEN_W; x++) {
-      const size_t i = static_cast<size_t>((y * SCREEN_W + x) * 4);
-      const uint8_t index = static_cast<uint8_t>(((y / 16) * 16 + (x / 16)) & 0xff);
-      uint8_t r = static_cast<uint8_t>((index >> 5) * 255 / 7);
-      uint8_t g = static_cast<uint8_t>(((index >> 2) & 7) * 255 / 7);
-      uint8_t b = static_cast<uint8_t>((index & 3) * 255 / 3);
-      const bool bar = static_cast<uint64_t>(x) == (f % SCREEN_W);
-      const bool halted = machine_->status != Status::Running;
-      if (bar) r = g = b = 255;
-      if (halted) {
-        r = static_cast<uint8_t>(r / 3);
-        g = static_cast<uint8_t>(g / 3);
-        b = static_cast<uint8_t>(b / 3);
-      }
-      frame_[i] = r;
-      frame_[i + 1] = g;
-      frame_[i + 2] = b;
-      frame_[i + 3] = 255;
-    }
+  std::string key = gpu_.displayKey();
+  if (key != lastDisplayKey_) {
+    gpu_.compose(frame_);
+    lastDisplayKey_ = std::move(key);
   }
   return frame_;
 }
