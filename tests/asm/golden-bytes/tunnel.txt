@@ -1,0 +1,51 @@
+# Golden assembler output for the tunnel program.
+# Recorded from the demo source on purpose, and committed. Do not
+# regenerate to make a failing test pass: a difference here is the
+# assembled program changing, which is either intended or a bug.
+source-lines 41
+errors 0
+program 27
+# slot, opcode, operand, source line. Byte offset is slot * 3.
+0000 60 0380 4
+0001 60 0580 5
+0002 60 0003 6
+0003 10 00b4 7
+0004 12 0000 8
+0005 10 0001 9
+0006 12 0001 10
+0007 11 0001 11
+0008 61 0200 12
+0009 60 0002 13
+000a 11 0000 14
+000b 61 0200 15
+000c 60 0006 16
+000d 11 0001 17
+000e 48 0007 18
+000f 12 0001 19
+0010 11 0000 20
+0011 49 0006 21
+0012 12 0000 22
+0013 09 0015 23
+0014 08 0007 24
+0015 60 0201 28
+0016 60 03ff 29
+0017 60 0018 30
+0018 60 0201 31
+0019 60 0016 32
+001a 08 001a 36
+ram 2
+# byte offset, then the data RAM bytes .ram defined.
+0000  00 00
+cart 0
+# byte offset, then the cartridge bytes .data built.
+labels 5
+# name, kind, value in hex, in the order the assembler defined them.
+rings code 0007
+spin code 0015
+wait code 001a
+r ram 0000
+c ram 0001
+ramlines 2
+# .ram source line, then the RAM address that line defines.
+39 0000
+40 0001

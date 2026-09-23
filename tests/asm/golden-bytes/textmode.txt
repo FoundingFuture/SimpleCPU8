@@ -1,0 +1,35 @@
+# Golden assembler output for the textmode program.
+# Recorded from the demo source on purpose, and committed. Do not
+# regenerate to make a failing test pass: a difference here is the
+# assembled program changing, which is either intended or a bug.
+source-lines 34
+errors 0
+program 13
+# slot, opcode, operand, source line. Byte offset is slot * 3.
+0000 60 021e 7
+0001 60 0301 8
+0002 60 0052 9
+0003 60 02fa 13
+0004 60 03c0 14
+0005 60 0050 15
+0006 22 fac0 20
+0007 23 0000 21
+0008 17 0000 22
+0009 09 000c 23
+000a 1a 0000 24
+000b 08 0008 25
+000c 01 0000 30
+ram 33
+# byte offset, then the data RAM bytes .ram defined.
+0000  48 45 4c 4c 4f 20 46 52 4f 4d 20 52 41 4d 2e 20 20 54 65 78 74 20 6d 6f 64 65 20 72 65 61 64 73
+0020  00
+cart 0
+# byte offset, then the cartridge bytes .data built.
+labels 3
+# name, kind, value in hex, in the order the assembler defined them.
+copy code 0008
+done code 000c
+msg ram 0000
+ramlines 1
+# .ram source line, then the RAM address that line defines.
+33 0000

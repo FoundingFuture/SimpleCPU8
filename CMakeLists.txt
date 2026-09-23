@@ -28,3 +28,8 @@ if(SC8_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
 endif()
+
+# The example ROMs need simplecpu-asm, and their tests simplecpu-run.
+if(SC8_BUILD_TOOLS)
+  add_subdirectory(examples)
+endif()
