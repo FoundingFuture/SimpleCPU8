@@ -1,0 +1,47 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Release, Ninja",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug, Ninja",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-debug",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "headless",
+      "displayName": "Tools and tests only, no display",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-headless",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "SC8_BUILD_IDE": "OFF" }
+    },
+    {
+      "name": "xcode",
+      "displayName": "Xcode project",
+      "generator": "Xcode",
+      "binaryDir": "${sourceDir}/build-xcode"
+    },
+    {
+      "name": "vs2022",
+      "displayName": "Visual Studio 2022",
+      "generator": "Visual Studio 17 2022",
+      "binaryDir": "${sourceDir}/build-vs"
+    }
+  ],
+  "buildPresets": [
+    { "name": "default", "configurePreset": "default" },
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "headless", "configurePreset": "headless" }
+  ],
+  "testPresets": [
+    { "name": "default", "configurePreset": "default", "output": { "outputOnFailure": true } },
+    { "name": "headless", "configurePreset": "headless", "output": { "outputOnFailure": true } }
+  ]
+}

@@ -1,0 +1,6 @@
+build/
+build-*/
+*.rom
+imgui.ini
+.DS_Store
+_to_delete*
