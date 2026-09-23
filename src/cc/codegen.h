@@ -68,6 +68,9 @@ std::vector<int> templateArgWidths(const std::vector<uint8_t>& tmpl);
 Compiled compileUnit(const std::string& src, const std::string& file = "main.c");
 
 // The driver merges every file into one tree and hands it here.
-Compiled compileUnitTree(const Unit& unit, bool softMul = false, const Profile* profile = nullptr);
+// zpReserve leaves that many bytes at the start of the zero page to the
+// program, as a system page it reaches through fixed addresses.
+Compiled compileUnitTree(const Unit& unit, bool softMul = false, const Profile* profile = nullptr,
+                         int zpReserve = 0);
 
 }  // namespace sc8::cc

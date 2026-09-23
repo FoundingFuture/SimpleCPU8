@@ -411,7 +411,8 @@ Program compileProgram(const std::vector<SourceFile>& files, const CcOptions& op
   merged.builds = m.builds;
   merged.included = m.included;
 
-  const Compiled out = compileUnitTree(merged, plan.softMul || opts.defines.count("SOFT_MUL") > 0, opts.profile);
+  const Compiled out = compileUnitTree(merged, plan.softMul || opts.defines.count("SOFT_MUL") > 0, opts.profile,
+                                       opts.zpReserve);
   Program p;
   static_cast<Compiled&>(p) = out;
   for (const SourceFile& f : chosen) p.files.push_back(f.name);

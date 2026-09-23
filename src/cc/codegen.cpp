@@ -156,8 +156,8 @@ int intBytes(const std::string& length) {
 
 class Gen {
  public:
-  Gen(const Unit& unit, bool softMul, const Profile* profile)
-      : unit_(unit), softMul_(softMul), profile_(profile) {
+  Gen(const Unit& unit, bool softMul, const Profile* profile, int zpReserve)
+      : unit_(unit), softMul_(softMul), profile_(profile), zpReserve_(zpReserve) {
     for (const RomEntry& e : layoutRom(unit.vars)) romPlan_[e.name] = e;
   }
 
@@ -174,7 +174,7 @@ class Gen {
   Compiled compile() {
     plan();  // once: it checks for a redefinition, which is not idempotent
     body();  // pass one, thrown away, run only to count the temps
-    globalBase_ = RESERVED_BYTES + 2 * maxSlot_;
+    globalBase_ = zpReserve_ + RESERVED_BYTES + 2 * maxSlot_;
     reset();
     return assemble(body());
   }
@@ -183,6 +183,8 @@ class Gen {
   const Unit& unit_;
   bool softMul_;
   const Profile* profile_;
+  // Bytes at the start of the zero page the program keeps for itself.
+  int zpReserve_;
 
   std::vector<std::string> out_;
   std::map<std::string, Sym> globals_;
@@ -275,7 +277,7 @@ class Gen {
     // The order globals are laid down in IS the zero page allocation: .ram
     // starts at address zero, so whatever is emitted first is in it. The
     // compiler's own reservations come before any of this.
-    const int reserved = RESERVED_BYTES + 2 * maxSlot_ + (softMul_ ? SOFT_ZP_BYTES : 0);
+    const int reserved = zpReserve_ + RESERVED_BYTES + 2 * maxSlot_ + (softMul_ ? SOFT_ZP_BYTES : 0);
     for (const Placed& p : allocate(unit_, reserved, profile_)) {
       placedWhy_[p.decl.name] = p.why;
       declareGlobal(p.decl);
@@ -331,6 +333,9 @@ class Gen {
       zeroPage_.push_back({label, ramAddr_, bytes, why});
       ramAddr_ += bytes;
     };
+    // The system page comes first, so its addresses are the ones the
+    // program was written against. The compiler never touches it.
+    if (zpReserve_ > 0) reserve("__sys", zpReserve_, "the system page, the program's own");
     reserve(ZP_SP, 2, "the software stack pointer");
     reserve(ZP_RET, 2, "the return value");
     reserve(ZP_CMP, 1, "a word compare's scratch byte");
@@ -2069,11 +2074,11 @@ std::vector<int> templateArgWidths(const std::vector<uint8_t>& tmpl) {
 
 Compiled compileUnit(const std::string& src, const std::string& file) {
   const Unit unit = parse(src, file);
-  return Gen(unit, false, nullptr).compile();
+  return Gen(unit, false, nullptr, 0).compile();
 }
 
-Compiled compileUnitTree(const Unit& unit, bool softMul, const Profile* profile) {
-  return Gen(unit, softMul, profile).compile();
+Compiled compileUnitTree(const Unit& unit, bool softMul, const Profile* profile, int zpReserve) {
+  return Gen(unit, softMul, profile, zpReserve).compile();
 }
 
 }  // namespace sc8::cc

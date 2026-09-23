@@ -261,3 +261,18 @@ TEST_SUITE("the map explains itself") {
     for (size_t i = 1; i < map.size(); i++) CHECK(map[i].addr >= map[i - 1].addr);
   }
 }
+
+TEST_SUITE("a system page ahead of the compiler") {
+  TEST_CASE("zpReserve leaves the first bytes to the program and shifts everything up") {
+    CcOptions opts;
+    opts.zpReserve = 32;
+    const cc::Program p = cc::compileProgram({{"main.c", "int a; int main(void){ a = 1; return 0; }"}}, opts);
+    REQUIRE(!p.zeroPage.empty());
+    CHECK(p.zeroPage[0].name == "__sys");
+    CHECK(p.zeroPage[0].addr == 0);
+    CHECK(p.zeroPage[0].size == 32);
+    const cc::ZpEntry* sp = entry(p.zeroPage, "__sp");
+    REQUIRE(sp);
+    CHECK(sp->addr == 32);
+  }
+}

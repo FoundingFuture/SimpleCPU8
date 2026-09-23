@@ -36,6 +36,9 @@ struct CcOptions {
   // Real accesses per variable, read off the machine after a run. The zero
   // page then goes by what the program DID rather than by how it reads.
   const Profile* profile = nullptr;
+  // Bytes at the start of the zero page left to the program as a system
+  // page of fixed addresses. BASIC keeps its vectors and pointers there.
+  int zpReserve = 0;
 };
 
 struct Program : Compiled {

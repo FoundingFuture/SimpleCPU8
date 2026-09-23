@@ -6,6 +6,7 @@
 //   -o file          where the assembly goes (default out.asm)
 //   -D NAME[=VALUE]  a preprocessor definition, as on any cc command line
 //   -msoft-mul       multiply, divide and shift on the CPU, not the ACP
+//   -zp-reserve N    leave the first N bytes of the zero page to the program
 //   --rom-header f   also write ROM.h, the cartridge map, to f
 
 #include <cstdio>
@@ -33,6 +34,10 @@ int main(int argc, char** argv) {
       romHeaderPath = argv[++i];
       continue;
     }
+    if (a == "-zp-reserve" && i + 1 < argc) {
+      opts.zpReserve = std::stoi(argv[++i]);
+      continue;
+    }
     if (a == "-msoft-mul") {
       opts.defines["SOFT_MUL"] = "1";
       continue;
@@ -52,7 +57,7 @@ int main(int argc, char** argv) {
     inputs.push_back({a, std::string(std::istreambuf_iterator<char>(in), {})});
   }
   if (inputs.empty()) {
-    std::fprintf(stderr, "usage: simplecpu-cc <file.c>... [-o out.asm] [-D NAME[=VALUE]] [-msoft-mul] [--rom-header ROM.h]\n");
+    std::fprintf(stderr, "usage: simplecpu-cc <file.c>... [-o out.asm] [-D NAME[=VALUE]] [-msoft-mul] [-zp-reserve N] [--rom-header ROM.h]\n");
     return 2;
   }
   CcResult r = compile(inputs, opts);
