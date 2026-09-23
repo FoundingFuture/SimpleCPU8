@@ -62,9 +62,15 @@ function resolveSource(name, depth = 0) {
   throw new Error(`demo source ${name} is neither in main.ts nor exported by a module`);
 }
 
+// Demos this repository maintains on its own. pacman.asm gained the score
+// strip here, above a maze moved down eight pixels, and the browser copy
+// has neither. Extracting it again would throw that work away.
+const local = new Set(["pacman"]);
+
 let count = 0;
 for (const entry of block[1].matchAll(/^\s*(\w+):\s*(\w+),/gm)) {
   const [, key, name] = entry;
+  if (local.has(key)) continue;
   const dir = join(here, key);
   mkdirSync(dir, { recursive: true });
   let text = resolveSource(name);

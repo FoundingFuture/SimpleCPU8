@@ -42,6 +42,15 @@
         LD [D1] <- A
         OUT GPU_CMD, CMD_FETCH_PALETTE
 
+; --- the score strip, in the eight screen rows above the maze. The overlay
+; rides over graphics and sprites, so it costs no video memory and no sprite.
+; The maze's fades never touch it. $FC is the default palette's yellow, which
+; is outside the entries 1 to 3 the maze rewrites. The style is set once. hud
+; prints the strip now, and again whenever a value on it changes.
+        OUT GPU_TEXT_COLOR, $FC
+        OUT GPU_CMD, CMD_TEXT_STYLE
+        JSR hud
+
 ; --- the per-level difficulty table, out of the cartridge and into RAM.
 ; DESIGN: the CPU cannot read the cartridge, so the GPU moves the bytes, the
 ; same one-cycle CMD_COPY loadmaze uses for a maze. It runs once, before the
@@ -953,16 +962,20 @@ cellrect: LD A <- [px]
 ; with rx0 = rx1 or ry0 = ry1 is a one-pixel-wide line spanning the other
 ; axis, which is exactly what the wall outlines need: see CMD_RECT in
 ; gpu.ts, which fills min..max on each axis independently.
+; The rows are maze pixels and the GPU wants screen pixels, so mzytop is
+; added on the way out. ry1 is at most 247, so the sum stays in a byte.
 rectxy: OUT GPU_X_HI, 0
         OUT GPU_Y_HI, 0
         LD A <- [rx0]
         OUTA GPU_X
         LD A <- [ry0]
+        ADD A <- [mzytop]
         OUTA GPU_Y
         OUT GPU_CMD, CMD_MOVE_TO
         LD A <- [rx1]
         OUTA GPU_X
         LD A <- [ry1]
+        ADD A <- [mzytop]
         OUTA GPU_Y
         OUT GPU_CMD, CMD_RECT
         RET
@@ -1369,7 +1382,8 @@ wpcbr2: LD A <- [ndn]
 wpdone: POP D1
         RET
 
-; a 2 by 2 dot in the middle of the cell at (px, py)
+; a 2 by 2 dot in the middle of the cell at (px, py). py is a maze pixel,
+; so mzytop goes on the way out, as in rectxy.
 dotrect: OUT GPU_X_HI, 0
         OUT GPU_Y_HI, 0
         LD A <- [px]
@@ -1377,6 +1391,7 @@ dotrect: OUT GPU_X_HI, 0
         OUTA GPU_X
         LD A <- [py]
         ADD A <- 3
+        ADD A <- [mzytop]
         OUTA GPU_Y
         OUT GPU_CMD, CMD_MOVE_TO
         LD A <- [px]
@@ -1384,11 +1399,12 @@ dotrect: OUT GPU_X_HI, 0
         OUTA GPU_X
         LD A <- [py]
         ADD A <- 4
+        ADD A <- [mzytop]
         OUTA GPU_Y
         OUT GPU_CMD, CMD_RECT
         RET
 
-; a 4 by 4 pill at (px, py)
+; a 4 by 4 pill at (px, py), offset like the dot
 pillrect: OUT GPU_X_HI, 0
         OUT GPU_Y_HI, 0
         LD A <- [px]
@@ -1396,6 +1412,7 @@ pillrect: OUT GPU_X_HI, 0
         OUTA GPU_X
         LD A <- [py]
         ADD A <- 2
+        ADD A <- [mzytop]
         OUTA GPU_Y
         OUT GPU_CMD, CMD_MOVE_TO
         LD A <- [px]
@@ -1403,6 +1420,7 @@ pillrect: OUT GPU_X_HI, 0
         OUTA GPU_X
         LD A <- [py]
         ADD A <- 5
+        ADD A <- [mzytop]
         OUTA GPU_Y
         OUT GPU_CMD, CMD_RECT
         RET
@@ -3598,7 +3616,11 @@ adxy:   LD A <- [aspr]
         LD A <- [ax]
         JSR adcent
         OUTA GPU_SPRITE_X
+; ay is a maze pixel. The strip's offset goes on before the centring. A
+; sprite on tile row 0 then starts two pixels into the strip rather than at
+; its floor, and only x can reach the floor in adcent.
         LD A <- [ay]
+        ADD A <- [mzytop]
         JSR adcent
         OUTA GPU_SPRITE_Y
         OUT GPU_CMD, CMD_SPRITE_MOVE
@@ -3693,9 +3715,9 @@ adsdone: RET
 ; the far side of the screen for every frame spent there, which everybody
 ; can. The GPU does not save us either: CMD_SPRITE_MOVE takes the data byte as
 ; an unsigned pixel column, so 254 is a real place and not an error.
-; The same floor covers ay. No shipped maze puts a mouth on row 0 or 1, but
-; nothing in the game promises that, and one routine for both axes costs
-; nothing.
+; ay arrives with mzytop already added, so it never reaches the floor. Tile
+; row 0 sits at screen row 8 and centring takes it to 6. One routine for
+; both axes costs nothing, and the floor stays for an x that needs it.
 ; The considered alternative was a true negative: GPU_X_HI $FF with GPU_X $FE
 ; reads as -2 (the GPU sign-extends the 16 bit pair), which would keep the
 ; sprite exactly centred and let it clip off the edge. Rejected because it
@@ -3822,16 +3844,42 @@ droplo: LD A <- [D1+1]
         JZ nextlvl
         RET
 
-; add t3 tens of points to the 16-bit score.
+; add t3 tens of points to the 16-bit score, and show it.
 addscore: LD D1 <- score
         LD A <- [D1+1]
         ADD A <- [t3]
         LD [D1+1] <- A
         JC ashi
-        RET
+        JMP hud              ; a tail call: hud's RET answers addscore's caller
 ashi:   LD A <- [D1]
         ADD A <- 1
         LD [D1] <- A
+        JMP hud
+
+; --- print the score strip: the score, the lives and the level, in the top
+; text row, which is the eight screen rows the maze leaves free.
+; DESIGN: called when a value changes and never from the frame loop. The
+; three writers are addscore, dieover and nextlvl, so a frame that changes
+; nothing costs no printf. A dot is the frequent case, one print every few
+; frames, and a print is a dozen OUTs.
+; DESIGN: the arguments are the game's own bytes. score, lives and lvlno are
+; declared together, in the template's order, and printf reads them where
+; they are. The strip therefore cannot disagree with the game.
+; DESIGN: the cursor is set on every print. Drawing advances it, and a
+; second print from where the first ended would walk down the screen.
+; DESIGN: the score is held in tens, so the template prints it with a
+; trailing 0 and pads to four digits, which is SCORE 00000 at the start.
+; Above 9999 tens the field widens by one column. The gaps are sized so the
+; longest strip, a five digit score on a three digit level, fits 42 columns.
+hud:    OUT GPU_TEXT_COL, 0
+        OUT GPU_TEXT_ROW, 0
+        OUT GPU_CMD, CMD_TEXT_AT
+        OUT GPU_CART_BANK, get_bankbyte(hudfmt)
+        OUT GPU_CART_HI, get_highbyte(hudfmt)
+        OUT GPU_CART_LO, get_lowbyte(hudfmt)
+        OUT GPU_TEXT_ARG_HI, score >> 8
+        OUT GPU_TEXT_ARG_LO, score & 255
+        OUT GPU_CMD, CMD_PRINTF
         RET
 
 ; --- a cleared board fades out, loads the next maze, and fades back in.
@@ -3849,7 +3897,10 @@ nextlvl: JSR sndoff          ; the board is over: silence across the fade
         JC nlkeep
         LD A <- 1            ; four mazes, then round again
         LD [level] <- A
-nlkeep:
+nlkeep: LD A <- [lvlno]      ; the level number does not round: see lvlno
+        INC A
+        LD [lvlno] <- A
+        JSR hud
 ; drawmaze resets every actor's record: Pac-Man's position from the new maze's
 ; own P via dmpac, his direction and accumulator via the per-level block, and
 ; all four ghosts via placeghosts. This whole path runs inside some actor's
@@ -4200,6 +4251,8 @@ diestep: LD A <- [dietk]
 dieover: LD A <- [lives]
         SUB A <- 1
         LD [lives] <- A
+        JSR hud              ; the strip shows the life go, at zero too
+        LD A <- [lives]
         JZ dieall
         JSR resetact
         LD A <- 1
@@ -4612,9 +4665,28 @@ nul:    db 0                   ; the four diagonals
 nur:    db 0
 ndl:    db 0
 ndr:    db 0
+; --- where the maze sits on the screen: the pixel row of tile row 0.
+; DESIGN: the maze is 248 pixels tall on a 256 pixel screen, and the score
+; strip takes the eight rows above it. Every record, table and tunnel still
+; works in maze pixels, where tile row 0 is pixel 0. So p2t and the tunnel
+; wrap never see the strip. The offset is added at the four places a maze
+; pixel reaches the GPU: rectxy, dotrect, pillrect and adxy. A byte in RAM
+; rather than a literal, because the assembler has no named constant. Four
+; copies of an 8 would drift apart.
+mzytop: db 8
+; the maze index, 1 to 4: which of the four mazes is on screen
 level:  db 1
 dots:   dw 0
+; --- the four bytes the score strip prints, in template order, so hud hands
+; printf the game's own state and keeps no copy of it. score is big-endian,
+; the way %u reads it.
 score:  dw 0
+; DESIGN: lives ships at 3, the arcade's own count, and is counted DOWN. Zero
+; is the game over, so nothing anywhere compares against the 3.
+lives:  db 3
+; the difficulty level, 1 upward. level above is the maze and wraps at 4.
+; This one never wraps, because a player on the fifth board is on level 5.
+lvlno:  db 1
 ; --- the actor window: the one actor the movement code is working on.
 ; DESIGN: a window, not a pointer. canmove and advance each need D1 for a
 ; table lookup of their own, so a movement routine cannot also hold a pointer
@@ -4843,9 +4915,7 @@ pactk:  db 0                   ; frames until the next phase step
 ; gstate is what the frame loop dispatches on: 0 ready, 1 playing, 2 dying,
 ; 3 game over. 0 stands for the whole of the startup draw and fade, and the
 ; line that ends it is the one just before the loop is entered.
-; DESIGN: lives ships at 3, the arcade's own count, and is counted DOWN. Zero
-; is the game over, so nothing anywhere compares against the 3.
-lives:  db 3
+; lives sits beside score, in the block the score strip prints.
 gstate: db 0
 dietk:  db 0                   ; frames left in the dying pause
 ; --- the level table's row, as a pointer that walks. lvlrem is the advances
@@ -9793,3 +9863,8 @@ lvlrom: db 205, 192, 128, 45, 20, 52, 102
         db 255, 243, 154, 0, 120, 38, 128
         db 255, 243, 154, 0, 120, 38, 128
         db 230, 243, 154, 0, 120, 38, 128
+
+; --- the score strip's template. The gaps are sized for the longest strip,
+; a five digit score on a three digit level, which is 41 of the 42 columns.
+; See hud.
+hudfmt: db "SCORE %04u0        LIVES %hhu     LEVEL %hhu", 0
