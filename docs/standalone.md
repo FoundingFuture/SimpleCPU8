@@ -154,7 +154,7 @@ Everything under src/. One library per layer, one executable per program.
 | src/devices | sc8_devices | core |
 | src/asm | sc8_asm | core, devices |
 | src/cc | sc8_cc | asm |
-| src/basic | C sources for the interpreter | cc at build time |
+| src/basic | sc8_basic, the interpreter's ROM from its C sources | cc and asm at build time |
 | src/tools | simplecpu-asm, simplecpu-run, simplecpu-cc | asm, cc |
 | src/vm | sc8_vm, simplecpu | asm, raylib, miniaudio |
 | src/ide | simplecpu-ide | vm, Dear ImGui, rlImGui |
@@ -194,10 +194,15 @@ The 25 demos sit in examples/ as assembly. The build burns each into a
 ROM under build/roms and CTest runs every ROM headless. The assembler's
 output for each demo matches the browser project's golden bytes.
 
+The BASIC interpreter is ported as a ROM built from the C sources in
+src/basic. The function sc8::basicRom() hands the bytes to the virtual
+computer. The tests in tests/basic boot the ROM into a headless machine.
+The GPU, the ACP, the APU and the input device sit on its bus.
+
 Pending, in the order they unblock each other:
 
 - the GPU: screen, text, sprites, world
 - the input device, the APU and the ACP
 - the image and audio decoders for `.image` and `.sample`
-- the BASIC interpreter and its ROM
+- the --basic switch of simplecpu, booting sc8::basicRom()
 - the storage device

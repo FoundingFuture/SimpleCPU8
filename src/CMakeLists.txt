@@ -18,6 +18,9 @@ add_subdirectory(cc)
 
 if(SC8_BUILD_TOOLS)
   add_subdirectory(tools)
+  # The BASIC ROM is compiled by simplecpu-cc and burnt by simplecpu-asm
+  # from this same build, so it needs the tools.
+  add_subdirectory(basic)
 endif()
 
 if(SC8_BUILD_IDE)
