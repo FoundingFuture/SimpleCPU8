@@ -1,7 +1,7 @@
 # Third party code, fetched at configure time with FetchContent and pinned to
 # a tag or a commit. Nothing here needs a package manager on the machine.
 #
-# raylib brings its own CMake project. The other four ship no usable CMake
+# raylib brings its own CMake project. The others ship no usable CMake
 # target, so this file defines one for each from the fetched sources.
 
 include(FetchContent)
@@ -24,6 +24,29 @@ if(SC8_BUILD_TESTS)
   target_include_directories(doctest SYSTEM INTERFACE "${doctest_SOURCE_DIR}/doctest")
 endif()
 
+# stb_image: one header, decodes the image formats .image accepts. The
+# implementation is compiled once in src/assets/stb_impl.cpp. Pinned to a
+# commit because the repository carries no release tags.
+FetchContent_Declare(stb
+  GIT_REPOSITORY https://github.com/nothings/stb.git
+  GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20
+  SOURCE_SUBDIR cmake_disabled)
+FetchContent_MakeAvailable(stb)
+add_library(stb INTERFACE)
+target_include_directories(stb SYSTEM INTERFACE "${stb_SOURCE_DIR}")
+
+# miniaudio: one header. The assembler's .sample decodes through it, so the
+# headless build needs it too. The implementation is compiled once in
+# src/assets/miniaudio_impl.cpp, with device IO for src/vm/audio.cpp.
+FetchContent_Declare(miniaudio
+  GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+  GIT_TAG 0.11.25
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR cmake_disabled)
+FetchContent_MakeAvailable(miniaudio)
+add_library(miniaudio INTERFACE)
+target_include_directories(miniaudio SYSTEM INTERFACE "${miniaudio_SOURCE_DIR}")
+
 if(SC8_BUILD_IDE)
   # raylib: window, input, 2D drawing. The examples and games are skipped.
   set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -37,17 +60,6 @@ if(SC8_BUILD_IDE)
     GIT_TAG 5.5
     GIT_SHALLOW TRUE)
   FetchContent_MakeAvailable(raylib)
-
-  # miniaudio: one header. The implementation is compiled once in
-  # src/ide/audio.cpp.
-  FetchContent_Declare(miniaudio
-    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
-    GIT_TAG 0.11.25
-    GIT_SHALLOW TRUE
-    SOURCE_SUBDIR cmake_disabled)
-  FetchContent_MakeAvailable(miniaudio)
-  add_library(miniaudio INTERFACE)
-  target_include_directories(miniaudio SYSTEM INTERFACE "${miniaudio_SOURCE_DIR}")
 
   # Dear ImGui, docking branch, so the IDE panes can be rearranged.
   FetchContent_Declare(imgui

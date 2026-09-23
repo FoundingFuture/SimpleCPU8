@@ -11,4 +11,5 @@ endfunction()
 
 add_subdirectory(core)
 add_subdirectory(asm)
+add_subdirectory(assets)
 add_subdirectory(devices)

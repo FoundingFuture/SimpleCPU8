@@ -5,7 +5,7 @@
 #   simplecpu-cc    compile C to assembly
 
 add_executable(simplecpu-asm asm_main.cpp)
-target_link_libraries(simplecpu-asm PRIVATE sc8::asm sc8_warnings)
+target_link_libraries(simplecpu-asm PRIVATE sc8::assets sc8_warnings)
 
 add_executable(simplecpu-run run_main.cpp)
 target_link_libraries(simplecpu-run PRIVATE sc8::asm sc8_warnings)

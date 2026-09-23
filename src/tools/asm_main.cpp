@@ -7,8 +7,8 @@
 //   simplecpu-asm main.asm --listing        prints labels and sizes
 //
 // .file, .image and .sample resolve relative to the source file's directory.
-// Image and sample decoding are pending: today .file works and the other
-// two report that they need a decoder.
+// An image is decoded and fitted to the screen, audio becomes 8 bit mono at
+// 8 kHz. A conversion that lost something says so on stderr.
 
 #include <cstdio>
 #include <filesystem>
@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "asm/asm.h"
+#include "assets/assets.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
 
@@ -97,15 +98,22 @@ int main(int argc, char** argv) {
 
   Assets assets;
   assets.loadFile = [&](std::string_view name) { return readBytes(dir / fs::path(name)); };
-  assets.loadImage = [&](std::string_view name) -> std::optional<ImageAsset> {
-    std::fprintf(stderr, "%s: .image('%.*s') needs the image decoder, which is not ported yet\n",
-                 source.string().c_str(), static_cast<int>(name.size()), name.data());
-    return std::nullopt;
+  auto report = [&](std::string_view name, const std::string& note) {
+    if (note.empty()) return;
+    std::fprintf(stderr, "%s: %.*s: %s\n", source.string().c_str(), static_cast<int>(name.size()), name.data(),
+                 note.c_str());
   };
-  assets.loadSample = [&](std::string_view name) -> std::optional<std::vector<uint8_t>> {
-    std::fprintf(stderr, "%s: .sample('%.*s') needs the audio decoder, which is not ported yet\n",
-                 source.string().c_str(), static_cast<int>(name.size()), name.data());
-    return std::nullopt;
+  assets.loadImage = [&](std::string_view name) {
+    std::string note;
+    auto img = loadImageFile(dir / fs::path(name), &note);
+    report(name, note);
+    return img;
+  };
+  assets.loadSample = [&](std::string_view name) {
+    std::string note;
+    auto pcm = loadSampleFile(dir / fs::path(name), &note);
+    report(name, note);
+    return pcm;
   };
 
   Assembled a = assemble(text, &assets);
