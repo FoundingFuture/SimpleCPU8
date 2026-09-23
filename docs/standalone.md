@@ -190,6 +190,10 @@ Written new:
 The C compiler is ported. Its tests run doubles and rom_copy through a
 stub GPU in the harness that answers CMD_RAM_MOVE and CMD_COPY only.
 
+The 25 demos sit in examples/ as assembly. The build burns each into a
+ROM under build/roms and CTest runs every ROM headless. The assembler's
+output for each demo matches the browser project's golden bytes.
+
 Pending, in the order they unblock each other:
 
 - the GPU: screen, text, sprites, world
@@ -197,4 +201,3 @@ Pending, in the order they unblock each other:
 - the image and audio decoders for `.image` and `.sample`
 - the BASIC interpreter and its ROM
 - the storage device
-- the demos

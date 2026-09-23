@@ -1,0 +1,104 @@
+# Golden assembler output for the world program.
+# Recorded from the demo source on purpose, and committed. Do not
+# regenerate to make a failing test pass: a difference here is the
+# assembled program changing, which is either intended or a bug.
+source-lines 166
+errors 0
+program 49
+# slot, opcode, operand, source line. Byte offset is slot * 3.
+0000 60 0200 23
+0001 60 0001 24
+0002 60 0200 35
+0003 60 0318 36
+0004 60 0420 37
+0005 60 0538 38
+0006 60 0063 39
+0007 60 0201 46
+0008 60 0360 47
+0009 60 04ff 48
+000a 60 05a0 49
+000b 60 0063 50
+000c 60 0202 52
+000d 60 03ff 53
+000e 60 04a0 54
+000f 60 0540 55
+0010 60 0063 56
+0011 60 0200 64
+0012 60 0300 65
+0013 60 0400 66
+0014 60 0500 67
+0015 60 0061 68
+0016 60 0200 72
+0017 60 0300 73
+0018 60 0400 74
+0019 60 0502 75
+001a 60 0060 76
+001b 22 002a 82
+001c 11 002b 83
+001d 48 00a0 84
+001e 12 002b 85
+001f 11 002a 86
+0020 4d 0000 87
+0021 12 002a 88
+0022 11 003b 92
+0023 49 0060 93
+0024 12 003b 94
+0025 11 003a 95
+0026 4e 0000 96
+0027 12 003a 97
+0028 0e 002a 99
+0029 08 001b 100
+002a 62 1f00 105
+002b 12 0040 106
+002c 41 0041 107
+002d 09 002a 108
+002e 11 0040 109
+002f 12 0041 110
+0030 0f 0000 111
+ram 66
+# byte offset, then the data RAM bytes .ram defined.
+0000  00 00 00 c8 03 84 00 00 00 00 00 00 00 01 07 d0 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+0020  01 00 01 40 00 00 00 00 00 00 00 00 00 00 00 00 01 00 02 28 01 90 00 00 fd c0 00 00 00 00 00 00
+0040  00 00
+cart 66
+# byte offset, then the cartridge bytes .data built.
+0000  00 05 00 08 fe 70 00 00 fe 70 01 90 00 00 fe 70 01 90 00 00 01 90 fe 70 00 00 01 90 00 00 01 f4
+0020  00 00 00 00 00 01 00 01 00 02 00 02 00 03 00 03 00 00 00 00 00 04 00 01 00 04 00 02 00 04 00 03
+0040  00 04
+labels 11
+# name, kind, value in hex, in the order the assembler defined them.
+loop code 001b
+waitframe code 002a
+scene ram 0000
+cam ram 0000
+obj0 ram 0020
+spin ram 002a
+obj1 ram 0030
+spin2 ram 003a
+fnow ram 0040
+flast ram 0041
+pyramid data 0000
+ramlines 22
+# .ram source line, then the RAM address that line defines.
+116 0000
+121 0000
+122 0006
+123 000c
+124 0010
+125 0012
+128 0020
+129 0021
+130 0022
+131 0023
+132 0024
+133 002a
+134 002c
+137 0030
+138 0031
+139 0032
+140 0033
+141 0034
+142 003a
+143 003c
+145 0040
+146 0041

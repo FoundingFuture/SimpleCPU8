@@ -1,0 +1,45 @@
+# Golden assembler output for the list program.
+# Recorded from the demo source on purpose, and committed. Do not
+# regenerate to make a failing test pass: a difference here is the
+# assembled program changing, which is either intended or a bug.
+source-lines 24
+errors 0
+program 13
+# slot, opcode, operand, source line. Byte offset is slot * 3.
+0000 24 0001 3
+0001 09 000c 4
+0002 14 0000 5
+0003 40 0000 6
+0004 12 0000 7
+0005 30 0001 8
+0006 09 000c 9
+0007 15 0000 10
+0008 40 0000 11
+0009 12 0000 12
+000a 31 0001 13
+000b 08 0001 14
+000c 01 0000 15
+ram 15
+# byte offset, then the data RAM bytes .ram defined.
+0000  00 00 03 05 00 06 03 00 09 0b 00 0c 17 00 00
+cart 0
+# byte offset, then the cartridge bytes .data built.
+labels 9
+# name, kind, value in hex, in the order the assembler defined them.
+loopA code 0001
+loopB code 0006
+done code 000c
+sum ram 0000
+head ram 0001
+node1 ram 0003
+node2 ram 0006
+node3 ram 0009
+node4 ram 000c
+ramlines 6
+# .ram source line, then the RAM address that line defines.
+18 0000
+19 0001
+20 0003
+21 0006
+22 0009
+23 000c

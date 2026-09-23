@@ -32,10 +32,10 @@ projects.
 ## Run
 
 ```bash
-build/src/tools/simplecpu-asm examples/hello/list.asm --title "List sum"
-build/src/vm/simplecpu --rom examples/hello/list.rom --fps 60
-build/src/ide/simplecpu-ide examples/hello/list.asm
-build/src/tools/simplecpu-run examples/hello/list.rom --ram 0 4
+build/src/tools/simplecpu-asm examples/hello/hello.asm --title "List sum"
+build/src/vm/simplecpu --rom examples/hello/hello.rom --fps 60
+build/src/ide/simplecpu-ide examples/hello/hello.asm
+build/src/tools/simplecpu-run examples/hello/hello.rom --ram 0 4
 ```
 
 Keys in simplecpu: F1 toggles the CRT look. F2 and F3 turn it down and up.

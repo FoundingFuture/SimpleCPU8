@@ -1,0 +1,27 @@
+# Golden assembler output for the random program.
+# Recorded from the demo source on purpose, and committed. Do not
+# regenerate to make a failing test pass: a difference here is the
+# assembled program changing, which is either intended or a bug.
+source-lines 17
+errors 0
+program 10
+# slot, opcode, operand, source line. Byte offset is slot * 3.
+0000 60 0200 6
+0001 60 0400 7
+0002 62 1e00 9
+0003 61 0300 10
+0004 62 1e00 11
+0005 61 0500 12
+0006 62 1e00 13
+0007 61 0600 14
+0008 60 0008 15
+0009 08 0002 16
+ram 0
+# byte offset, then the data RAM bytes .ram defined.
+cart 0
+# byte offset, then the cartridge bytes .data built.
+labels 1
+# name, kind, value in hex, in the order the assembler defined them.
+loop code 0002
+ramlines 0
+# .ram source line, then the RAM address that line defines.

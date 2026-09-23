@@ -1,0 +1,82 @@
+# Example programs
+
+The demos of the browser version as plain assembly, one directory per
+program. Each directory holds `<name>.asm`, a README whose first line is
+the ROM title, and any asset the source names. Edit a source in any editor.
+The build assembles it again.
+
+## Building the ROMs
+
+The `roms` target runs simplecpu-asm on every example and writes
+`build/roms/<name>.rom`. It is part of the default build:
+
+```bash
+cmake --preset headless && cmake --build --preset headless
+build-headless/src/vm/simplecpu --rom build-headless/roms/pacman.rom
+```
+
+CTest runs every ROM through simplecpu-run for a bounded number of
+instructions. A demo that halts must reach halted. A demo that reads the
+keyboard or runs forever must not crash.
+
+## Where the sources come from
+
+`extract-demos.mjs` copies the demo strings out of the browser project's
+TypeScript, so the text here is what its picker loads. Run it again after
+a demo changes there:
+
+```bash
+/opt/node22/bin/node --experimental-strip-types examples/extract-demos.mjs ../SimpleCPU
+```
+
+No demo names an external file. The MIDI, mazes, sprites and samples were
+generated into db lines by the browser project's scripts.
+tests/asm/golden-bytes holds that project's assembled output per demo, and
+sc8_asm_tests checks the C++ assembler against it.
+
+## Memory and the stack
+
+- list: linked list sum. Halts.
+- hanoi: towers of Hanoi, one move per frame. Halts.
+- hello: the list demo with a banner in .data through .file. Halts.
+
+## Arithmetic
+
+- mul8: 8x8 multiply. Halts.
+- div8: 8/8 divide. Halts.
+- mul16: 16x16 multiply. Halts.
+- div16: 16/16 divide. Halts.
+- mandel: Mandelbrot on the coprocessor. Halts.
+
+## Graphics
+
+- gpu: gradient and palette. Halts.
+- tunnel: rings and palette rotation. Endless.
+- star: spinning star. Endless.
+- cube: 3D wireframe cube. Endless.
+- world: 3D world, spinning pyramid. Endless.
+- fly: 3D world, fly through with the arrows. Endless.
+- orbit: 3D world, ACP matrix orbit. Endless.
+- circle: sin table circle test. Halts.
+- random: random pixels from the GPU random port. Endless.
+
+## Text
+
+- text: printf over graphics. Halts.
+- textmode: text mode from mapped RAM. Halts.
+- matrix: matrix rain in text mode. Endless.
+
+## Sound
+
+- audio: a tune on the audio chip. Endless.
+
+## Input
+
+- input: keyboard playground. Endless.
+
+## Games
+
+- sprite: Space Invaders. Endless.
+- pacman: Pac-Man. Halts on game over.
+- groups: sprite groups and collision. Endless.
+- pong: pong with hit tests. Endless.

@@ -1,0 +1,92 @@
+# Golden assembler output for the input program.
+# Recorded from the demo source on purpose, and committed. Do not
+# regenerate to make a failing test pass: a difference here is the
+# assembled program changing, which is either intended or a bug.
+source-lines 71
+errors 0
+program 57
+# slot, opcode, operand, source line. Byte offset is slot * 3.
+0000 60 0200 5
+0001 60 0001 6
+0002 10 0080 7
+0003 12 0000 8
+0004 12 0001 9
+0005 62 2000 11
+0006 12 0002 12
+0007 4a 0001 14
+0008 09 000c 15
+0009 11 0001 16
+000a 49 0001 17
+000b 12 0001 18
+000c 11 0002 19
+000d 4a 0002 20
+000e 09 0012 21
+000f 11 0001 22
+0010 48 0001 23
+0011 12 0001 24
+0012 11 0002 25
+0013 4a 0004 26
+0014 09 0018 27
+0015 11 0000 28
+0016 49 0001 29
+0017 12 0000 30
+0018 11 0002 31
+0019 4a 0008 32
+001a 09 001e 33
+001b 11 0000 34
+001c 48 0001 35
+001d 12 0000 36
+001e 11 0002 37
+001f 4a 0020 38
+0020 09 0023 39
+0021 60 0200 40
+0022 60 0001 41
+0023 11 0002 42
+0024 4a 0040 43
+0025 09 0029 44
+0026 10 0080 45
+0027 12 0000 46
+0028 12 0001 47
+0029 11 0002 48
+002a 4a 0010 49
+002b 09 002d 50
+002c 08 0033 51
+002d 11 0000 52
+002e 61 0300 53
+002f 11 0001 54
+0030 61 0500 55
+0031 60 06fc 56
+0032 60 0008 57
+0033 62 1f00 59
+0034 12 0003 60
+0035 62 1f00 61
+0036 41 0003 62
+0037 09 0035 63
+0038 08 0005 64
+ram 4
+# byte offset, then the data RAM bytes .ram defined.
+0000  80 80 00 00
+cart 0
+# byte offset, then the cartridge bytes .data built.
+labels 14
+# name, kind, value in hex, in the order the assembler defined them.
+loop code 0005
+noup code 000c
+nodown code 0012
+noleft code 0018
+noright code 001e
+noclear code 0023
+nocenter code 0029
+draw code 002d
+wait code 0033
+poll code 0035
+px ram 0000
+py ram 0001
+inp ram 0002
+fr ram 0003
+ramlines 4
+# .ram source line, then the RAM address that line defines.
+67 0000
+68 0001
+69 0002
+70 0003

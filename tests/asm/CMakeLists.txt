@@ -1,4 +1,9 @@
 sc8_add_test(sc8_asm_tests
   expr_test.cpp
-  asm_test.cpp)
+  asm_test.cpp
+  golden_test.cpp)
 target_link_libraries(sc8_asm_tests PRIVATE sc8::asm)
+# The golden byte test reads the demo sources and the fixtures from the tree.
+target_compile_definitions(sc8_asm_tests PRIVATE
+  SC8_EXAMPLES_DIR="${PROJECT_SOURCE_DIR}/examples"
+  SC8_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden-bytes")

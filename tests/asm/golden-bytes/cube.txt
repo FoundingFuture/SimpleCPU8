@@ -1,0 +1,88 @@
+# Golden assembler output for the cube program.
+# Recorded from the demo source on purpose, and committed. Do not
+# regenerate to make a failing test pass: a difference here is the
+# assembled program changing, which is either intended or a bug.
+source-lines 78
+errors 0
+program 50
+# slot, opcode, operand, source line. Byte offset is slot * 3.
+0000 60 0380 6
+0001 60 0580 7
+0002 60 0003 8
+0003 62 1f00 9
+0004 41 0000 10
+0005 09 0003 11
+0006 62 1f00 12
+0007 12 0000 13
+0008 11 0002 14
+0009 48 0002 15
+000a 12 0002 16
+000b 61 0200 17
+000c 60 0041 18
+000d 11 0001 19
+000e 48 0001 20
+000f 12 0001 21
+0010 61 0200 22
+0011 60 0040 23
+0012 11 0003 24
+0013 48 0001 25
+0014 4a 001f 26
+0015 12 0003 27
+0016 48 0004 28
+0017 13 0000 29
+0018 61 0200 30
+0019 60 0043 31
+001a 60 0200 32
+001b 60 0001 33
+001c 60 02ff 34
+001d 60 0002 35
+001e 60 0380 36
+001f 60 0580 37
+0020 60 0003 38
+0021 60 0200 39
+0022 60 0300 40
+0023 60 0400 41
+0024 60 0045 42
+0025 60 0200 43
+0026 60 0300 44
+0027 60 041f 45
+0028 60 0045 46
+0029 60 0200 47
+002a 60 0300 48
+002b 60 0426 49
+002c 60 0045 50
+002d 60 0200 51
+002e 60 0300 52
+002f 60 042d 53
+0030 60 0045 54
+0031 08 0003 55
+ram 36
+# byte offset, then the data RAM bytes .ram defined.
+0000  00 00 00 00 8c 96 a0 aa b4 be c8 d2 dc e6 f0 fa ff fa f0 e6 dc d2 c8 be b4 aa a0 96 8c 82 78 6e
+0020  64 6e 78 82
+cart 52
+# byte offset, then the cartridge bytes .data built.
+0000  0a 40 40 40 c0 40 40 c0 c0 40 40 c0 40 40 40 40 40 40 c0 c0 40 c0 c0 c0 c0 40 c0 c0 40 40 c0 02
+0020  c0 40 40 c0 40 c0 02 c0 c0 40 c0 c0 c0 02 40 c0 40 40 c0 c0
+labels 10
+# name, kind, value in hex, in the order the assembler defined them.
+loop code 0003
+fr ram 0000
+ax ram 0001
+ay ram 0002
+si ram 0003
+tab ram 0004
+ring data 0000
+p15 data 001f
+p26 data 0026
+p37 data 002d
+ramlines 8
+# .ram source line, then the RAM address that line defines.
+58 0000
+59 0001
+60 0002
+61 0003
+62 0004
+63 000c
+64 0014
+65 001c
