@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <fstream>
 
 #include "core/mcparse.h"
 #include "vm/audio.h"
@@ -11,12 +12,53 @@ namespace sc8 {
 
 Computer::Computer()
     : microcode_(buildNaive()),
-      apu_(&input_),
+      storage_(&input_),
+      apu_(&storage_),
       acp_(&apu_),
       gpu_([this] { return machine_ ? machine_->cycles : 0; }, &acp_, [this] { return drawSeed(); }) {
   apu_.setMasterGain(MASTER_GAIN);
+  storage_.attach(&cart_.basic, [this] { slotsChanged(); });
   frame_.assign(static_cast<size_t>(SCREEN_W * SCREEN_H * 4), 0);
   newMachine();
+}
+
+// A SAVE or DELETE from inside the machine changed the cartridge. With a
+// file behind it, the file follows at once, so a crash a second later
+// loses nothing. The counter lets the IDE notice without a callback.
+void Computer::slotsChanged() {
+  slotChanges_++;
+  writeRom();
+}
+
+bool Computer::writeRom() {
+  if (romPath_.empty()) return false;
+  std::vector<uint8_t> bytes = encodeCartridge(cart_);
+  std::ofstream out(romPath_, std::ios::binary);
+  out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  return static_cast<bool>(out);
+}
+
+// Typing waits twenty frames, a third of a second at 60 fps, because BASIC
+// drains the key queue while it boots and would eat an earlier line.
+void Computer::typeText(std::string text) {
+  typeBuffer_ = std::move(text);
+  typePos_ = 0;
+  typeAfterFrame_ = frameCounter() + 20;
+}
+
+// BASIC reads a line from the key queue, so typing is a press and a release
+// per character, and the queue is kept half empty so nothing is dropped.
+void Computer::pumpTyping() {
+  if (frameCounter() < typeAfterFrame_) return;
+  while (typePos_ < typeBuffer_.size() && input_.queued() < static_cast<size_t>(input::KEY_QUEUE_MAX / 2)) {
+    char c = typeBuffer_[typePos_++];
+    if (c == '\r') continue;
+    if (c == '\n') c = 13;
+    else if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+    const auto code = static_cast<uint8_t>(static_cast<unsigned char>(c) & 0x7f);
+    input_.pushKey(code, false);
+    input_.pushKey(code, true);
+  }
 }
 
 Computer::~Computer() = default;
@@ -47,6 +89,7 @@ void Computer::newMachine() {
   machine_->setTrace(traceOn_);
   gpu_.attachRam(machine_->ram.data());
   acp_.attachRam(machine_->ram.data());
+  storage_.attachRam(machine_->ram.data());
   std::copy(cart_.ram.begin(), cart_.ram.end(), machine_->ram.begin());
   lastDisplayKey_.clear();
 }
@@ -58,6 +101,7 @@ void Computer::newMachine() {
 void Computer::powerOn() {
   gpu_.powerOn();
   apu_.powerOn();
+  storage_.powerOn();
   newMachine();
 }
 

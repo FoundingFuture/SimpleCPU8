@@ -36,6 +36,9 @@ Display::Display() : impl_(new Impl) {
   img.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
   impl_->texture = LoadTextureFromImage(img);
   SetTextureFilter(impl_->texture, TEXTURE_FILTER_POINT);
+  // The blur samples past the edge. Clamped, the edge repeats; wrapped, the
+  // top row would show at the bottom.
+  SetTextureWrap(impl_->texture, TEXTURE_WRAP_CLAMP);
 
   impl_->shader = LoadShaderFromMemory(nullptr, CRT_SHADER_FS);
   shaderOk_ = IsShaderValid(impl_->shader);

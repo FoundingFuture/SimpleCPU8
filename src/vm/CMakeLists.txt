@@ -30,3 +30,9 @@ target_include_directories(sc8_vm PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 
 add_executable(simplecpu main.cpp)
 target_link_libraries(simplecpu PRIVATE sc8::vm sc8_warnings)
+
+# The BASIC ROM is built by the tools, so --basic exists only when they do.
+if(TARGET sc8_basic)
+  target_link_libraries(simplecpu PRIVATE sc8::basic)
+  target_compile_definitions(simplecpu PRIVATE SC8_HAVE_BASIC=1)
+endif()

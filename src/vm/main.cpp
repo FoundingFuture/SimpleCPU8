@@ -5,6 +5,7 @@
 //   simplecpu --rom game.rom --max         run flat out, the host decides
 //   simplecpu --basic                      boot into the BASIC interpreter
 //   simplecpu --basic hello.bas            boot BASIC and load the program
+//   simplecpu --basic hello.bas --run      load it and run it
 //   simplecpu --rom game.rom --microcode naive
 //   simplecpu --rom game.rom --crt 0.6     CRT look at 60 percent
 //   simplecpu --rom game.rom --no-crt      the plain scaled picture
@@ -15,7 +16,9 @@
 // Keys while running: F1 toggles the CRT look, F2 and F3 turn it down and
 // up. F5 powers on again, F11 goes fullscreen and Escape quits.
 
+#include <cctype>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -26,6 +29,10 @@
 #include "vm/audio.h"
 #include "vm/computer.h"
 #include "vm/display.h"
+
+#if SC8_HAVE_BASIC
+#include "basic/basic_rom.h"
+#endif
 #include "vm/keys.h"
 
 using namespace sc8;
@@ -36,7 +43,7 @@ int usage() {
   std::fprintf(stderr,
                "usage: simplecpu --rom FILE.rom [--fps N | --max] [--microcode naive|optimal]\n"
                "                 [--crt S | --no-crt] [--scale N] [--title T]\n"
-               "       simplecpu --basic [FILE.bas]\n");
+               "       simplecpu --basic [FILE.bas [--run]]\n");
   return 2;
 }
 
@@ -52,6 +59,18 @@ std::optional<Cartridge> loadRom(const std::string& path) {
   return r.cartridge;
 }
 
+// A slot name from a file name: the stem, uppercase, letters and digits,
+// at most 16, which is what the storage device accepts.
+std::string slotNameFor(const std::string& path) {
+  std::string stem = std::filesystem::path(path).stem().string();
+  std::string out;
+  for (char c : stem) {
+    if (std::isalnum(static_cast<unsigned char>(c))) out += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (out.size() == 16) break;
+  }
+  return out.empty() ? "PROGRAM" : out;
+}
+
 std::string romTitle(const Cartridge& c, const std::string& fallback) {
   for (const auto& [k, v] : c.meta) {
     if (k == "title") return v;
@@ -63,7 +82,7 @@ std::string romTitle(const Cartridge& c, const std::string& fallback) {
 
 int main(int argc, char** argv) {
   std::string romPath, basicPath, microcode, title, screenshot;
-  bool basic = false, maxSpeed = false;
+  bool basic = false, maxSpeed = false, runBasic = false;
   int fps = 60, scale = 3;
   DisplaySettings display;
 
@@ -82,6 +101,7 @@ int main(int argc, char** argv) {
       if (i + 1 < argc && argv[i + 1][0] != '-') basicPath = argv[++i];
     } else if (a == "--fps") fps = std::stoi(next());
     else if (a == "--max") maxSpeed = true;
+    else if (a == "--run") runBasic = true;
     else if (a == "--microcode") microcode = next();
     else if (a == "--crt") display.setStrength(std::stof(next()));
     else if (a == "--no-crt") display.enabled = false;
@@ -91,15 +111,44 @@ int main(int argc, char** argv) {
     else return usage();
   }
   if (romPath.empty() && !basic) return usage();
-  if (basic) {
-    std::fprintf(stderr,
-                 "simplecpu: the BASIC ROM is not built yet. It needs the C compiler and the GPU,\n"
-                 "which are the next ports. Boot a ROM with --rom for now.\n");
-    return 1;
+  if (!romPath.empty() && basic) {
+    std::fprintf(stderr, "simplecpu: --basic boots its own ROM, so it takes no --rom\n");
+    return 2;
   }
 
-  std::optional<Cartridge> cart = loadRom(romPath);
-  if (!cart) return 1;
+  std::optional<Cartridge> cart;
+  std::string typed;
+  if (basic) {
+#if SC8_HAVE_BASIC
+    std::vector<uint8_t> bytes(basicRom().begin(), basicRom().end());
+    CartridgeResult r = decodeCartridge(bytes);
+    if (!r.cartridge) {
+      std::fprintf(stderr, "simplecpu: the built-in BASIC ROM is damaged: %s\n", r.error.c_str());
+      return 1;
+    }
+    cart = std::move(r.cartridge);
+    if (!basicPath.empty()) {
+      // The program goes into a slot of the BASIC cartridge and the
+      // interpreter is told to load it, the same way a person would.
+      std::ifstream in(basicPath);
+      if (!in) {
+        std::fprintf(stderr, "cannot read %s\n", basicPath.c_str());
+        return 1;
+      }
+      std::string text(std::istreambuf_iterator<char>(in), {});
+      std::string slot = slotNameFor(basicPath);
+      cart->basic.emplace_back(slot, text);
+      typed = "!LOAD \"" + slot + "\"\n";
+      if (runBasic) typed += "RUN\n";
+    }
+#else
+    std::fprintf(stderr, "simplecpu: this build has no BASIC ROM (built with SC8_BUILD_TOOLS off)\n");
+    return 1;
+#endif
+  } else {
+    cart = loadRom(romPath);
+    if (!cart) return 1;
+  }
 
   Computer computer;
   if (!microcode.empty()) {
@@ -107,7 +156,9 @@ int main(int argc, char** argv) {
     cart->microcode.clear();  // the command line wins over the ROM's choice
   }
   computer.insert(std::move(*cart));
-  if (title.empty()) title = romTitle(computer.cartridge(), romPath);
+  computer.setRomPath(romPath);
+  if (!typed.empty()) computer.typeText(typed);
+  if (title.empty()) title = basic ? "BASIC" : romTitle(computer.cartridge(), romPath);
 
   SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
   InitWindow(SCREEN_W * scale, SCREEN_H * scale, ("SimpleCPU-8: " + title).c_str());
@@ -124,9 +175,10 @@ int main(int argc, char** argv) {
 
     double owed = 0.0;
     float strength = 0.5f;
-    int hostFrames = 0;
     while (!WindowShouldClose()) {
-      if (!screenshot.empty() && ++hostFrames == 60) {
+      // One and a half seconds of wall clock, so the machine has run a
+      // while whatever the host's frame rate is.
+      if (!screenshot.empty() && GetTime() > 1.5) {
         // raylib's TakeScreenshot drops the directory, so export by hand.
         Image shot = LoadImageFromScreen();
         ExportImage(shot, screenshot.c_str());
@@ -139,6 +191,7 @@ int main(int argc, char** argv) {
       if (IsKeyPressed(KEY_F5)) computer.powerOn();
       if (IsKeyPressed(KEY_F11)) ToggleFullscreen();
       pollKeyboard(computer.input());
+      computer.pumpTyping();
 
       // Frame-locked pacing, the worker's rule. Owed frames come from real
       // elapsed time times the target rate, capped at about a second of

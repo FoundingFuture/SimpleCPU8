@@ -18,6 +18,7 @@
 #include "devices/apu.h"
 #include "devices/gpu.h"
 #include "devices/input.h"
+#include "devices/storage.h"
 
 namespace sc8 {
 
@@ -77,6 +78,24 @@ class Computer {
   Apu& apu() { return apu_; }
   const Apu& apu() const { return apu_; }
   Acp& acp() { return acp_; }
+  Storage& storage() { return storage_; }
+
+  // Where the cartridge came from. With a path set, a SAVE or DELETE from
+  // the running machine writes the ROM file back, so the change survives.
+  // Empty means the cartridge lives only in memory.
+  void setRomPath(std::string path) { romPath_ = std::move(path); }
+  const std::string& romPath() const { return romPath_; }
+  // How many times the running machine changed the cartridge's slots.
+  uint64_t slotChanges() const { return slotChanges_; }
+  // Write the cartridge to romPath(). False when there is no path or the
+  // write failed.
+  bool writeRom();
+
+  // Type text into the running machine through the key queue, paced so the
+  // queue never overflows. A newline sends Enter. Called each host frame.
+  void typeText(std::string text);
+  void pumpTyping();
+  bool typing() const { return typePos_ < typeBuffer_.size(); }
 
   // The GPU's random seed. Unset, every power on draws a wall clock seed.
   // A program reading GPU_RAND then plays a different game each run. A fixed
@@ -129,6 +148,7 @@ class Computer {
  private:
   void newMachine();
   uint32_t drawSeed();
+  void slotsChanged();
 
   Cartridge cart_;
   std::string microcodeName_ = "@naive";
@@ -138,9 +158,15 @@ class Computer {
   // Each forwards the ports it does not claim. Declared in construction
   // order, since each one holds the pointer of the next.
   InputBus input_;
+  Storage storage_;
   Apu apu_;
   Acp acp_;
   Gpu gpu_;
+  std::string romPath_;
+  uint64_t slotChanges_ = 0;
+  std::string typeBuffer_;
+  size_t typePos_ = 0;
+  uint64_t typeAfterFrame_ = 0;
   std::optional<uint32_t> fixedSeed_;
   uint32_t seedRuns_ = 0;
   bool traceOn_ = true;
