@@ -10,6 +10,7 @@
 #include "raylib.h"
 #include "rlImGui.h"
 
+#include "assets/assets.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
 
@@ -98,9 +99,24 @@ void Ide::assembleSource() {
     if (!f) return std::nullopt;
     return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
   };
+  // A conversion that lost something is worth a line in the messages pane,
+  // the way the browser's asset card carried its note.
+  std::vector<std::string> notes;
+  assets.loadImage = [&](std::string_view name) {
+    std::string note;
+    auto img = loadImageFile(dir / fs::path(name), &note);
+    if (!note.empty()) notes.push_back(std::string(name) + ": " + note);
+    return img;
+  };
+  assets.loadSample = [&](std::string_view name) {
+    std::string note;
+    auto pcm = loadSampleFile(dir / fs::path(name), &note);
+    if (!note.empty()) notes.push_back(std::string(name) + ": " + note);
+    return pcm;
+  };
   assembled_ = assemble(source_, &assets);
   assembledOk_ = assembled_.errors.empty();
-  messages_.clear();
+  messages_ = std::move(notes);
   for (const AsmError& e : assembled_.errors) {
     messages_.push_back("line " + std::to_string(e.line) + ": " + e.message);
   }

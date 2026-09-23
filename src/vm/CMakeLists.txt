@@ -10,7 +10,7 @@ add_library(sc8_vm STATIC
 
 target_include_directories(sc8_vm PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(sc8_vm
-  PUBLIC sc8::asm raylib miniaudio
+  PUBLIC sc8::asm sc8::assets raylib miniaudio
   PRIVATE sc8_warnings)
 add_library(sc8::vm ALIAS sc8_vm)
 

@@ -3,9 +3,8 @@
 #include <atomic>
 #include <vector>
 
-#define MINIAUDIO_IMPLEMENTATION
-#define MA_NO_DECODING
-#define MA_NO_ENCODING
+// The implementation is compiled once, in src/assets/miniaudio_impl.cpp,
+// because the decoder there and the device here share one set of symbols.
 #include "miniaudio.h"
 
 #include "devices/apu_ports.h"
