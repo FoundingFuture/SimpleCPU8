@@ -65,6 +65,15 @@ list what a ROM holds. src/core/cartridge.h has the byte layout. The chunks:
 | META | Title, author, and whatever a tool adds. |
 | BAS | Saved BASIC programs, one per named slot. |
 
+A program may be laid out by instruction slot. `.org 4096` in the code
+section places what follows at slot 4096, and labels follow. Slots between
+runs are unloaded. A fetch from one crashes with an illegal program address,
+the way a fetch past the end does. The ROM stores one PROG chunk per run,
+each with its first slot. So a driver sits at a known slot apart from the
+program that calls it. A BASIC bang handler is one such driver, reached
+through a vector set with DOKE. A ROM built from several sources is the
+next step. Today one source holds every run.
+
 During development `.file('x.bin')`, `.image('x.png')` and `.sample('x.wav')`
 read from the directory of the source file. Burning copies the bytes into
 the DATA chunk, so a distributed ROM carries every resource.
@@ -221,7 +230,7 @@ Written new:
 - the IDE with its panes
 
 The C compiler is ported. Its tests run doubles and rom_copy through a
-stub GPU in the harness that answers CMD_RAM_MOVE and CMD_COPY only.
+stub GPU in the test rig that answers CMD_RAM_MOVE and CMD_COPY only.
 
 The 25 demos sit in examples/ as assembly. The build burns each into a
 ROM under build/roms and CTest runs every ROM headless. The assembler's

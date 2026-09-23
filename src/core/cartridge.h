@@ -15,7 +15,11 @@
 //
 // Chunk tags:
 //
-//   PROG   3 bytes per instruction: opcode, operand high, operand low
+//   PROG   a program segment: u32 first instruction slot, then 3 bytes per
+//          instruction: opcode, operand high, operand low. A ROM may hold
+//          several, one per .org run, so a driver can sit at a known slot
+//          apart from the program that calls it. Slots no segment covers
+//          are unloaded, and a fetch from one crashes.
 //   RAM    the bytes .ram defined, loaded at data RAM address 0
 //   DATA   the .data section, loaded at cartridge address 0
 //   ASET   the asset table: one line per resource, "kind\tname\toffset\tsize"
@@ -53,6 +57,7 @@ struct RomAsset {
 };
 
 struct Cartridge {
+  // The program by slot, sparse: UNLOADED_SLOT marks a gap between segments.
   std::vector<Instr> program;
   std::vector<uint8_t> ram;
   std::vector<uint8_t> data;

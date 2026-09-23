@@ -3,6 +3,7 @@
 #include <cctype>
 #include <cmath>
 #include <numbers>
+#include <set>
 #include <unordered_map>
 
 #include "asm/expr.h"
@@ -259,6 +260,7 @@ enum class ExprKind { Imm8, Addr8, Disp8, Imm16, Addr16, Target, Out8 };
 
 struct PendingInstr {
   int line;
+  uint32_t slot;
   std::string opName;
   std::optional<std::string> expr;
   ExprKind exprKind = ExprKind::Imm8;
@@ -474,7 +476,7 @@ class Assembler {
       size_t colon = line.find(':');
       if (colon != std::string::npos && isIdent(std::string_view(line).substr(0, colon))) {
         std::string name = line.substr(0, colon);
-        if (section == Section::Code) defineLabel(lineNo, name, Label::Kind::Code, static_cast<int64_t>(pending_.size()));
+        if (section == Section::Code) defineLabel(lineNo, name, Label::Kind::Code, static_cast<int64_t>(slot_));
         else dataLabel = name;
         line = std::string(trim(std::string_view(line).substr(colon + 1)));
         if (line.empty()) {
@@ -582,6 +584,18 @@ class Assembler {
         continue;
       }
 
+      // .org places what follows at an instruction slot, so a driver can
+      // sit at a known address a program reaches by JSR through a vector.
+      // The count folds in pass one, like a port and a .addr do.
+      if (startsWith(line, ".org ") || startsWith(line, ".org\t")) {
+        auto n = foldNow(lineNo, trim(std::string_view(line).substr(5)), ".org");
+        if (n) {
+          if (*n > 0xffff) err(lineNo, ".org takes an instruction slot 0..65535");
+          else slot_ = static_cast<uint32_t>(*n);
+        }
+        continue;
+      }
+
       parseInstruction(lineNo, line);
     }
   }
@@ -600,17 +614,21 @@ class Assembler {
   }
 
   void pushInstr(PendingInstr p) {
-    out_.lineToInstr[p.line] = static_cast<int>(pending_.size());
-    out_.instrToLine.push_back(p.line);
+    p.slot = slot_;
+    if (slots_.count(slot_)) err(p.line, "instruction slot " + std::to_string(slot_) + " is already used");
+    slots_.insert(slot_);
+    out_.lineToInstr[p.line] = static_cast<int>(slot_);
+    if (slot_ > 0xffff) err(p.line, "the program runs past slot 65535");
     pending_.push_back(std::move(p));
+    slot_++;
   }
 
   void pushLiteral(int line, std::string opName, int64_t literal = 0) {
-    pushInstr({line, std::move(opName), std::nullopt, ExprKind::Imm8, literal});
+    pushInstr({line, 0, std::move(opName), std::nullopt, ExprKind::Imm8, literal});
   }
 
   void pushExpr(int line, std::string opName, std::string expr, ExprKind kind, int64_t literal = 0) {
-    pushInstr({line, std::move(opName), std::move(expr), kind, literal});
+    pushInstr({line, 0, std::move(opName), std::move(expr), kind, literal});
   }
 
   struct Arrow {
@@ -943,13 +961,20 @@ class Assembler {
   }
 
   void passTwo() {
+    uint32_t top = 0;
+    for (const PendingInstr& p : pending_) top = std::max(top, p.slot + 1);
+    out_.program.assign(std::min<size_t>(top, 65536), UNLOADED_SLOT);
+    out_.instrToLine.assign(out_.program.size(), 0);
     for (const PendingInstr& p : pending_) {
+      if (p.slot >= out_.program.size()) continue;
       const OpDef* def = opByName(p.opName);
+      Instr& target = out_.program[p.slot];
+      out_.instrToLine[p.slot] = p.line;
       int64_t operand = p.literal;
       if (p.expr) {
         auto v = resolve(p.line, *p.expr);
         if (!v) {
-          out_.program.push_back({def->op, 0});
+          target = {def->op, 0};
           continue;
         }
         switch (p.exprKind) {
@@ -991,7 +1016,7 @@ class Assembler {
             break;
         }
       }
-      out_.program.push_back({def->op, static_cast<uint16_t>(operand & 0xffff)});
+      target = {def->op, static_cast<uint16_t>(operand & 0xffff)};
     }
 
     // RAM image.
@@ -1042,6 +1067,8 @@ class Assembler {
   const Assets* assets_;
   Assembled out_;
   std::vector<PendingInstr> pending_;
+  uint32_t slot_ = 0;
+  std::set<uint32_t> slots_;
   std::vector<RamItem> ramItems_;
   std::vector<CartItem> cartItems_;
   int64_t ramOffset_ = 0;

@@ -49,14 +49,32 @@ std::vector<uint8_t> encodeCartridge(const Cartridge& c) {
   out.insert(out.end(), MAGIC, MAGIC + 8);
   putU32(out, VERSION);
 
-  std::vector<uint8_t> prog;
-  prog.reserve(c.program.size() * 3);
-  for (const Instr& i : c.program) {
-    prog.push_back(i.op);
-    prog.push_back(static_cast<uint8_t>(i.operand >> 8));
-    prog.push_back(static_cast<uint8_t>(i.operand & 0xff));
+  // One PROG chunk per run of loaded slots. A program with no gaps is one
+  // chunk starting at slot 0. An empty program still writes one, since a
+  // ROM must have a PROG chunk.
+  bool wrote = false;
+  size_t i = 0;
+  while (i < c.program.size()) {
+    if (c.program[i].op == UNLOADED_OP) {
+      i++;
+      continue;
+    }
+    std::vector<uint8_t> prog;
+    putU32(prog, static_cast<uint32_t>(i));
+    while (i < c.program.size() && c.program[i].op != UNLOADED_OP) {
+      prog.push_back(c.program[i].op);
+      prog.push_back(static_cast<uint8_t>(c.program[i].operand >> 8));
+      prog.push_back(static_cast<uint8_t>(c.program[i].operand & 0xff));
+      i++;
+    }
+    chunk(out, "PROG", prog);
+    wrote = true;
   }
-  chunk(out, "PROG", prog);
+  if (!wrote) {
+    std::vector<uint8_t> prog;
+    putU32(prog, 0);
+    chunk(out, "PROG", prog);
+  }
   if (!c.ram.empty()) chunk(out, "RAM ", c.ram);
   if (!c.data.empty()) chunk(out, "DATA", c.data);
   if (!c.assets.empty()) {
@@ -84,9 +102,9 @@ std::vector<uint8_t> encodeCartridge(const Cartridge& c) {
   }
   if (!c.basic.empty()) {
     std::string text;
-    for (size_t i = 0; i < c.basic.size(); i++) {
-      if (i) text += '\f';
-      text += c.basic[i].first + "\n" + c.basic[i].second;
+    for (size_t n = 0; n < c.basic.size(); n++) {
+      if (n) text += '\f';
+      text += c.basic[n].first + "\n" + c.basic[n].second;
     }
     chunk(out, "BAS ", bytesOf(text));
   }
@@ -114,11 +132,15 @@ CartridgeResult decodeCartridge(const std::vector<uint8_t>& bytes) {
     const uint8_t* p = bytes.data() + pos;
     const std::string_view text(reinterpret_cast<const char*>(p), len);
     if (tag == "PROG") {
-      if (len % 3 != 0) return {std::nullopt, "PROG chunk is not a whole number of instructions"};
-      if (len / 3 > 65536) return {std::nullopt, "program is longer than 65536 instructions"};
-      c.program.clear();
-      for (uint32_t i = 0; i < len; i += 3) {
-        c.program.push_back({p[i], static_cast<uint16_t>((p[i + 1] << 8) | p[i + 2])});
+      if (len < 4 || (len - 4) % 3 != 0) return {std::nullopt, "PROG chunk is not a start slot and whole instructions"};
+      const uint32_t start = getU32(p);
+      const uint32_t count = (len - 4) / 3;
+      if (start + count > 65536) return {std::nullopt, "a PROG segment runs past slot 65535"};
+      if (c.program.size() < start + count) c.program.resize(start + count, UNLOADED_SLOT);
+      const uint8_t* q = p + 4;
+      for (uint32_t i = 0; i < count; i++, q += 3) {
+        if (c.program[start + i].op != UNLOADED_OP) return {std::nullopt, "two PROG segments overlap"};
+        c.program[start + i] = {q[0], static_cast<uint16_t>((q[1] << 8) | q[2])};
       }
       sawProg = true;
     } else if (tag == "RAM ") {

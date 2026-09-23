@@ -53,6 +53,7 @@ struct Assets {
 };
 
 struct Assembled {
+  // The program by slot. A .org gap holds UNLOADED_SLOT entries.
   std::vector<Instr> program;
   std::vector<uint8_t> ram;  // RAM_SIZE bytes
   size_t ramLength = 0;       // how many of them .ram defined

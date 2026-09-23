@@ -593,3 +593,51 @@ TEST_SUITE("the ROM") {
     CHECK(!decodeCartridge(bytes).cartridge);
   }
 }
+
+TEST_SUITE("program layout by slot") {
+  TEST_CASE(".org places code at a slot and labels follow") {
+    Assembled a = ok("        JSR handler\n        HLT\n.org $100\nhandler: LD A <- 7\n        RET");
+    CHECK_EQ(a.program.size(), 0x102u);
+    CHECK(a.labels.at("handler") == Label{Label::Kind::Code, 0x100});
+    CHECK(a.program[0] == Instr{opOf("JSR"), 0x100});
+    CHECK(a.program[2] == UNLOADED_SLOT);
+    CHECK(a.program[0xff] == UNLOADED_SLOT);
+    CHECK(a.program[0x100] == Instr{opOf("LD A <- imm8"), 7});
+    CHECK_EQ(a.lineToInstr.at(4), 0x100);
+    CHECK_EQ(a.instrToLine[0x101], 5);
+  }
+
+  TEST_CASE("two runs cannot land on one slot") {
+    CHECK(has(firstError(".org 5\n        NOP\n.org 5\n        HLT"), "already used"));
+    CHECK(has(firstError(".org later\nlater: NOP"), "not a label"));
+  }
+
+  TEST_CASE("a fetch from an unloaded slot crashes, a jump over it works") {
+    Assembled a = ok("        JMP far\n.org 40\nfar:    HLT");
+    Machine m(a.program, buildNaive());
+    m.run(10);
+    CHECK_EQ(m.status, Status::Halted);
+
+    Assembled b = ok("        NOP\n.org 40\nfar:    HLT");
+    Machine n(b.program, buildNaive());
+    n.run(10);
+    CHECK_EQ(n.status, Status::Crashed);
+    CHECK_EQ(n.crash->kind, CrashKind::IllegalProgramAddress);
+  }
+
+  TEST_CASE("the ROM keeps the segments and the gaps between them") {
+    Assembled a = ok("        JSR handler\n        HLT\n.org $200\nhandler: RET\n.org $300\nother:   RET");
+    Cartridge c = a.cartridge();
+    std::vector<uint8_t> bytes = encodeCartridge(c);
+    int progChunks = 0;
+    for (size_t i = 0; i + 4 <= bytes.size(); i++) {
+      if (bytes[i] == 'P' && bytes[i + 1] == 'R' && bytes[i + 2] == 'O' && bytes[i + 3] == 'G') progChunks++;
+    }
+    CHECK_EQ(progChunks, 3);
+    CartridgeResult r = decodeCartridge(bytes);
+    REQUIRE_MESSAGE(r.cartridge, r.error);
+    CHECK(r.cartridge->program == c.program);
+    CHECK(r.cartridge->program[0x100] == UNLOADED_SLOT);
+    CHECK_EQ(r.cartridge->program[0x300].op, opOf("RET"));
+  }
+}

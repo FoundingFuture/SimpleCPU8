@@ -473,6 +473,10 @@ bool Machine::microStep() {
       fail(CrashKind::IllegalProgramAddress, "PC " + hex(pc) + " is outside the program");
       return false;
     }
+    if (program[pc].op == UNLOADED_OP) {
+      fail(CrashKind::IllegalProgramAddress, "PC " + hex(pc) + " is a slot nothing was loaded into");
+      return false;
+    }
     lastInstrPc = pc;
     if (fetchSection_ < 0) {
       fail(CrashKind::NoMicrocode, "no fetch microprogram");

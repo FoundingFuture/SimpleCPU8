@@ -32,6 +32,12 @@ struct Instr {
   bool operator==(const Instr&) const = default;
 };
 
+// The opcode of a program slot nothing was loaded into. A program with
+// .org gaps is a sparse vector, and a fetch from such a slot crashes the
+// machine the way a fetch past the end does. No instruction has this code.
+constexpr uint8_t UNLOADED_OP = 0xff;
+constexpr Instr UNLOADED_SLOT{UNLOADED_OP, 0xffff};
+
 // Every opcode, in opcode order.
 std::span<const OpDef> ops();
 
