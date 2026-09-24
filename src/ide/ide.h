@@ -105,6 +105,16 @@ class Ide {
   Settings& settings() { return settings_; }
   void applyScale();
 
+  // The machine's screen alone, full screen. The IDE's panes are not drawn
+  // at all meanwhile, so the host spends nothing on them. Escape comes
+  // back, and it does not reach the machine: Ctrl-C still breaks a BASIC
+  // program. The machine runs on and plays on as it did.
+  void enterScreenOnly();
+  void leaveScreenOnly();
+  bool screenOnly() const { return screenOnly_; }
+  // Draw the screen-only frame: the picture square and centred on black.
+  void drawScreenOnly();
+
   // The window's close gesture. With unsaved documents the IDE asks
   // first; done() turns true once the person answered or nothing needed
   // saving.
@@ -166,6 +176,10 @@ class Ide {
   void reset();
   void powerOff();
   bool poweredOff_ = false;  // the machine is off: black screen, nothing runs
+  bool screenOnly_ = false;
+  // The window to go back to: its size and its place.
+  int windowedW_ = 0, windowedH_ = 0;
+  int windowedX_ = 0, windowedY_ = 0;
   void statusMenu();
   void selectMicrocode(const std::string& name);
   void applyLock();

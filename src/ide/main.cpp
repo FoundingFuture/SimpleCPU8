@@ -77,7 +77,11 @@ int main(int argc, char** argv) {
     int hostFrames = 0;
     while (!ide.done()) {
       // The close gesture asks about unsaved documents before it ends.
-      if (WindowShouldClose()) ide.requestQuit();
+      // The question is asked in the IDE, so the full screen goes first.
+      if (WindowShouldClose()) {
+        ide.leaveScreenOnly();
+        ide.requestQuit();
+      }
       if (!screenshot.empty() && ++hostFrames == 60) {
         // raylib's TakeScreenshot drops the directory, so export by hand.
         Image shot = LoadImageFromScreen();
@@ -86,6 +90,14 @@ int main(int argc, char** argv) {
         break;
       }
       ide.update();
+      // Full screen, the machine's picture is all there is to draw: the
+      // panes and Dear ImGui are skipped until Escape.
+      if (ide.screenOnly()) {
+        BeginDrawing();
+        ide.drawScreenOnly();
+        EndDrawing();
+        continue;
+      }
       BeginDrawing();
       ClearBackground(Color{24, 24, 28, 255});
       rlImGuiBegin();

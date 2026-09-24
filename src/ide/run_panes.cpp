@@ -64,6 +64,9 @@ void Ide::screenBody(float side) {
   screenHasKeys_ = screenHasKeys_ || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
                    ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
   if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ImGui::SetWindowFocus();
+  if (ImGui::SmallButton("Full screen")) enterScreenOnly();
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("the screen alone, full size. Esc comes back. F12");
+  ImGui::SameLine();
   const Machine& m = computer_.machine();
   if (m.status != Status::Running) {
     ImGui::TextColored(STOP, "%s%s", std::string(statusName(m.status)).c_str(),

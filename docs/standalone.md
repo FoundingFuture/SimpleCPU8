@@ -303,6 +303,12 @@ the zero page, D1, D2 and the text screen, and follows the last bus
 access while stepping. The stack shows its 4096 bytes with SP
 marked and follows SP.
 
+Full screen shows the machine's picture alone on the whole display. It
+sits under every screen pane, in the Display menu and on F12. The machine keeps
+running and gets the keyboard. The IDE draws nothing meanwhile, so it
+costs no host time. Escape comes back and never reaches the machine, so
+Ctrl-C is the way to break a BASIC program there.
+
 The CPU's state sits at the right of the menu bar: running, paused,
 halted, crashed with the message, or off. Clicking it gives the power
 controls. Reset restarts the CPU with RAM as it is. Reboot powers on

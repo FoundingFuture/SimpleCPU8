@@ -1,6 +1,7 @@
 #include "ide/ide.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -456,11 +457,52 @@ void Ide::pushBreakpoints() {
 
 // ---- the host frame
 
+void Ide::enterScreenOnly() {
+  if (screenOnly_) return;
+  screenOnly_ = true;
+  windowedW_ = GetScreenWidth();
+  windowedH_ = GetScreenHeight();
+  const Vector2 at = GetWindowPosition();
+  windowedX_ = static_cast<int>(at.x);
+  windowedY_ = static_cast<int>(at.y);
+  const int m = GetCurrentMonitor();
+  SetWindowSize(GetMonitorWidth(m), GetMonitorHeight(m));
+  ToggleFullscreen();
+  // Nothing can be pressed on the full screen but the machine's keys, so
+  // a paused machine starts: the picture is what the person came for.
+  if (!running_ && !poweredOff_) setRunning(true);
+}
+
+void Ide::leaveScreenOnly() {
+  if (!screenOnly_) return;
+  screenOnly_ = false;
+  if (IsWindowFullscreen()) ToggleFullscreen();
+  SetWindowSize(windowedW_, windowedH_);
+  SetWindowPosition(windowedX_, windowedY_);
+  // Dear ImGui saw no frames while the screen was full, so it still holds
+  // the keys as they were when it went: F12 down, which would read as held
+  // and repeat straight back into full screen.
+  ImGui::GetIO().ClearInputKeys();
+}
+
+void Ide::drawScreenOnly() {
+  ClearBackground(BLACK);
+  if (poweredOff_) return;
+  const int w = GetScreenWidth();
+  const int h = GetScreenHeight();
+  const int side = std::min(w, h);
+  screen_.upload(computer_.frame());
+  screen_.draw((w - side) / 2, (h - side) / 2, side, side, display);
+}
+
 void Ide::update() {
-  // The keyboard belongs to the machine only while the screen pane has it
-  // and the machine runs. Otherwise the editor owns the keys and the
-  // machine sees everything released.
-  if (screenHasKeys_ && running_ && !poweredOff_) keyboard_.poll(computer_.input());
+  // Escape leaves the full screen before the keyboard is read, so the
+  // machine never sees it.
+  if (screenOnly_ && IsKeyPressed(KEY_ESCAPE)) leaveScreenOnly();
+  // The keyboard belongs to the machine only while the screen pane has it,
+  // or the screen fills the display, and the machine runs. Otherwise the
+  // editor owns the keys and the machine sees everything released.
+  if ((screenHasKeys_ || screenOnly_) && running_ && !poweredOff_) keyboard_.poll(computer_.input());
   else keyboard_.releaseAll(computer_.input());
   if (!poweredOff_) {
     typeIntoMachine();
@@ -470,6 +512,8 @@ void Ide::update() {
   // The chip renders on its own clock, so a tune plays on while the CPU
   // sits paused.
   computer_.pumpAudio(audio_);
+  // The pane's texture is for the panes, which are not drawn full screen.
+  if (screenOnly_) return;
   BeginTextureMode(panes::target());
   ClearBackground(BLACK);
   if (!poweredOff_) {
@@ -766,6 +810,8 @@ void Ide::menuBar() {
     ImGui::SliderFloat("Bloom", &display.bloom, 0.0f, 1.0f);
     ImGui::SliderFloat("Vignette", &display.vignette, 0.0f, 1.0f);
     ImGui::MenuItem("Integer scale", nullptr, &display.integerScale);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Full screen (Esc returns)", "F12")) enterScreenOnly();
     ImGui::EndMenu();
   }
   if (lockedMicrocode_) {
@@ -784,6 +830,7 @@ void Ide::shortcuts() {
   if (ImGui::IsKeyPressed(ImGuiKey_F3)) setLevel(Level::Run);
   if (ImGui::IsKeyPressed(ImGuiKey_F4)) setLevel(Level::Cpu);
   if (ImGui::IsKeyPressed(ImGuiKey_F7)) buildProject(false);
+  if (ImGui::IsKeyPressed(ImGuiKey_F12)) enterScreenOnly();
   if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
     if (io.KeyShift) powerOn();
     else if (io.KeyCtrl) buildProject(true);
