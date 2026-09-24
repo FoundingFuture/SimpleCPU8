@@ -82,8 +82,8 @@ std::string_view trim(std::string_view s) {
 
 // ---- inline text
 
-// Splits a line of markdown into styled words. A code span is one word,
-// spaces and all, so it never wraps in the middle. A link keeps its
+// Splits a line of markdown into styled words. A short code span is one
+// word, spaces and all, so it never wraps in the middle. A link keeps its
 // text and drops the target. Bold markers switch the style.
 void addInline(Words& out, std::string_view s) {
   std::string cur;
@@ -103,7 +103,21 @@ void addInline(Words& out, std::string_view s) {
       const size_t end = s.find('`', i + 1);
       if (end != std::string_view::npos) {
         flush(false);
-        out.push_back({std::string(s.substr(i + 1, end - i - 1)), Style::Code, false});
+        // A short span, an instruction or a name, stays one word so it
+        // never breaks in the middle. A long one, a quoted message, is
+        // split at its spaces and wraps like prose.
+        const std::string_view span = s.substr(i + 1, end - i - 1);
+        if (span.size() <= 24) {
+          out.push_back({std::string(span), Style::Code, false});
+        } else {
+          size_t at = 0;
+          while (at < span.size()) {
+            size_t sp = span.find(' ', at);
+            if (sp == std::string_view::npos) sp = span.size();
+            if (sp > at) out.push_back({std::string(span.substr(at, sp - at)), Style::Code, sp < span.size()});
+            at = sp + 1;
+          }
+        }
         i = end + 1;
         continue;
       }
