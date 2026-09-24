@@ -14,6 +14,7 @@ enum class OperandKind {
   Addr8,    // low byte used as a zero page address
   Disp8,    // low byte used as a displacement
   Imm16,    // full operand as a value (D loads)
+  Off16,    // full operand added to a D register, wrapping, so negative works
   Addr16,   // full operand as a data RAM address
   Target,   // full operand as a program address
   Port,     // high byte = port

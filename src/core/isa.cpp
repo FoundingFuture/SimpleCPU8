@@ -10,7 +10,7 @@ namespace {
 
 using enum OperandKind;
 
-constexpr std::array<OpDef, 84> OPS = {{
+constexpr std::array<OpDef, 119> OPS = {{
     {0x00, "NOP", None},
     {0x01, "HLT", None},
 
@@ -72,6 +72,18 @@ constexpr std::array<OpDef, 84> OPS = {{
     {0x36, "LD [D1+n] <- D2", Disp8},
     {0x37, "LD [D2+n] <- D1", Disp8},
 
+    // Address arithmetic: the EA adder's sum loaded into a D register
+    // instead of sent to RAM. D1+n takes the full operand, so D1-8 is
+    // D1+$FFF8.
+    {0x38, "LD D1 <- D1+n", Off16},
+    {0x39, "LD D2 <- D2+n", Off16},
+    {0x3a, "LD D1 <- D2+n", Off16},
+    {0x3b, "LD D2 <- D1+n", Off16},
+    {0x3c, "LD D1 <- D1+A", None},
+    {0x3d, "LD D2 <- D2+A", None},
+    {0x3e, "LD D1 <- D2+A", None},
+    {0x3f, "LD D2 <- D1+A", None},
+
     {0x40, "ADD A <- [addr8]", Addr8},
     {0x41, "SUB A <- [addr8]", Addr8},
     {0x42, "AND A <- [addr8]", Addr8},
@@ -79,6 +91,7 @@ constexpr std::array<OpDef, 84> OPS = {{
     {0x44, "XOR A <- [addr8]", Addr8},
     {0x45, "ADC A <- [addr8]", Addr8},
     {0x46, "SBC A <- [addr8]", Addr8},
+    {0x47, "CMP A, [addr8]", Addr8},
     {0x48, "ADD A <- imm8", Imm8},
     {0x49, "SUB A <- imm8", Imm8},
     {0x4a, "AND A <- imm8", Imm8},
@@ -86,6 +99,7 @@ constexpr std::array<OpDef, 84> OPS = {{
     {0x4c, "XOR A <- imm8", Imm8},
     {0x4d, "ADC A <- imm8", Imm8},
     {0x4e, "SBC A <- imm8", Imm8},
+    {0x4f, "CMP A, imm8", Imm8},
 
     {0x50, "PUSHB A", None},
     {0x51, "POPB A", None},
@@ -109,6 +123,38 @@ constexpr std::array<OpDef, 84> OPS = {{
     {0x7a, "JNC", Target},
     {0x7b, "JP", Target},
     {0x7c, "JNV", Target},
+
+    // The ALU on a byte a D register points at, n bytes in: a C local in
+    // its frame, or a field of a record. The low nibble matches $40-$47.
+    {0x80, "ADD A <- [D1+n]", Disp8},
+    {0x81, "SUB A <- [D1+n]", Disp8},
+    {0x82, "AND A <- [D1+n]", Disp8},
+    {0x83, "OR A <- [D1+n]", Disp8},
+    {0x84, "XOR A <- [D1+n]", Disp8},
+    {0x85, "ADC A <- [D1+n]", Disp8},
+    {0x86, "SBC A <- [D1+n]", Disp8},
+    {0x87, "CMP A, [D1+n]", Disp8},
+    {0x88, "ADD A <- [D2+n]", Disp8},
+    {0x89, "SUB A <- [D2+n]", Disp8},
+    {0x8a, "AND A <- [D2+n]", Disp8},
+    {0x8b, "OR A <- [D2+n]", Disp8},
+    {0x8c, "XOR A <- [D2+n]", Disp8},
+    {0x8d, "ADC A <- [D2+n]", Disp8},
+    {0x8e, "SBC A <- [D2+n]", Disp8},
+    {0x8f, "CMP A, [D2+n]", Disp8},
+
+    // AND that sets the flags and keeps A.
+    {0x90, "TST A, [addr8]", Addr8},
+    {0x91, "TST A, imm8", Imm8},
+    {0x92, "TST A, [D1+n]", Disp8},
+    {0x93, "TST A, [D2+n]", Disp8},
+
+    // One bit left or right. C takes the bit that leaves.
+    {0x98, "SHL A", None},
+    {0x99, "SHR A", None},
+    {0x9a, "ROL A", None},
+    {0x9b, "ROR A", None},
+    {0x9c, "ASR A", None},
 }};
 
 struct Tables {

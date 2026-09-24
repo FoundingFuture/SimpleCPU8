@@ -777,14 +777,14 @@ const char* const CYCLES_ASM = R"(; %NAME%: what every instruction costs, in mic
 ; into cycles.asm, which it generates and appends to this file. Change a
 ; row in microcode.txt, build, run: the MY column moves.
 ;
-; Eighty-four instructions in two pages of forty-two, two columns of
-; twenty-one. A key turns the page, and so do four seconds.
+; Forty instructions a page, two columns of twenty. A key turns the page,
+; and so do four seconds. cycles_n says how many there are.
         OUT GPU_TEXT_COLOR, 0xFF
         OUT GPU_TEXT_BG, 0
         OUT GPU_TEXT_FLAGS, 0
         OUT GPU_CMD, CMD_TEXT_STYLE
         LD A <- 0
-        LD [first] <- A
+        LD [page] <- A
 show:   OUT GPU_CMD, CMD_TEXT_CLEAR
         OUT GPU_TEXT_COL, 0
         OUT GPU_TEXT_ROW, 0
@@ -798,14 +798,31 @@ show:   OUT GPU_CMD, CMD_TEXT_CLEAR
         LD [col] <- A
         LD A <- 2
         LD [row] <- A
-        LD A <- 42
-        LD [left] <- A
-        ; D1 walks the address table: three bytes an entry, and page two
-        ; starts forty-two entries in.
+        ; D1 walks the address table, three bytes an entry. Each page
+        ; before this one skips forty entries and takes forty off left.
         LD D1 <- &cycles_addr
-        LD A <- [first]
-        JZ entry
-        LD D1 <- &cycles_addr + 126
+        LD A <- [cycles_n]
+        LD [left] <- A
+        LD A <- [page]
+        JZ fit
+skip:   LD [count] <- A
+        LD D1 <- D1+120
+        LD A <- [left]
+        SUB A <- 40
+        LD [left] <- A
+        LD A <- [count]
+        DEC A
+        JNZ skip
+        ; More than forty left means another page follows this one.
+fit:    LD A <- 0
+        LD [more] <- A
+        LD A <- [left]
+        CMP A, 41
+        JC entry
+        LD A <- 1
+        LD [more] <- A
+        LD A <- 40
+        LD [left] <- A
 entry:  LD A <- [left]
         JZ foot
         LD A <- [col]
@@ -821,12 +838,12 @@ entry:  LD A <- [left]
         OUTA GPU_CART_LO
         OUT GPU_CMD, CMD_PRINTF
         LD A <- [left]
-        SUB A <- 1
+        DEC A
         LD [left] <- A
         LD A <- [row]
-        ADD A <- 1
+        INC A
         LD [row] <- A
-        SUB A <- 23
+        CMP A, 22
         JNZ entry
         LD A <- 2
         LD [row] <- A
@@ -844,28 +861,30 @@ foot:   OUT GPU_TEXT_COL, 0
         LD [ticks] <- A
         IN GPU_FRAME
         LD [frame] <- A
-; IN leaves the flags alone, so the byte is kept and tested with AND.
+; IN leaves the flags alone, so the byte is kept and tested with TST.
 poll:   IN IO_KEY -> A
-        LD [key] <- A
-        AND A <- 0x7F
+        TST A, 0x7F
         JZ tick
-        LD A <- [key]
-        AND A <- 0x80
+        TST A, 0x80
         JZ flip
         JMP poll
 tick:   IN GPU_FRAME
-        SUB A <- [frame]
+        CMP A, [frame]
         JZ poll
-        IN GPU_FRAME
         LD [frame] <- A
         LD A <- [ticks]
-        ADD A <- 1
+        INC A
         LD [ticks] <- A
-        SUB A <- 240
+        CMP A, 240
         JNZ poll
-flip:   LD A <- [first]
-        XOR A <- 42
-        LD [first] <- A
+flip:   LD A <- [more]
+        JZ first
+        LD A <- [page]
+        INC A
+        LD [page] <- A
+        JMP show
+first:  LD A <- 0
+        LD [page] <- A
         JMP show
 head:   OUT GPU_CART_BANK, get_bankbyte(header)
         OUT GPU_CART_HI, get_highbyte(header)
@@ -873,13 +892,14 @@ head:   OUT GPU_CART_BANK, get_bankbyte(header)
         OUT GPU_CMD, CMD_PRINTF
         RET
 .ram
-first:  db 0
+page:   db 0
+count:  db 0
+more:   db 0
 col:    db 0
 row:    db 0
 left:   db 0
 frame:  db 0
 ticks:  db 0
-key:    db 0
 .data
 header: db "INSTRUCTION   MY OP", 0
 footer: db "MY = MICROCODE.TXT   OP = OPTIMAL   KEY", 0

@@ -57,6 +57,18 @@ const char* GEN_OPS[] = {
     "PUSHW D1",
     "OUT",
     "OUTA",
+    "ADD A <- [D1+n]",
+    "SBC A <- [D2+n]",
+    "CMP A, imm8",
+    "CMP A, [D1+n]",
+    "TST A, [addr8]",
+    "SHL A",
+    "SHR A",
+    "ROL A",
+    "ROR A",
+    "ASR A",
+    "LD D1 <- D2+n",
+    "LD D2 <- D1+A",
 };
 
 std::vector<Instr> randomProgram(Rand& rand, int length) {
@@ -71,6 +83,7 @@ std::vector<Instr> randomProgram(Rand& rand, int length) {
       case OperandKind::Addr8: operand = static_cast<uint16_t>(rand.below(256)); break;
       // Keep pointers inside RAM so dereferences stay legal.
       case OperandKind::Imm16: operand = static_cast<uint16_t>(rand.below(512)); break;
+      case OperandKind::Off16: operand = static_cast<uint16_t>(rand.below(512)); break;
       case OperandKind::Addr16: operand = static_cast<uint16_t>(rand.below(1022)); break;
       case OperandKind::PortImm:
         operand = static_cast<uint16_t>((rand.below(4) << 8) | rand.below(256));

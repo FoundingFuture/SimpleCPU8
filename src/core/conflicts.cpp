@@ -71,6 +71,11 @@ std::optional<Conflict> checkRow(const Row& row) {
   if (ram == 1 && bases != 1) {
     return Conflict{8, "a data RAM access needs exactly one address base select"};
   }
+  for (Signal s : row) {
+    if ((s == Signal::D1_LOAD_EA || s == Signal::D2_LOAD_EA) && bases != 1) {
+      return Conflict{8, std::string(signalName(s)) + " needs exactly one address base select"};
+    }
+  }
 
   return std::nullopt;
 }

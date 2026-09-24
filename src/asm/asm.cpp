@@ -175,7 +175,7 @@ uint32_t hashBytes(const std::vector<uint8_t>& bytes) {
 
 // Every field has a default, so a site names only the fields its shape uses.
 struct Operand {
-  enum class T { Reg, IndA, IndD, IdxD, DispD, Stack, Mem, Val, Round };
+  enum class T { Reg, IndA, IndD, IdxD, DispD, Stack, Mem, Val, Round, Sum };
   T t{};
   std::string r{};   // Reg: A, D1, D2
   int x = 0;         // IndD, IdxD, DispD: 1 or 2
@@ -183,6 +183,7 @@ struct Operand {
   bool push = false; // Stack: [SP]- pushes, [SP]+ pops
   std::string expr{}; // DispD, Mem, Val
   std::string was{};  // Round: the operand as typed
+  bool plusA = false; // Sum: D1+A rather than D1+n
 };
 
 // The six addressing shapes, spelled with one bracket pair. A dereference
@@ -233,6 +234,13 @@ std::optional<Operand> parseOperand(std::string_view raw) {
   const std::string s = stripSpaces(raw);
   if (s == "A" || s == "D1" || s == "D2") return Operand{.t = Operand::T::Reg, .r = s};
   if (auto d = parseDeref(s, '[', ']')) return d;
+  // A register plus an offset with no brackets is the sum itself, the
+  // address arithmetic: D1+8, D1-8, D2+A.
+  if (s.size() > 3 && (startsWith(s, "D1") || startsWith(s, "D2")) && (s[2] == '+' || s[2] == '-')) {
+    const std::string off = s.substr(3);
+    if (s[2] == '+' && off == "A") return Operand{.t = Operand::T::Sum, .x = s[1] - '0', .plusA = true};
+    return Operand{.t = Operand::T::Sum, .x = s[1] - '0', .expr = s[2] == '+' ? off : "0-(" + off + ")"};
+  }
   // Round brackets did this job until every program was rewritten. They are
   // matched here only to be refused with the spelling that works. A group
   // holding an operator is arithmetic, and (1 + 2) has one reading.
@@ -246,7 +254,7 @@ std::optional<Operand> parseOperand(std::string_view raw) {
   return Operand{.t = Operand::T::Val, .expr = s.front() == '&' ? s.substr(1) : s};
 }
 
-enum class ExprKind { Imm8, Addr8, Disp8, Imm16, Addr16, Target, Out8 };
+enum class ExprKind { Imm8, Addr8, Disp8, Imm16, Off16, Addr16, Target, Out8 };
 
 struct PendingInstr {
   int line;
@@ -280,6 +288,12 @@ struct Placed {
 
 const std::unordered_map<std::string_view, bool> BRANCHES = {
     {"JMP", true}, {"JZ", true}, {"JC", true}, {"JN", true}, {"JV", true}, {"JNZ", true}, {"JNC", true}, {"JP", true}, {"JNV", true}, {"JSR", true}};
+
+bool isTestMnemonic(std::string_view m) { return m == "CMP" || m == "TST"; }
+
+bool isShiftMnemonic(std::string_view m) {
+  return m == "SHL" || m == "SHR" || m == "ROL" || m == "ROR" || m == "ASR";
+}
 
 bool isAluMnemonic(std::string_view m) {
   return m == "ADD" || m == "SUB" || m == "ADC" || m == "SBC" || m == "AND" || m == "OR" ||
@@ -802,7 +816,33 @@ class Assembler {
       if (src && src->t == T::Round) return roundErr(lineNo, *src);
       if (src && src->t == T::Val) return pushExpr(lineNo, mnem + " A <- imm8", src->expr, ExprKind::Imm8);
       if (src && src->t == T::Mem) return pushExpr(lineNo, mnem + " A <- [addr8]", src->expr, ExprKind::Addr8);
-      return err(lineNo, mnem + " takes an immediate or a zero page address");
+      if (src && src->t == T::DispD) {
+        return pushExpr(lineNo, mnem + " A <- [D" + std::to_string(src->x) + "+n]", src->expr, ExprKind::Disp8);
+      }
+      return err(lineNo, mnem + " takes an immediate, a zero page address, or [D1+n] or [D2+n]");
+    }
+
+    if (isTestMnemonic(mnem)) {
+      // CMP and TST write no register, so they take no arrow: CMP A, 5.
+      const std::string what = mnem == "CMP" ? "subtracts" : "ANDs";
+      if (splitArrow(rest)) return err(lineNo, mnem + " " + what + " and keeps A, so it takes no arrow: " + mnem + " A, source");
+      const size_t comma = rest.find(',');
+      if (comma == std::string::npos || upper(trim(std::string_view(rest).substr(0, comma))) != "A") {
+        return err(lineNo, mnem + " compares A with a source: " + mnem + " A, source");
+      }
+      auto src = parseOperand(trim(std::string_view(rest).substr(comma + 1)));
+      if (src && src->t == T::Round) return roundErr(lineNo, *src);
+      if (src && src->t == T::Val) return pushExpr(lineNo, mnem + " A, imm8", src->expr, ExprKind::Imm8);
+      if (src && src->t == T::Mem) return pushExpr(lineNo, mnem + " A, [addr8]", src->expr, ExprKind::Addr8);
+      if (src && src->t == T::DispD) {
+        return pushExpr(lineNo, mnem + " A, [D" + std::to_string(src->x) + "+n]", src->expr, ExprKind::Disp8);
+      }
+      return err(lineNo, mnem + " takes an immediate, a zero page address, or [D1+n] or [D2+n]");
+    }
+
+    if (isShiftMnemonic(mnem)) {
+      if (restUpper != "A") return err(lineNo, mnem + " shifts A: " + mnem + " A");
+      return pushLiteral(lineNo, mnem + " A");
     }
 
     if (mnem == "LD") {
@@ -851,6 +891,7 @@ class Assembler {
         case T::DispD: return push("LD A <- [D" + std::to_string(src.x) + "+n]", src.expr, ExprKind::Disp8);
         case T::IdxD: return push("LD A <- [D" + std::to_string(src.x) + "+A]");
         case T::Reg: return err(lineNo, "register to register moves do not exist");
+        case T::Sum: return err(lineNo, "A is a byte and cannot hold an address sum; load it into D1 or D2");
         default: break;
       }
     }
@@ -872,7 +913,16 @@ class Assembler {
         case T::IdxD:
           if (src.x == x) return err(lineNo, "LD " + X + " <- [" + X + "+A] corrupts its own address; use the other D register");
           return push("LD " + X + " <- [" + S + "+A]");
-        case T::Reg: return err(lineNo, "register to register moves do not exist");
+        case T::Sum:
+          if (src.plusA) return push("LD " + X + " <- " + S + "+A");
+          return push("LD " + X + " <- " + S + "+n", src.expr, ExprKind::Off16);
+        case T::Reg:
+          // A copy is the sum with nothing added.
+          if (src.r == "D1" || src.r == "D2") {
+            if (src.r == X) return err(lineNo, "LD " + X + " <- " + X + " does nothing");
+            return push("LD " + X + " <- " + src.r + "+n", std::string("0"), ExprKind::Off16);
+          }
+          return err(lineNo, "a D register takes a byte from A only through RAM: store A, then load the word");
         default: break;
       }
     }
@@ -1029,6 +1079,10 @@ class Assembler {
           }
           case ExprKind::Imm16:
             if (*v > 0xffff) err(p.line, "value " + std::to_string(*v) + " does not fit in 16 bits");
+            operand = *v & 0xffff;
+            break;
+          case ExprKind::Off16:
+            if (*v > 0xffff || *v < -0xffff) err(p.line, "offset " + std::to_string(*v) + " does not fit in 16 bits");
             operand = *v & 0xffff;
             break;
           case ExprKind::Addr16:

@@ -43,6 +43,11 @@ namespace sc8 {
   X(ALU_OR, W(), MemNone, 0, Or, 0, 0, 0, 0, 0)                               \
   X(ALU_XOR, W(), MemNone, 0, Xor, 0, 0, 0, 0, 0)                             \
   X(ALU_PASS_B, W(), MemNone, 0, PassB, 0, 0, 0, 0, 0)                        \
+  X(ALU_SHL, W(), MemNone, 0, Shl, 0, 0, 0, 0, 0)                             \
+  X(ALU_SHR, W(), MemNone, 0, Shr, 0, 0, 0, 0, 0)                             \
+  X(ALU_ROL, W(), MemNone, 0, Rol, 0, 0, 0, 0, 0)                             \
+  X(ALU_ROR, W(), MemNone, 0, Ror, 0, 0, 0, 0, 0)                             \
+  X(ALU_ASR, W(), MemNone, 0, Asr, 0, 0, 0, 0, 0)                             \
   X(ACC_LOAD_ALU, W(ACC), MemNone, 0, AluNone, 1, 0, 0, 0, 0)                 \
   X(FLAGS_LOAD, W(FLAGS), MemNone, 0, AluNone, 1, 0, 0, 0, 0)                 \
   X(RAM_WRITE_ACC, W(), RamWrite, 0, AluNone, 0, 0, 0, 0, 0)                  \
@@ -61,9 +66,12 @@ namespace sc8 {
   X(ADDR_A, W(), MemNone, 0, AluNone, 0, 0, 1, 0, 0)                          \
   X(EA_OFF_OP8, W(), MemNone, 0, AluNone, 0, 0, 0, 1, 0)                      \
   X(EA_OFF_A, W(), MemNone, 0, AluNone, 0, 0, 0, 1, 0)                        \
+  X(EA_OFF_OP16, W(), MemNone, 0, AluNone, 0, 0, 0, 1, 0)                     \
   X(EA_CIN, W(), MemNone, 0, AluNone, 0, 0, 0, 1, 0)                          \
   X(D1_LOAD_OP16, W(D1H, D1L), MemNone, 0, AluNone, 0, 0, 0, 0, 0)            \
   X(D2_LOAD_OP16, W(D2H, D2L), MemNone, 0, AluNone, 0, 0, 0, 0, 0)            \
+  X(D1_LOAD_EA, W(D1H, D1L), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
+  X(D2_LOAD_EA, W(D2H, D2L), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
   X(D1_TSTZ, W(FLAGS), MemNone, 0, AluNone, 0, 0, 0, 0, 0)                    \
   X(D2_TSTZ, W(FLAGS), MemNone, 0, AluNone, 0, 0, 0, 0, 0)                    \
   X(D1_INC, W(D1H, D1L), MemNone, 1, AluNone, 0, 0, 0, 0, 0)                  \
@@ -124,7 +132,7 @@ enum RegAtom : uint16_t {
 
 enum class MemAccess : uint8_t { MemNone, ProgRead, RamRead, RamWrite, StackRead, StackWrite };
 
-enum class AluOp : uint8_t { AluNone, Add, Sub, Adc, Sbc, And, Or, Xor, PassB };
+enum class AluOp : uint8_t { AluNone, Add, Sub, Adc, Sbc, And, Or, Xor, PassB, Shl, Shr, Rol, Ror, Asr };
 
 struct SignalMeta {
   std::string_view name;

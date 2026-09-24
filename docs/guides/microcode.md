@@ -538,8 +538,9 @@ The program in `main.asm` prints a table. It lists every instruction
 with two costs. `MY` is the cost under the ROM's set and `OP` the cost
 under the optimal set. The build counts the rows of each section plus the
 rows of `fetch`, and writes the lines into a generated file,
-`cycles.asm`, which it appends to the program. Eighty-four instructions
-fill two pages of forty-two. A key press turns the page, and so do four seconds.
+`cycles.asm`, which it appends to the program. Forty instructions fill
+a page, and the pages cycle. A key press turns the page, and so do four
+seconds.
 A fresh project shows `ADD A <- i8` at `6 3` on page two. Change a
 row, build, run, and the `MY` number moves. The table is the truth
 about the set the ROM carries, because the same parser counted it.

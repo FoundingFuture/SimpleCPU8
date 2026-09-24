@@ -79,6 +79,11 @@ std::string disassemble(const Instr& in) {
       if (!replace("disp8", std::to_string(in.operand & 0xff))) replace("n]", std::to_string(in.operand & 0xff) + "]");
       break;
     case OperandKind::Imm16: replace("imm16", "$" + hex(in.operand, 4)); break;
+    case OperandKind::Off16: {
+      const int off = in.operand >= 0x8000 ? in.operand - 0x10000 : in.operand;
+      replace("+n", off < 0 ? std::to_string(off) : "+" + std::to_string(off));
+      break;
+    }
     case OperandKind::Addr16: replace("addr16", "$" + hex(in.operand, 4)); break;
     case OperandKind::Target: text += " $" + hex(in.operand, 4); break;
     case OperandKind::Port: text += " $" + hex(in.operand >> 8, 2); break;

@@ -1,5 +1,6 @@
 #include <doctest.h>
 
+#include "core/isa.h"
 #include "core/machine.h"
 #include "core/microcode.h"
 
@@ -216,6 +217,96 @@ TEST_SUITE("conditional jumps") {
         }
       }
     }
+  }
+}
+
+namespace {
+
+Instr ins(std::string_view name, uint16_t operand = 0) { return {opByName(name)->op, operand}; }
+
+// Runs a program to its end under both sets and checks they agree.
+Machine runBoth(std::vector<Instr> program) {
+  Machine a(program, naive());
+  Machine b(program, optimal());
+  a.run(1000);
+  b.run(1000);
+  CHECK_EQ(a.status, Status::Halted);
+  CHECK_EQ(a.acc, b.acc);
+  CHECK_EQ(a.d1, b.d1);
+  CHECK_EQ(a.d2, b.d2);
+  CHECK_EQ(a.flags, b.flags);
+  return b;
+}
+
+}  // namespace
+
+TEST_SUITE("compare, test, shift and address arithmetic") {
+  TEST_CASE("CMP sets SUB's flags and keeps A") {
+    Machine m = runBoth({ins("LD A <- imm8", 5), ins("CMP A, imm8", 7)});
+    CHECK_EQ(m.acc, 5);
+    CHECK(m.flags.c);
+    CHECK(!m.flags.z);
+    CHECK(m.flags.n);
+    m = runBoth({ins("LD A <- imm8", 7), ins("CMP A, imm8", 7)});
+    CHECK_EQ(m.acc, 7);
+    CHECK(m.flags.z);
+    CHECK(!m.flags.c);
+  }
+
+  TEST_CASE("TST sets AND's flags and keeps A") {
+    Machine m = runBoth({ins("LD A <- imm8", 0x41), ins("TST A, imm8", 0x80)});
+    CHECK_EQ(m.acc, 0x41);
+    CHECK(m.flags.z);
+  }
+
+  TEST_CASE("the ALU reads a byte through a D register and a displacement") {
+    Machine m = runBoth({ins("LD D1 <- imm16", 0x100), ins("LD A <- imm8", 9), ins("LD [D1+n] <- A", 3),
+                         ins("LD A <- imm8", 1), ins("ADD A <- [D1+n]", 3), ins("CMP A, [D1+n]", 3)});
+    CHECK_EQ(m.acc, 10);
+    CHECK(!m.flags.z);
+    CHECK(!m.flags.c);
+  }
+
+  TEST_CASE("shifts move one bit and put the bit that leaves in C") {
+    Machine m = runBoth({ins("LD A <- imm8", 0x81), ins("SHL A")});
+    CHECK_EQ(m.acc, 0x02);
+    CHECK(m.flags.c);
+    m = runBoth({ins("LD A <- imm8", 0x81), ins("SHR A")});
+    CHECK_EQ(m.acc, 0x40);
+    CHECK(m.flags.c);
+    m = runBoth({ins("LD A <- imm8", 0x81), ins("ASR A")});
+    CHECK_EQ(m.acc, 0xc0);
+    CHECK(m.flags.n);
+    // A 16 bit shift left of $80FF: SHL the low byte, ROL the high byte.
+    m = runBoth({ins("LD A <- imm8", 0xff), ins("SHL A"), ins("LD [addr8] <- A", 1), ins("LD A <- imm8", 0x80),
+                 ins("ROL A")});
+    CHECK_EQ(m.acc, 0x01);
+    CHECK(m.flags.c);
+    CHECK_EQ(m.ram[1], 0xfe);
+    m = runBoth({ins("LD A <- imm8", 0x01), ins("SUB A <- imm8", 2), ins("LD A <- imm8", 0x02), ins("ROR A")});
+    CHECK_EQ(m.acc, 0x81);
+    CHECK(!m.flags.c);
+  }
+
+  TEST_CASE("a shift leaves V alone") {
+    Machine m = runBoth({ins("LD A <- imm8", 0x7f), ins("ADD A <- imm8", 1), ins("SHR A")});
+    CHECK(m.flags.v);
+  }
+
+  TEST_CASE("a D register loads the adder's sum and tests it for zero") {
+    Machine m = runBoth({ins("LD D1 <- imm16", 0x1000), ins("LD D2 <- D1+n", 0xfff8), ins("LD A <- imm8", 0x20),
+                         ins("LD D1 <- D1+A")});
+    CHECK_EQ(m.d2, 0x0ff8);
+    CHECK_EQ(m.d1, 0x1020);
+    CHECK(!m.flags.z);
+    m = runBoth({ins("LD D1 <- imm16", 8), ins("LD D1 <- D1+n", 0xfff8)});
+    CHECK_EQ(m.d1, 0);
+    CHECK(m.flags.z);
+    // The sum wraps at 16 bits, and C is not touched.
+    m = runBoth({ins("LD A <- imm8", 0xff), ins("ADD A <- imm8", 1), ins("LD D2 <- imm16", 0xffff),
+                 ins("LD D2 <- D2+n", 2)});
+    CHECK_EQ(m.d2, 1);
+    CHECK(m.flags.c);
   }
 }
 

@@ -114,14 +114,16 @@ const std::map<std::string, Meta>& meta() {
               "outside the brackets decides the width: A moves one byte, D1 and D2 move two, big-endian. [A] "
               "addresses the zero page and never crashes, and [A]+ steps A after a word load. D registers reach "
               "all of data RAM. No data address is illegal. An effective address wraps at 16 bits, so a pointer "
-              "walked off the end wraps to zero."}},
-      {"ADD", {"ARITHMETIC", "ADD A <- value", "A <- an 8 bit immediate, or A <- [zero page address]",
+              "walked off the end wraps to zero. Without brackets a sum is the address itself: LD D1 <- D1+8 "
+              "adds 8 to D1, LD D1 <- D1-8 subtracts, LD D2 <- D1+A adds A, and LD D2 <- D1 copies. These run "
+              "through the address adder, set Z like every load into a D register, and leave C alone."}},
+      {"ADD", {"ARITHMETIC", "ADD A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
                arithFlags("set on carry out of bit 7"), "A",
                "Adds the operand to A. INC A is the same instruction as ADD A <- 1."}},
-      {"SUB", {"ARITHMETIC", "SUB A <- value", "A <- an 8 bit immediate, or A <- [zero page address]",
+      {"SUB", {"ARITHMETIC", "SUB A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
                arithFlags("set when a borrow occurred"), "A",
                "Subtracts the operand from A. DEC A is the same instruction as SUB A <- 1."}},
-      {"ADC", {"ARITHMETIC", "ADC A <- value", "A <- an 8 bit immediate, or A <- [zero page address]",
+      {"ADC", {"ARITHMETIC", "ADC A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
                [] {
                  FlagFacts f = arithFlags("read as carry in, then set to the carry out");
                  f.list = "N, V, Z, C (reads C)";
@@ -130,19 +132,42 @@ const std::map<std::string, Meta>& meta() {
                "A",
                "Adds the operand and the incoming C flag. This chains byte additions into wider ones: ADD the "
                "low bytes, then ADC each higher byte."}},
-      {"SBC", {"ARITHMETIC", "SBC A <- value", "A <- an 8 bit immediate, or A <- [zero page address]",
+      {"SBC", {"ARITHMETIC", "SBC A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
                [] {
                  FlagFacts f = arithFlags("read as borrow in, then set when a borrow occurred");
                  f.list = "N, V, Z, C (reads C)";
                  return f;
                }(),
                "A", "Subtracts the operand and the incoming borrow. The mirror of ADC for multi byte subtraction."}},
-      {"AND", {"LOGIC", "AND A <- value", "A <- an 8 bit immediate, or A <- [zero page address]", LOGIC_FLAGS,
+      {"AND", {"LOGIC", "AND A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]", LOGIC_FLAGS,
                "A", "Bitwise AND into A. Masks bits: AND A <- $0F keeps the low nibble."}},
-      {"OR", {"LOGIC", "OR A <- value", "A <- an 8 bit immediate, or A <- [zero page address]", LOGIC_FLAGS,
+      {"OR", {"LOGIC", "OR A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]", LOGIC_FLAGS,
               "A", "Bitwise OR into A. Sets bits."}},
-      {"XOR", {"LOGIC", "XOR A <- value", "A <- an 8 bit immediate, or A <- [zero page address]", LOGIC_FLAGS,
+      {"XOR", {"LOGIC", "XOR A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]", LOGIC_FLAGS,
                "A", "Bitwise XOR into A. Flips bits. XOR A <- $FF inverts A. XOR with itself clears A."}},
+      {"CMP", {"ARITHMETIC", "CMP A, value", "A, then an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
+               arithFlags("set when A is below the value, unsigned"), "none",
+               "Compares A with the operand: the flags of SUB, and A keeps its value. So one byte can be tested "
+               "against several values in a row. JZ jumps when they are equal, JC when A is lower and JNC when "
+               "it is the same or higher, unsigned. Signed order is N xor V, as after SUB."}},
+      {"TST", {"LOGIC", "TST A, value", "A, then an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
+               LOGIC_FLAGS, "none",
+               "Tests bits: the flags of AND, and A keeps its value. TST A, $80 sets Z when bit 7 is clear. TST "
+               "A, $FF tests A itself, which a port read needs, since IN sets no flags."}},
+      {"SHL", {"SHIFT", "SHL A", "A", FlagFacts{"N, Z, C", "set when the result is zero", "set to bit 7 of the result", "set to the bit shifted out of bit 7", UNAFFECTED}, "A",
+               "Shifts A one bit left, a 0 into bit 0. A doubles. For a 16 bit value, SHL the low byte and ROL "
+               "the high byte."}},
+      {"SHR", {"SHIFT", "SHR A", "A", FlagFacts{"N, Z, C", "set when the result is zero", "set to bit 7 of the result", "set to the bit shifted out of bit 0", UNAFFECTED}, "A",
+               "Shifts A one bit right, a 0 into bit 7. A halves, unsigned. For a 16 bit value, SHR the high "
+               "byte and ROR the low byte."}},
+      {"ROL", {"SHIFT", "ROL A", "A", FlagFacts{"N, Z, C", "set when the result is zero", "set to bit 7 of the result", "read into bit 0, then set to the old bit 7", UNAFFECTED}, "A",
+               "Rotates A one bit left through C: C goes into bit 0 and bit 7 goes into C. It carries a shift "
+               "from one byte into the next."}},
+      {"ROR", {"SHIFT", "ROR A", "A", FlagFacts{"N, Z, C", "set when the result is zero", "set to bit 7 of the result", "read into bit 7, then set to the old bit 0", UNAFFECTED}, "A",
+               "Rotates A one bit right through C: C goes into bit 7 and bit 0 goes into C."}},
+      {"ASR", {"SHIFT", "ASR A", "A", FlagFacts{"N, Z, C", "set when the result is zero", "set to bit 7 of the result", "set to the bit shifted out of bit 0", UNAFFECTED}, "A",
+               "Shifts A one bit right and keeps bit 7, so a negative byte stays negative. A halves, signed, "
+               "rounding down. For a 16 bit value, ASR the high byte and ROR the low byte."}},
       {"INC", {"ARITHMETIC", "INC A | INC D1 | INC D2", "A, D1, or D2",
                FlagFacts{"N, V, Z, C (INC A only)", "INC A: set when A wraps to zero. INC D1, INC D2: " + UNAFFECTED,
                          "INC A only: set to bit 7 of the result", "INC A only: set on carry out",
@@ -152,8 +177,8 @@ const std::map<std::string, Meta>& meta() {
                "shared step unit and touch no flags. Stepping past $FFFF wraps to zero. No data address is "
                "illegal, so the dereference that follows is legal too."}},
       {"DEC", {"ARITHMETIC", "DEC A", "A", arithFlags("set when a borrow occurred"), "A",
-               "DEC A assembles as SUB A <- 1. There is no DEC for D registers in this ISA; walk pointers "
-               "forward or reload them."}},
+               "DEC A assembles as SUB A <- 1. A D register steps back with LD D1 <- D1-1, through the "
+               "address adder."}},
       {"PUSHB", {"STACK", "PUSHB A", "A", NO_FLAGS, "A, SP, stack",
                  "Writes A to the stack and steps SP down. Pushing with SP at 0 crashes with a stack overflow."}},
       {"POPB", {"STACK", "POPB A", "A",

@@ -137,6 +137,31 @@ Rows optimalAlu(Signal op, Row source) {
   return {source, {op, S::ACC_LOAD_ALU, S::FLAGS_LOAD}};
 }
 
+// CMP and TST: the operation's flags without its result.
+Rows naiveTest(Signal op, Row source) {
+  return {source, {S::ACC_TO_A}, {op, S::FLAGS_LOAD}, {S::PC_INC}};
+}
+
+Rows optimalTest(Signal op, Row source) {
+  source.push_back(S::ACC_TO_A);
+  return {source, {op, S::FLAGS_LOAD}};
+}
+
+struct Shift {
+  std::string_view name;
+  Signal select;
+};
+
+constexpr Shift SHIFTS[] = {
+    {"SHL", S::ALU_SHL}, {"SHR", S::ALU_SHR}, {"ROL", S::ALU_ROL}, {"ROR", S::ALU_ROR}, {"ASR", S::ALU_ASR},
+};
+
+// The address arithmetic. dst gets base + n or base + A from the EA
+// adder, then Z is tested as for every load into a D register.
+Signal loadEa(int d) { return d == 1 ? S::D1_LOAD_EA : S::D2_LOAD_EA; }
+Signal addrOf(int d) { return d == 1 ? S::ADDR_D1 : S::ADDR_D2; }
+Signal tstzOf(int d) { return d == 1 ? S::D1_TSTZ : S::D2_TSTZ; }
+
 struct AluFamily {
   std::string_view name;
   Signal select;
@@ -217,6 +242,26 @@ Microcode buildNaive() {
   for (const AluFamily& f : ALU_FAMILIES) {
     m.set(std::string(f.name) + " A <- [addr8]", naiveAlu(f.select, {S::RAM_TO_B, S::ADDR_OP8}));
     m.set(std::string(f.name) + " A <- imm8", naiveAlu(f.select, {S::IMM_TO_B}));
+    for (int xi = 1; xi <= 2; xi++) {
+      m.set(std::string(f.name) + " A <- [" + dn(xi) + "+n]",
+            naiveAlu(f.select, {S::RAM_TO_B, addrOf(xi), S::EA_OFF_OP8}));
+    }
+  }
+  for (const auto& [name, op] : {std::pair<std::string, Signal>{"CMP", S::ALU_SUB}, {"TST", S::ALU_AND}}) {
+    m.set(name + " A, [addr8]", naiveTest(op, {S::RAM_TO_B, S::ADDR_OP8}));
+    m.set(name + " A, imm8", naiveTest(op, {S::IMM_TO_B}));
+    for (int xi = 1; xi <= 2; xi++) {
+      m.set(name + " A, [" + dn(xi) + "+n]", naiveTest(op, {S::RAM_TO_B, addrOf(xi), S::EA_OFF_OP8}));
+    }
+  }
+  for (const Shift& sh : SHIFTS) {
+    m.set(std::string(sh.name) + " A", {{S::ACC_TO_A}, {sh.select, S::ACC_LOAD_ALU}, {sh.select, S::FLAGS_LOAD}, {S::PC_INC}});
+  }
+  for (int d = 1; d <= 2; d++) {
+    for (int b = 1; b <= 2; b++) {
+      m.set("LD " + dn(d) + " <- " + dn(b) + "+n", {{loadEa(d), addrOf(b), S::EA_OFF_OP16}, {tstzOf(d)}, {S::PC_INC}});
+      m.set("LD " + dn(d) + " <- " + dn(b) + "+A", {{loadEa(d), addrOf(b), S::EA_OFF_A}, {tstzOf(d)}, {S::PC_INC}});
+    }
   }
 
   m.set("PUSHB A", {{S::STK_WRITE_ACC}, {S::SP_DEC}, {S::PC_INC}});
@@ -295,6 +340,26 @@ Microcode buildOptimal() {
     m.set(std::string(f.name) + " A <- [addr8]",
           optimalAlu(f.select, {S::RAM_TO_B, S::ADDR_OP8}));
     m.set(std::string(f.name) + " A <- imm8", optimalAlu(f.select, {S::IMM_TO_B}));
+    for (int xi = 1; xi <= 2; xi++) {
+      m.set(std::string(f.name) + " A <- [" + dn(xi) + "+n]",
+            optimalAlu(f.select, {S::RAM_TO_B, addrOf(xi), S::EA_OFF_OP8}));
+    }
+  }
+  for (const auto& [name, op] : {std::pair<std::string, Signal>{"CMP", S::ALU_SUB}, {"TST", S::ALU_AND}}) {
+    m.set(name + " A, [addr8]", optimalTest(op, {S::RAM_TO_B, S::ADDR_OP8}));
+    m.set(name + " A, imm8", optimalTest(op, {S::IMM_TO_B}));
+    for (int xi = 1; xi <= 2; xi++) {
+      m.set(name + " A, [" + dn(xi) + "+n]", optimalTest(op, {S::RAM_TO_B, addrOf(xi), S::EA_OFF_OP8}));
+    }
+  }
+  for (const Shift& sh : SHIFTS) {
+    m.set(std::string(sh.name) + " A", {{S::ACC_TO_A}, {sh.select, S::ACC_LOAD_ALU, S::FLAGS_LOAD}});
+  }
+  for (int d = 1; d <= 2; d++) {
+    for (int b = 1; b <= 2; b++) {
+      m.set("LD " + dn(d) + " <- " + dn(b) + "+n", {{loadEa(d), addrOf(b), S::EA_OFF_OP16}, {tstzOf(d)}});
+      m.set("LD " + dn(d) + " <- " + dn(b) + "+A", {{loadEa(d), addrOf(b), S::EA_OFF_A}, {tstzOf(d)}});
+    }
   }
 
   m.set("PUSHB A", {{S::STK_WRITE_ACC, S::SP_DEC}});

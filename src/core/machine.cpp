@@ -129,6 +129,8 @@ Machine::RowInfo Machine::analyze(const Row& row) {
   for (Signal s : row) {
     const SignalMeta& meta = signalMeta(s);
     if (meta.mem == RamRead || meta.mem == RamWrite) info.needsRam = true;
+    // An address load uses the adder with no RAM access.
+    if (s == Signal::D1_LOAD_EA || s == Signal::D2_LOAD_EA) info.needsRam = true;
     if (meta.mem == StackRead || meta.mem == StackWrite) info.needsStack = true;
     if (meta.aluSelect != AluOp::AluNone) info.aluOp = meta.aluSelect;
   }
@@ -222,13 +224,27 @@ Machine::AluOut Machine::alu(AluOp op) const {
     case Or: result = a | b; break;
     case Xor: result = a ^ b; break;
     case PassB: result = b; break;
+    // The shifts read A alone. The bit that leaves goes to C, and the
+    // rotates bring the old C in at the other end.
+    case Shl:
+    case Rol:
+      result = ((a << 1) | (op == Rol && flags.c ? 1 : 0)) & 0xff;
+      f.c = (a & 0x80) != 0;
+      break;
+    case Shr:
+    case Ror:
+    case Asr:
+      result = (a >> 1) | (op == Ror && flags.c ? 0x80 : 0) | (op == Asr ? (a & 0x80) : 0);
+      f.c = (a & 1) != 0;
+      break;
     case AluNone: break;
   }
   f.z = result == 0;
   f.n = (result & 0x80) != 0;
-  // Logic operations leave C and V as they were.
+  // Logic operations leave C and V as they were. Shifts set C and leave V.
+  const bool shift = op == Shl || op == Shr || op == Rol || op == Ror || op == Asr;
   if (!arithmetic) {
-    f.c = flags.c;
+    if (!shift) f.c = flags.c;
     f.v = flags.v;
   }
   return {static_cast<uint8_t>(result), f};
@@ -255,6 +271,7 @@ uint16_t Machine::effectiveAddress(const Row& row) {
   else if (has(row, S::ADDR_A)) base = acc;
   unsigned ea = base;
   if (has(row, S::EA_OFF_OP8)) ea += irOperand & 0xff;
+  if (has(row, S::EA_OFF_OP16)) ea += irOperand;
   if (has(row, S::EA_OFF_A)) ea += acc;
   if (has(row, S::EA_CIN)) ea += 1;
   // No address is illegal. The adder masks to 16 bits and RAM is 64KB, so a
@@ -365,6 +382,9 @@ bool Machine::executeRow(const Row& row, const RowInfo& info) {
 
       case S::D1_LOAD_OP16: writes.push(T::D1, irOperand); break;
       case S::D2_LOAD_OP16: writes.push(T::D2, irOperand); break;
+      // The adder's output itself, the address a RAM access would use.
+      case S::D1_LOAD_EA: writes.push(T::D1, ea); break;
+      case S::D2_LOAD_EA: writes.push(T::D2, ea); break;
       case S::D1_TSTZ: {
         Flags f = flags;
         f.z = d1 == 0;
@@ -428,10 +448,11 @@ bool Machine::executeRow(const Row& row, const RowInfo& info) {
 
       // Pure address-stage and ALU-select signals carry no action of their own.
       case S::ADDR_OP8: case S::ADDR_OP16: case S::ADDR_D1: case S::ADDR_D2:
-      case S::ADDR_A: case S::EA_OFF_OP8: case S::EA_OFF_A: case S::EA_CIN:
+      case S::ADDR_A: case S::EA_OFF_OP8: case S::EA_OFF_OP16: case S::EA_OFF_A: case S::EA_CIN:
       case S::STK_CIN:
       case S::ALU_ADD: case S::ALU_SUB: case S::ALU_ADC: case S::ALU_SBC:
       case S::ALU_AND: case S::ALU_OR: case S::ALU_XOR: case S::ALU_PASS_B:
+      case S::ALU_SHL: case S::ALU_SHR: case S::ALU_ROL: case S::ALU_ROR: case S::ALU_ASR:
         break;
     }
   }

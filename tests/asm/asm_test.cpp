@@ -238,7 +238,31 @@ TEST_SUITE("assembler errors") {
   }
 
   TEST_CASE("rejects register-to-register moves") {
-    CHECK(has(firstError("LD D1 <- D2"), "register to register"));
+    CHECK(has(firstError("LD A <- D2"), "register to register"));
+    CHECK(has(firstError("LD D1 <- A"), "through RAM"));
+    CHECK(has(firstError("LD D1 <- D1"), "does nothing"));
+  }
+
+  TEST_CASE("a D register takes a sum: the address arithmetic") {
+    Assembled a = ok("LD D1 <- D1+8\nLD D1 <- D1-8\nLD D2 <- D1+A\nLD D1 <- D2\nLD D2 <- D2+count\n.ram\ncount: db 0");
+    REQUIRE_EQ(a.program.size(), 5u);
+    CHECK(a.program[0] == Instr{opOf("LD D1 <- D1+n"), 8});
+    CHECK(a.program[1] == Instr{opOf("LD D1 <- D1+n"), 0xfff8});
+    CHECK(a.program[2] == Instr{opOf("LD D2 <- D1+A"), 0});
+    CHECK(a.program[3] == Instr{opOf("LD D1 <- D2+n"), 0});
+    CHECK(a.program[4] == Instr{opOf("LD D2 <- D2+n"), 0});
+  }
+
+  TEST_CASE("CMP and TST take a comma, the shifts take A") {
+    Assembled a = ok("CMP A, 5\nCMP A, [x]\nTST A, [D2+3]\nADD A <- [D1+4]\nSHL A\nASR A\n.ram\nx: db 0");
+    CHECK(a.program[0] == Instr{opOf("CMP A, imm8"), 5});
+    CHECK(a.program[1] == Instr{opOf("CMP A, [addr8]"), 0});
+    CHECK(a.program[2] == Instr{opOf("TST A, [D2+n]"), 3});
+    CHECK(a.program[3] == Instr{opOf("ADD A <- [D1+n]"), 4});
+    CHECK(a.program[4] == Instr{opOf("SHL A"), 0});
+    CHECK(a.program[5] == Instr{opOf("ASR A"), 0});
+    CHECK(has(firstError("CMP A <- 5"), "takes no arrow"));
+    CHECK(has(firstError("SHL D1"), "shifts A"));
   }
 
   TEST_CASE("rejects undefined and duplicate labels") {

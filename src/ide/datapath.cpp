@@ -51,6 +51,8 @@ const Wire WIRES[] = {
     {"ea-ram", {{104, 86}, {72, 86}}},
     {"d1-ea", {{240, 84}, {168, 84}}},
     {"d2-ea", {{336, 88}, {168, 88}}},
+    {"ea-d1", {{168, 96}, {240, 96}}},
+    {"ea-d2", {{160, 100}, {160, 104}, {320, 104}, {320, 96}, {336, 96}}},
     {"acc-ea", {{44, 196}, {44, 184}, {88, 184}, {88, 120}, {132, 120}, {132, 100}}},
     {"ram-d1", {{72, 76}, {240, 76}}},
     {"ram-d2", {{72, 72}, {336, 72}}},
@@ -110,7 +112,8 @@ const Card CARDS[] = {
     {"EA", "EA · effective address adder", "combinational · forgets every cycle",
      "EA stands for effective address: the address that actually takes effect on RAM this cycle, after all "
      "the addressing math is done. The EA adder computes it fresh, every cycle, from three ingredients: a "
-     "base, an optional offset, and an optional carry-in."},
+     "base, an optional offset, and an optional carry-in. D1_LOAD_EA and D2_LOAD_EA keep the sum in a D "
+     "register instead, which is how LD D1 <- D1+8 steps a pointer by any amount."},
     {"D1", "D1 · pointer register", "register · remembers across cycles",
      "A 16 bit pointer register. It can load whole from the operand (D1_LOAD_OP16), or one byte half at a "
      "time from RAM or the stack, high half then low half, matching the machine's big-endian words."},
@@ -133,7 +136,8 @@ const Card CARDS[] = {
      "device claims reads as zero."},
     {"ALU", "ALU · arithmetic logic unit", "combinational · forgets every cycle",
      "The one place arithmetic happens. It combines the A and B latches under one selected operation: add, "
-     "subtract, with or without carry, and, or, xor, or pass B through untouched (the load path)."},
+     "subtract, with or without carry, and, or, xor, or pass B through untouched (the load path). The five "
+     "shifts read A alone and move it one bit, with the bit that leaves going to C."},
     {"FLAGS", "FLAGS · condition codes", "register · remembers across cycles",
      "Four bits that remember what the last captured result looked like: Z (zero), N (bit 7), C (carry or "
      "borrow), V (signed overflow)."},
@@ -181,7 +185,16 @@ std::vector<std::string_view> componentsFor(Signal s) {
     case Signal::ADDR_D1: return {"EA", "D1"};
     case Signal::ADDR_D2: return {"EA", "D2"};
     case Signal::ADDR_A: return {"EA", "ACC"};
-    case Signal::EA_OFF_OP8: return {"EA", "IR"};
+    case Signal::EA_OFF_OP8:
+    case Signal::EA_OFF_OP16: return {"EA", "IR"};
+    case Signal::D1_LOAD_EA: return {"EA", "D1"};
+    case Signal::D2_LOAD_EA: return {"EA", "D2"};
+    // A shift reads the A latch alone.
+    case Signal::ALU_SHL:
+    case Signal::ALU_SHR:
+    case Signal::ALU_ROL:
+    case Signal::ALU_ROR:
+    case Signal::ALU_ASR: return {"ALU", "A"};
     case Signal::EA_OFF_A: return {"EA", "ACC"};
     case Signal::EA_CIN: return {"EA"};
     case Signal::D1_LOAD_OP16: return {"D1", "IR"};
@@ -234,19 +247,25 @@ std::vector<std::string_view> wiresFor(Signal s) {
     case Signal::PC_FROM_D2: out = {"d2-pc"}; break;
     case Signal::ACC_TO_A: out = {"acc-a"}; break;
     case Signal::IMM_TO_B: out = {"ir-b"}; break;
-    case Signal::RAM_TO_B: out = {"ram-b"}; break;
+    case Signal::RAM_TO_B: out = {"ram-b", "ea-ram"}; break;
     case Signal::STK_TO_B: out = {"stack-b", "sp-stack"}; break;
     case Signal::ACC_LOAD_ALU: out = {"alu-acc"}; break;
     case Signal::FLAGS_LOAD: out = {"alu-flags"}; break;
-    case Signal::RAM_WRITE_ACC: out = {"acc-ram"}; break;
+    // The address the adder computes goes to RAM when a RAM signal uses
+    // it, and to a D register when an address load does. The address
+    // signals light only the adder's inputs.
+    case Signal::RAM_WRITE_ACC: out = {"acc-ram", "ea-ram"}; break;
     case Signal::ADDR_OP8:
     case Signal::ADDR_OP16:
-    case Signal::EA_OFF_OP8: out = {"ir-ea", "ea-ram"}; break;
-    case Signal::ADDR_D1: out = {"d1-ea", "ea-ram"}; break;
-    case Signal::ADDR_D2: out = {"d2-ea", "ea-ram"}; break;
+    case Signal::EA_OFF_OP8:
+    case Signal::EA_OFF_OP16: out = {"ir-ea"}; break;
+    case Signal::ADDR_D1: out = {"d1-ea"}; break;
+    case Signal::ADDR_D2: out = {"d2-ea"}; break;
     case Signal::ADDR_A:
-    case Signal::EA_OFF_A: out = {"acc-ea", "ea-ram"}; break;
-    case Signal::EA_CIN: out = {"ea-ram"}; break;
+    case Signal::EA_OFF_A: out = {"acc-ea"}; break;
+    case Signal::EA_CIN: break;
+    case Signal::D1_LOAD_EA: out = {"ea-d1"}; break;
+    case Signal::D2_LOAD_EA: out = {"ea-d2"}; break;
     case Signal::D1_LOAD_OP16:
     case Signal::D2_LOAD_OP16: out = {"ir-d"}; break;
     case Signal::D1_INC: out = {"step-d1"}; break;
@@ -260,12 +279,15 @@ std::vector<std::string_view> wiresFor(Signal s) {
     case Signal::IO_READ: out = {"io-acc"}; break;
     default: break;
   }
+  const bool shift = s == Signal::ALU_SHL || s == Signal::ALU_SHR || s == Signal::ALU_ROL ||
+                     s == Signal::ALU_ROR || s == Signal::ALU_ASR;
   if (starts(n, "ALU_")) {
     out.push_back("a-alu");
-    out.push_back("b-alu");
+    if (!shift) out.push_back("b-alu");
   }
   if (ramD(n, '1')) out.push_back("ram-d1");
   if (ramD(n, '2')) out.push_back("ram-d2");
+  if (ramD(n, '1') || ramD(n, '2')) out.push_back("ea-ram");
   if (stkPc(n)) {
     out.push_back("stack-pc");
     out.push_back("sp-stack");
