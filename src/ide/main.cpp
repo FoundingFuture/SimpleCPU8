@@ -15,6 +15,7 @@
 // F11 a microcycle.
 
 #include <cstdio>
+#include <optional>
 #include <string>
 
 #include "imgui.h"
@@ -48,16 +49,20 @@ int main(int argc, char** argv) {
     ide.applyScale();
     std::string screenshot;
     bool run = false;
+    // An opened project picks its own level. A --level on the command
+    // line is applied after everything opened, so it wins.
+    std::optional<sc8::Level> level;
     for (int i = 1; i < argc; i++) {
       const std::string a = argv[i];
       if (a == "--screenshot" && i + 1 < argc) {
         screenshot = argv[++i];
       } else if (a == "--level" && i + 1 < argc) {
-        const std::string level = argv[++i];
-        if (level == "project" || level == "edit") ide.setLevel(sc8::Level::Project);
-        else if (level == "run") ide.setLevel(sc8::Level::Run);
-        else if (level == "cpu" || level == "microcode") ide.setLevel(sc8::Level::Cpu);
-        else std::fprintf(stderr, "unknown level %s: project, run or cpu\n", level.c_str());
+        const std::string name = argv[++i];
+        if (name == "basic") level = sc8::Level::Basic;
+        else if (name == "project" || name == "edit") level = sc8::Level::Project;
+        else if (name == "run") level = sc8::Level::Run;
+        else if (name == "cpu" || name == "microcode") level = sc8::Level::Cpu;
+        else std::fprintf(stderr, "unknown level %s: basic, project, run or cpu\n", name.c_str());
       } else if (a == "--speed" && i + 1 < argc) {
         if (!ide.setSpeed(argv[++i])) std::fprintf(stderr, "unknown speed %s\n", argv[i]);
       } else if (a == "--run") {
@@ -66,6 +71,7 @@ int main(int argc, char** argv) {
         ide.open(a);
       }
     }
+    if (level) ide.setLevel(*level);
     if (run) ide.run();
 
     int hostFrames = 0;

@@ -677,7 +677,10 @@ lays out a new project with a first program in it.
 
 `./r --ide` opens the IDE, a bigger window with more panes. File, New
 project, BASIC lays out a BASIC project with one file, `autorun.bas`.
-The editor shows that file, with the machine's screen beside it.
+The IDE opens it on the BASIC level. The editor is on the left, the
+machine's screen on the right, and this guide under the screen. Nothing
+else is in the way. The Level menu shows the files and the messages
+when you want them, and F2 opens the full Project level.
 
 Type a program in the editor. Press Run in BASIC. The IDE boots BASIC,
 puts the program in the machine's memory and types `RUN` for you.

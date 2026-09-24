@@ -141,6 +141,15 @@ void Ide::openProject(const std::string& dir) {
   focusFiles_ = true;
   buildProject(false);
   note("opened project " + projectTitle_ + " in " + projectDir_);
+  levelForProject();
+}
+
+void Ide::levelForProject() {
+  const bool allBasic = !docs_.empty() && std::all_of(docs_.begin(), docs_.end(), [](const Doc& d) {
+    return docKindOf(d.name) == DocKind::Basic;
+  });
+  if (allBasic) setLevel(Level::Basic);
+  else if (level_ == Level::Basic) setLevel(Level::Project);
 }
 
 // A ROM is a project too: its BASIC slots and its own microcode set are
@@ -201,6 +210,7 @@ void Ide::openRomAsProject(const std::string& path) {
   buildProject(false);
   note("opened ROM " + path + (carriedProject_ ? " with its project: " : " as a project: ") +
        std::to_string(docs_.size()) + " document(s)" + (carriedProject_ ? "" : ", the program as it is"));
+  levelForProject();
 }
 
 void Ide::createProject(const std::string& dir, project::Kind kind) {
@@ -584,12 +594,12 @@ void Ide::typeIntoMachine() {
 
 // ---- the panes
 
-void Ide::filesPane() {
+void Ide::filesPane(const char* name, bool* open) {
   if (focusFiles_) {
     ImGui::SetNextWindowFocus();
     focusFiles_ = false;
   }
-  ImGui::Begin("Files");
+  ImGui::Begin(name, open);
   const std::string where = projectDir_.empty() ? (romBase_ ? "a ROM, not saved as a folder yet" : "not saved yet")
                                                 : projectDir_;
   ImGui::TextWrapped("%s", projectTitle_.c_str());
@@ -643,8 +653,8 @@ void Ide::filesPane() {
 // The editor shows the active document with the buttons its kind needs.
 // A .bas document has the interpreter beside it: Run in BASIC, the sync
 // state and Pull.
-void Ide::editorPane() {
-  ImGui::Begin("Editor");
+void Ide::editorPane(const char* name) {
+  ImGui::Begin(name);
   Doc* d = activeDoc();
   if (!d) {
     ImGui::TextDisabled("no document: add one in the Files pane, or open a project");

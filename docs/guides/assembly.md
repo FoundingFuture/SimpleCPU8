@@ -84,7 +84,7 @@ its files. F7 assembles the source and the Messages pane reports the
 count: `assembled: 4 instructions, 3 bytes of .ram, 0
 bytes of .data`. An error names the line instead.
 
-F2 switches to the Run level. Six panes surround the screen.
+F3 switches to the Run level. Six panes surround the screen.
 
 The Listing shows the source with a column of numbers on the left. For
 an instruction line the column holds its slot number, then the opcode
@@ -140,7 +140,7 @@ destination. Square brackets mean the contents of an address. So `LD A
 [y]` adds the byte at address 1 to it. `LD [sum] <- A` writes `A` to
 address 2. `HLT` stops the clock.
 
-Open it in the IDE and press F2, then Step four times. After the first
+Open it in the IDE and press F3, then Step four times. After the first
 step `A` shows `05`, the bus line says `ram read 0000 <- 05`, and the
 first byte in the Memory pane is lit. The flags stay dark, because 5 is
 not zero and its top bit is clear. After the second step `A` shows `0C`,
@@ -1658,7 +1658,7 @@ tells you the slot when one of them is wrong.
 The microcode guide beside this one goes one layer down again. Every
 instruction in this guide is a short list of control signals, one row
 per cycle. The naive set that an assembly project runs on is open to
-read and change. The IDE's Microcode level, F3, shows the rows firing
+read and change. The IDE's CPU level, F4, shows the rows firing
 on the datapath as a program steps. `simplecpu-make new mine
 --microcode` lays out a project with the naive set as a file. Its
 program prints what every instruction costs.

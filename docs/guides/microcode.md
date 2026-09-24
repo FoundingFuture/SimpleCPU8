@@ -554,7 +554,7 @@ examples/cycles is the same project, kept in the repository, so
 
 ## The Microcode level
 
-`./r --ide` opens the IDE, and F3 switches to the Microcode level. The
+`./r --ide` opens the IDE, and F4 switches to the CPU level. The
 Listing and the Registers panes are the ones from the Run level. The
 Registers pane has the buttons Run, Step, Microstep, Frame and Power on,
 then the speed box. The first speed is `trace microcode`, three rows a

@@ -243,8 +243,12 @@ PEEK beside POKE so a driver can install itself from the prompt.
 ## IDE levels
 
 One screen cannot hold everything, so the IDE has levels. Each level is a
-saved pane layout, and switching level swaps the layout. Three:
+saved pane layout, and switching level swaps the layout. Four:
 
+- BASIC: the editor, the screen and the manual under it, nothing else.
+  A beginner writing BASIC sees only what BASIC needs. The Level menu
+  shows the files and the messages on request, as tabs beside the editor
+  and the manual. A project of `.bas` files only opens on this level.
 - Project: the files, the editor, the assembly the build made, the
   messages, the screen and the manual.
 - Run: the screen large, registers, memory, breakpoints, and the code
@@ -333,10 +337,12 @@ documents asks: save and quit, quit without saving, or stay. Opening and saving 
 own. It walks folders and can make a new folder on the way.
 
 The levels are built. Each level owns a Dear ImGui dockspace with a fixed
-id. imgui.ini keeps three layouts, so a rearrangement inside one level
+id. imgui.ini keeps four layouts, so a rearrangement inside one level
 survives a switch. The hidden levels are submitted with KeepAliveOnly. A
 pane both Run and CPU show, the listing and the registers, has one window
-name per level. F1, F2 and F3 switch the level, as does the Level menu.
+name per level. F1 to F4 switch the level, BASIC, Project, Run and CPU,
+as does the Level menu. `--level basic|project|run|cpu` picks one on the
+command line and wins over the level a project picks.
 The CRT toggle sits in the Display menu and has no key.
 
 The Run level's speed choice is the browser's ladder. Trace microcode

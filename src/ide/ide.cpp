@@ -191,9 +191,13 @@ void Ide::run() {
 
 void Ide::setLevel(Level level) {
   level_ = level;
-  // The manual follows the level too: the CPU level opens the microcode
-  // guide, the Run level the assembly guide. Project keeps the document's.
-  if (level == Level::Cpu) {
+  // The manual follows the level too: the BASIC level opens the BASIC
+  // guide, the CPU level the microcode guide, the Run level the assembly
+  // guide. Project keeps the document's.
+  if (level == Level::Basic) {
+    guideView_.guide = Guide::Basic;
+    manualTab_ = static_cast<int>(Guide::Basic);
+  } else if (level == Level::Cpu) {
     guideView_.guide = Guide::Microcode;
     manualTab_ = static_cast<int>(Guide::Microcode);
   } else if (level == Level::Run) {
@@ -483,11 +487,11 @@ void Ide::frame() {
   // The number in the id is the layout's version. A new pane bumps it, so
   // an imgui.ini from before the pane rebuilds the level once rather than
   // leaving the newcomer floating.
-  static const ImGuiID IDS[3] = {ImHashStr("sc8-level-project-3"), ImHashStr("sc8-level-run-2"),
-                                 ImHashStr("sc8-level-cpu-4")};
+  static const ImGuiID IDS[LEVEL_COUNT] = {ImHashStr("sc8-level-basic-1"), ImHashStr("sc8-level-project-3"),
+                                           ImHashStr("sc8-level-run-2"), ImHashStr("sc8-level-cpu-4")};
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const int active = static_cast<int>(level_);
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < LEVEL_COUNT; i++) {
     if (i != active) ImGui::DockSpaceOverViewport(IDS[i], vp, ImGuiDockNodeFlags_KeepAliveOnly);
   }
   const ImGuiID dockspace = ImGui::DockSpaceOverViewport(IDS[active], vp, ImGuiDockNodeFlags_PassthruCentralNode);
@@ -496,7 +500,10 @@ void Ide::frame() {
     buildLayout(level_, dockspace);
     // Which tab is in front is decided by focus, and every window of a
     // fresh layout asks for it. The one a person wants first wins here.
-    focusAfterLayout_ = level_ == Level::Project ? "Editor" : level_ == Level::Run ? "Memory##run" : "Microcode";
+    focusAfterLayout_ = level_ == Level::Basic     ? "Editor##basic"
+                        : level_ == Level::Project ? "Editor"
+                        : level_ == Level::Run     ? "Memory##run"
+                                                   : "Microcode";
   } else if (!focusAfterLayout_.empty()) {
     ImGui::SetWindowFocus(focusAfterLayout_.c_str());
     focusAfterLayout_.clear();
@@ -505,11 +512,18 @@ void Ide::frame() {
   shortcuts();
   screenHasKeys_ = false;
   switch (level_) {
+    case Level::Basic:
+      editorPane("Editor##basic");
+      screenPane("Screen##basic");
+      manualPane("Manual##basic");
+      if (basicShowsFiles_) filesPane("Files##basic", &basicShowsFiles_);
+      if (basicShowsMessages_) messagesPane("Messages##basic", &basicShowsMessages_);
+      break;
     case Level::Project:
-      filesPane();
-      editorPane();
+      filesPane("Files");
+      editorPane("Editor");
       assemblyPane();
-      messagesPane();
+      messagesPane("Messages");
       screenPane("Screen##project");
       manualPane("Manual##project");
       break;
@@ -520,14 +534,14 @@ void Ide::frame() {
       stackPane("Stack##run");
       breakpointsPane();
       listingPane("Listing##run");
-      messagesPane();
+      messagesPane("Messages");
       manualPane("Manual##run");
       break;
     case Level::Cpu:
       cpuPane();
       microcodePane();
       listingPane("Listing##micro");
-      messagesPane();
+      messagesPane("Messages");
       sidePane();
       break;
   }
@@ -551,6 +565,18 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
   ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
   ImGuiID left = dockspace, right, bottom, mid, midBottom, rightBottom, files;
   switch (level) {
+    case Level::Basic:
+      // The editor large on the left. The screen on the right with the
+      // manual under it. The files and the messages, when the Level menu
+      // shows them, open as tabs beside the editor and the manual.
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.42f, &right, &left);
+      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &rightBottom, &right);
+      ImGui::DockBuilderDockWindow("Files##basic", left);
+      ImGui::DockBuilderDockWindow("Editor##basic", left);
+      ImGui::DockBuilderDockWindow("Screen##basic", right);
+      ImGui::DockBuilderDockWindow("Messages##basic", rightBottom);
+      ImGui::DockBuilderDockWindow("Manual##basic", rightBottom);
+      break;
     case Level::Project:
       // The files on the far left, the editor beside them with the
       // messages under it. The screen on the right, so a program's result
@@ -657,9 +683,15 @@ void Ide::menuBar() {
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Level")) {
-    if (ImGui::MenuItem("Project", "F1", level_ == Level::Project)) setLevel(Level::Project);
-    if (ImGui::MenuItem("Run", "F2", level_ == Level::Run)) setLevel(Level::Run);
-    if (ImGui::MenuItem("CPU", "F3", level_ == Level::Cpu)) setLevel(Level::Cpu);
+    if (ImGui::MenuItem("BASIC", "F1", level_ == Level::Basic)) setLevel(Level::Basic);
+    if (ImGui::MenuItem("Project", "F2", level_ == Level::Project)) setLevel(Level::Project);
+    if (ImGui::MenuItem("Run", "F3", level_ == Level::Run)) setLevel(Level::Run);
+    if (ImGui::MenuItem("CPU", "F4", level_ == Level::Cpu)) setLevel(Level::Cpu);
+    if (level_ == Level::Basic) {
+      ImGui::Separator();
+      if (ImGui::MenuItem("Show files", nullptr, basicShowsFiles_)) basicShowsFiles_ = !basicShowsFiles_;
+      if (ImGui::MenuItem("Show messages", nullptr, basicShowsMessages_)) basicShowsMessages_ = !basicShowsMessages_;
+    }
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Run")) {
@@ -747,9 +779,10 @@ void Ide::menuBar() {
 void Ide::shortcuts() {
   if (dialog_.isOpen() || askQuit_) return;
   const ImGuiIO& io = ImGui::GetIO();
-  if (ImGui::IsKeyPressed(ImGuiKey_F1)) setLevel(Level::Project);
-  if (ImGui::IsKeyPressed(ImGuiKey_F2)) setLevel(Level::Run);
-  if (ImGui::IsKeyPressed(ImGuiKey_F3)) setLevel(Level::Cpu);
+  if (ImGui::IsKeyPressed(ImGuiKey_F1)) setLevel(Level::Basic);
+  if (ImGui::IsKeyPressed(ImGuiKey_F2)) setLevel(Level::Project);
+  if (ImGui::IsKeyPressed(ImGuiKey_F3)) setLevel(Level::Run);
+  if (ImGui::IsKeyPressed(ImGuiKey_F4)) setLevel(Level::Cpu);
   if (ImGui::IsKeyPressed(ImGuiKey_F7)) buildProject(false);
   if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
     if (io.KeyShift) powerOn();
@@ -932,8 +965,8 @@ void Ide::settingsDialog() {
   ImGui::EndPopup();
 }
 
-void Ide::messagesPane() {
-  ImGui::Begin("Messages");
+void Ide::messagesPane(const char* name, bool* open) {
+  ImGui::Begin(name, open);
   for (const std::string& msg : messages_) ImGui::TextWrapped("%s", msg.c_str());
   if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
   ImGui::End();

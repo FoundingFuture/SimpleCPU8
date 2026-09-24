@@ -1,6 +1,7 @@
 // The IDE: one Computer, one project, and the panes that look at both,
-// arranged in levels. A level is a saved dock layout. Project holds the
-// files, the screen, the messages and the manual. Run holds the screen
+// arranged in levels. A level is a saved dock layout. BASIC holds the
+// editor, the screen and the manual only. Project holds the files, the
+// editor, the screen, the messages and the manual. Run holds the screen
 // and the debugger. CPU holds the datapath, the flow and the microcode
 // rows, with a side pane for the screen, the manual and the state.
 // Switching level swaps the layout.
@@ -34,7 +35,12 @@
 
 namespace sc8 {
 
-enum class Level { Project, Run, Cpu };
+// BASIC is the plain level: the editor, the screen and the manual, for a
+// person writing BASIC who needs nothing else in view. Project adds the
+// files, the assembly and the messages. Run adds the debugger. CPU shows
+// the inside of the processor.
+enum class Level { Basic, Project, Run, Cpu };
+constexpr int LEVEL_COUNT = 4;
 
 // The speed ladder from the browser's speed menu: the trace speed, six
 // instruction rates, three frame-locked rates, then MAX.
@@ -193,10 +199,10 @@ class Ide {
   void settingsDialog();
 
   // The panes. A pane shared by two levels takes the level's window name.
-  void filesPane();
-  void editorPane();
+  void filesPane(const char* name, bool* open = nullptr);
+  void editorPane(const char* name);
   void assemblyPane();
-  void messagesPane();
+  void messagesPane(const char* name, bool* open = nullptr);
   void manualPane(const char* name);
   void manualBody();
   void screenPane(const char* name);
@@ -279,7 +285,14 @@ class Ide {
   std::vector<std::string> messages_;
 
   Level level_ = Level::Project;
-  bool layoutBuilt_[3] = {false, false, false};
+  bool layoutBuilt_[LEVEL_COUNT] = {false, false, false, false};
+  // The BASIC level keeps the files and the messages out of sight until
+  // the Level menu shows them.
+  bool basicShowsFiles_ = false;
+  bool basicShowsMessages_ = false;
+  // After a project opens: the BASIC level for a project of .bas files
+  // only, the Project level for anything else.
+  void levelForProject();
   std::string focusAfterLayout_;  // a window to bring to the front once
   bool done_ = false;
   bool askQuit_ = false;
