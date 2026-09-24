@@ -81,8 +81,17 @@ struct Created {
 };
 Created create(const std::filesystem::path& dir, Kind kind);
 
+// A source as text, named the way its file would be: main.c, game.bas,
+// driver.asm, microcode.txt. The IDE builds from these when a project
+// lives in memory: an opened ROM, or a scratch project not yet saved.
+struct Source {
+  std::string name;
+  std::string text;
+};
+
 struct Built {
   std::optional<Cartridge> cartridge;  // nothing on an error
+  Assembled assembled;                 // what the assembler made, for a listing
   std::string assembly;                // the whole text the assembler saw
   std::vector<std::string> errors;     // file:line: message, ready to print
   std::vector<std::string> notes;      // conversion notes and the like
@@ -94,6 +103,13 @@ struct Built {
 
 // Compile and assemble. Nothing is written to disk.
 Built build(const Layout& layout, const Options& opts);
+
+// The same from sources in memory. Errors name the sources by their names
+// under `where`, a folder shown in messages. `base` is a cartridge whose
+// program stands in when the sources hold no .c and no .asm: an opened
+// ROM's program, with the sources' .bas slots and microcode.txt on top.
+Built buildSources(const std::vector<Source>& sources, const Assets& assets, const Options& opts,
+                   const std::string& title, const std::string& where, const std::optional<Cartridge>& base = {});
 
 // Build and write the ROM, and the assembly when asked. The path written
 // comes back, or nothing with the errors in the Built.

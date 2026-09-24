@@ -41,10 +41,10 @@ int main(int argc, char** argv) {
         screenshot = argv[++i];
       } else if (a == "--level" && i + 1 < argc) {
         const std::string level = argv[++i];
-        if (level == "edit") ide.setLevel(sc8::Level::Edit);
+        if (level == "project" || level == "edit") ide.setLevel(sc8::Level::Project);
         else if (level == "run") ide.setLevel(sc8::Level::Run);
-        else if (level == "microcode") ide.setLevel(sc8::Level::Microcode);
-        else std::fprintf(stderr, "unknown level %s: edit, run or microcode\n", level.c_str());
+        else if (level == "cpu" || level == "microcode") ide.setLevel(sc8::Level::Cpu);
+        else std::fprintf(stderr, "unknown level %s: project, run or cpu\n", level.c_str());
       } else if (a == "--speed" && i + 1 < argc) {
         if (!ide.setSpeed(argv[++i])) std::fprintf(stderr, "unknown speed %s\n", argv[i]);
       } else if (a == "--run") {
@@ -56,7 +56,9 @@ int main(int argc, char** argv) {
     if (run) ide.run();
 
     int hostFrames = 0;
-    while (!WindowShouldClose()) {
+    while (!ide.done()) {
+      // The close gesture asks about unsaved documents before it ends.
+      if (WindowShouldClose()) ide.requestQuit();
       if (!screenshot.empty() && ++hostFrames == 60) {
         // raylib's TakeScreenshot drops the directory, so export by hand.
         Image shot = LoadImageFromScreen();

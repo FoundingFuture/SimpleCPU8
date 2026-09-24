@@ -25,17 +25,6 @@ namespace sc8 {
 
 namespace {
 
-const char* DEFAULT_SOURCE = R"(; SimpleCPU-8: a countdown, then a halt.
-        LD A <- 5
-loop:   SUB A <- 1
-        JZ done
-        JMP loop
-done:   LD [result] <- A
-        HLT
-.ram
-result: db 0xEE
-)";
-
 // The ladder of the browser's speed menu. Slow speeds stretch the tick so
 // the label is literally true: at 0.5 the machine executes one instruction
 // every two seconds.
@@ -100,57 +89,64 @@ std::string disassemble(const Instr& in) {
 
 std::span<const Speed> speedLadder() { return LADDER; }
 
-Ide::Ide() : source_(DEFAULT_SOURCE) {
-  source_.reserve(1 << 16);
-  basicText_.reserve(1 << 14);
+Ide::Ide() {
   customText_.reserve(1 << 15);
   audio_.start();
-  assembleSource();
+  newScratchProject();
 }
 
+// A ROM opens as a project. A folder opens as a project. A source file
+// opens the project it sits in: its folder, or the folder above a src/
+// directory, and becomes the active document.
 void Ide::open(const std::string& path) {
-  openedBasic_ = fs::path(path).extension() == ".bas";
-  if (fs::path(path).extension() == ".rom") {
-    loadRomFile(path);
+  const std::string ext = fs::path(path).extension().string();
+  openedBasic_ = ext == ".bas";
+  if (ext == ".rom") {
+    openRomAsProject(path);
     return;
   }
-  // A C file opens its project: the folder it sits in, or the folder
-  // above a src/ directory. A folder opens as a project too.
   if (fs::is_directory(path)) {
     openProject(path);
-    buildProject(false);
     return;
   }
-  if (fs::path(path).extension() == ".c" || fs::path(path).extension() == ".h") {
+  if (docKindOf(fs::path(path).filename().string()) != DocKind::Other) {
     fs::path dir = fs::absolute(path).parent_path();
     if (dir.filename() == "src") dir = dir.parent_path();
     openProject(dir.string());
-    openProjectFile(fs::path(path).filename().string());
-    buildProject(false);
-    return;
-  }
-  if (fs::path(path).extension() == ".bas") {
-    std::ifstream in(path);
-    if (!in) {
-      note("cannot read " + path);
-      return;
+    const std::string name = fs::path(path).filename().string();
+    for (size_t i = 0; i < docs_.size(); i++) {
+      if (docs_[i].name == name) activate(i);
     }
-    basicText_.assign(std::istreambuf_iterator<char>(in), {});
-    basicPath_ = path;
     return;
   }
-  std::ifstream in(path);
-  if (!in) {
-    note("cannot read " + path);
-    return;
-  }
-  source_.assign(std::istreambuf_iterator<char>(in), {});
-  source_.reserve(source_.size() + (1 << 16));
-  sourcePath_ = path;
-  assembleSource();
+  note("cannot open " + path + ": a .rom, a folder, or a .c, .h, .asm, .bas or microcode.txt");
 }
 
-void Ide::setLevel(Level level) { level_ = level; }
+void Ide::run() {
+  if (openedBasic_ && activeDoc() && docKindOf(activeDoc()->name) == DocKind::Basic && !projectDir_.empty()) {
+    // The whole project built when it opened. Its AUTORUN is running
+    // already when the .bas was that one; any other runs the quick way.
+    if (activeDoc()->name == "autorun.bas") setRunning(true);
+    else runInBasic();
+    return;
+  }
+  setRunning(true);
+}
+
+void Ide::setLevel(Level level) {
+  level_ = level;
+  // The manual follows the level too: the CPU level opens the microcode
+  // guide, the Run level the assembly guide. Project keeps the document's.
+  if (level == Level::Cpu) {
+    guideView_.guide = Guide::Microcode;
+    manualTab_ = static_cast<int>(Guide::Microcode);
+  } else if (level == Level::Run) {
+    guideView_.guide = Guide::Assembly;
+    manualTab_ = static_cast<int>(Guide::Assembly);
+  } else if (activeDoc()) {
+    activate(active_);
+  }
+}
 
 bool Ide::setSpeed(const std::string& value) {
   for (size_t i = 0; i < std::size(LADDER); i++) {
@@ -162,193 +158,32 @@ bool Ide::setSpeed(const std::string& value) {
   return false;
 }
 
-void Ide::loadRomFile(const std::string& path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) {
-    note("cannot read " + path);
-    return;
-  }
-  std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
-  CartridgeResult r = decodeCartridge(bytes);
-  if (!r.cartridge) {
-    note(path + ": " + r.error);
-    return;
-  }
-  romPath_ = path;
-  loadCartridge(std::move(*r.cartridge), path);
+void Ide::requestQuit() {
+  if (anyDirty()) askQuit_ = true;
+  else done_ = true;
 }
 
-// A cartridge from a file has no source, so the listing shows a
-// disassembly. The slot list mirrors the ROM's BAS chunk for the BASIC
-// pane. The machine's own cartridge is left alone once inserted.
-void Ide::bootBasic() {
-  CartridgeResult r = decodeCartridge(std::vector<uint8_t>(basicRom().begin(), basicRom().end()));
-  if (!r.cartridge) {
-    note("BASIC ROM: " + r.error);
-    return;
-  }
-  romPath_.clear();
-  loadCartridge(std::move(*r.cartridge), "the BASIC ROM");
-  basicBooted_ = true;
-  // A fresh interpreter holds the empty program. Starting from it keeps
-  // the boot from counting as a change to the editor.
-  machineProgram_ = {0, 0, 3};
-}
-
-// The BASIC tab's Run: boot the interpreter unless it is already in the
-// slot, put the program in its memory and type RUN. The push waits for the
-// boot, since the system page is empty until bang_init fills it.
-void Ide::runInBasic() {
-  if (!basicBooted_ || computer_.machine().status != Status::Running) bootBasic();
-  pushPending_ = true;
-  afterPush_ = "RUN\n";
-  setRunning(true);
-}
-
-// The interpreter is at its prompt: SYS_PROG is set, no program runs, and
-// no command is still on its way through the keyboard.
-bool Ide::basicAtReady() const {
-  if (!basicBooted_ || computer_.machine().status != Status::Running) return false;
-  const auto& ram = computer_.machine().ram;
-  const int prog = (ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1];
-  return prog != 0 && ram[basic::SYS_RUNNING] == 0 && typingPos_ >= typing_.size();
-}
-
-// Write the editor's program where SYS_PROG points and set SYS_PROG_LEN,
-// which is what NEW followed by typing every line would leave behind.
-bool Ide::pushProgram() {
-  if (!basicAtReady()) return false;
-  auto& ram = computer_.machine().ram;
-  const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
-  std::vector<uint8_t> bytes = basic::encodeProgram(basicText_);
-  if (prog + bytes.size() > ram.size()) return false;
-  std::copy(bytes.begin(), bytes.end(), ram.begin() + static_cast<std::ptrdiff_t>(prog));
-  ram[basic::SYS_PROG_LEN] = static_cast<uint8_t>(bytes.size() >> 8);
-  ram[basic::SYS_PROG_LEN + 1] = static_cast<uint8_t>(bytes.size() & 255);
-  machineProgram_ = std::move(bytes);
-  syncedText_ = basicText_;
-  machineChanged_ = false;
-  return true;
-}
-
-// Replace the editor's text with the machine's program.
-void Ide::pullProgram() {
-  basicText_ = basic::decodeProgram(machineProgram_);
-  syncedText_ = basicText_;
-  machineChanged_ = false;
-}
-
-// Once per frame. A pending push goes through as soon as BASIC is at
-// READY. Otherwise the program memory is compared with the last exchange
-// and a difference flows to the editor, or waits for Pull when the editor
-// has unsynced edits of its own.
-void Ide::syncBasic() {
-  if (!basicAtReady()) return;
-  if (pushPending_) {
-    if (!pushProgram()) return;
-    pushPending_ = false;
-    typing_ = afterPush_;
-    typingPos_ = 0;
-    return;
-  }
-  const auto& ram = computer_.machine().ram;
-  const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
-  size_t len = static_cast<size_t>((ram[basic::SYS_PROG_LEN] << 8) | ram[basic::SYS_PROG_LEN + 1]);
-  if (len < 3 || len > basic::PROGRAM_MAX || prog + len > ram.size()) return;
-  const auto first = ram.begin() + static_cast<std::ptrdiff_t>(prog);
-  if (std::equal(first, first + static_cast<std::ptrdiff_t>(len), machineProgram_.begin(), machineProgram_.end())) return;
-  machineProgram_.assign(first, first + static_cast<std::ptrdiff_t>(len));
-  if (basicText_ == syncedText_) pullProgram();
-  else machineChanged_ = true;
-}
-
-void Ide::loadCartridge(Cartridge cart, const std::string& what) {
-  setRunning(false);
-  basicBooted_ = false;
-  pushPending_ = false;
-  machineChanged_ = false;
-  machineProgram_.clear();
-  basicSlots_ = cart.basic;
-  basicDirty_ = false;
-  haveSource_ = false;
-  computer_.insert(std::move(cart));
-  pushBreakpoints();
-  rebuildListing();
-  note("loaded " + what + ", microcode " + computer_.microcodeName());
-}
-
-void Ide::assembleSource() {
-  // An asset name resolves beside the source, or in the project's folders
-  // once a project built. A conversion that lost something is worth a line
-  // in the messages pane. The browser's asset card carried the same note.
-  std::vector<std::string> notes;
-  const fs::path dir = sourcePath_.empty() ? fs::current_path() : fs::path(sourcePath_).parent_path();
-  const project::Layout layout = projectLayout_ ? *projectLayout_ : project::layoutOf(dir);
-  Assets assets = project::loaders(layout, &notes);
-  assembled_ = assemble(source_, &assets);
-  assembledOk_ = assembled_.errors.empty();
-  messages_ = std::move(notes);
-  for (const AsmError& e : assembled_.errors) note("line " + std::to_string(e.line) + ": " + e.message);
-  haveSource_ = true;
-  if (assembledOk_) {
-    setRunning(false);
-    Cartridge c = assembled_.cartridge();
-    c.microcode = computer_.microcodeName();
-    c.basic = basicSlots_;
-    computer_.insert(std::move(c));
-    pushBreakpoints();
-    note("assembled: " + std::to_string(assembled_.program.size()) + " instructions, " +
-         std::to_string(assembled_.ramLength) + " bytes of .ram, " + std::to_string(assembled_.cart.size()) +
-         " bytes of .data");
-  }
-  rebuildListing();
-}
-
-void Ide::burnRom() {
-  if (!assembledOk_ || !haveSource_) {
-    note("fix the assembly errors before burning");
-    return;
-  }
-  fs::path out = sourcePath_.empty() ? fs::path("out.rom") : fs::path(sourcePath_).replace_extension(".rom");
-  Cartridge c = assembled_.cartridge();
-  c.microcode = computer_.microcodeName();
-  c.basic = basicSlots_;
-  std::vector<uint8_t> bytes = encodeCartridge(c);
-  std::ofstream o(out, std::ios::binary);
-  o.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-  if (o) {
-    basicDirty_ = false;
-    note("burned " + out.string() + " (" + std::to_string(bytes.size()) + " bytes)");
-  } else {
-    note("cannot write " + out.string());
-  }
-}
-
-void Ide::saveSource() {
-  if (sourcePath_.empty()) sourcePath_ = "main.asm";
-  std::ofstream o(sourcePath_);
-  o << source_;
-  note(o ? "saved " + sourcePath_ : "cannot write " + sourcePath_);
-}
-
-// The listing model: one line per source line, or one per instruction
-// when the ROM came without source. A .ram line that starts with a label
-// of RAM kind gets the label. The pane offers it for the watch list.
+// The listing model: one line per line of the built assembly, or one per
+// instruction when the ROM came without source. A .ram line that starts
+// with a label of RAM kind gets the label. The pane offers it for the
+// watch list.
 void Ide::rebuildListing() {
   listing_.clear();
   if (!haveSource_) {
     const auto& prog = computer_.cartridge().program;
     for (size_t i = 0; i < prog.size(); i++) {
+      if (prog[i] == UNLOADED_SLOT) continue;
       listing_.push_back({disassemble(prog[i]), static_cast<int>(i), std::nullopt, ""});
     }
     return;
   }
+  const std::string& source = builtAssembly_;
   size_t pos = 0;
   int lineNo = 0;
-  while (pos <= source_.size()) {
-    const size_t nl = source_.find('\n', pos);
-    const std::string text = source_.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
-    pos = nl == std::string::npos ? source_.size() + 1 : nl + 1;
+  while (pos <= source.size()) {
+    const size_t nl = source.find('\n', pos);
+    const std::string text = source.substr(pos, nl == std::string::npos ? std::string::npos : nl - pos);
+    pos = nl == std::string::npos ? source.size() + 1 : nl + 1;
     lineNo++;
     ListLine line{text, std::nullopt, std::nullopt, ""};
     if (auto it = assembled_.lineToInstr.find(lineNo); it != assembled_.lineToInstr.end()) line.instr = it->second;
@@ -465,10 +300,21 @@ void Ide::selectMicrocode(const std::string& name) {
     note("microcode: " + std::to_string(mcErrors_.size()) + " error(s), the set was not applied");
     return;
   }
+  // A locked set follows the choice: the lock is on what runs now.
+  if (lockedMicrocode_) lockedMicrocode_ = name;
   pushBreakpoints();
   selectedSection_ = 0;
   // The trace speed needs readable rows, which the sealed set hides.
   if (!computer_.microcodeInspectable() && LADDER[static_cast<size_t>(speed_)].micro) speed_ = 1;
+}
+
+// After every insert: a locked set replaces whatever the cartridge
+// brought, so the machine keeps running the person's own microcode.
+void Ide::applyLock() {
+  if (!lockedMicrocode_) return;
+  if (computer_.microcodeName() == *lockedMicrocode_) return;
+  mcErrors_ = computer_.selectMicrocode(*lockedMicrocode_);
+  if (!mcErrors_.empty()) note("the locked microcode set no longer parses; the cartridge's own set runs");
 }
 
 void Ide::toggleBreakpoint(int instr) {
@@ -512,8 +358,8 @@ void Ide::frame() {
   // The number in the id is the layout's version. A new pane bumps it, so
   // an imgui.ini from before the pane rebuilds the level once rather than
   // leaving the newcomer floating.
-  static const ImGuiID IDS[3] = {ImHashStr("sc8-level-edit-2"), ImHashStr("sc8-level-run-1"),
-                                 ImHashStr("sc8-level-microcode-1")};
+  static const ImGuiID IDS[3] = {ImHashStr("sc8-level-project-3"), ImHashStr("sc8-level-run-1"),
+                                 ImHashStr("sc8-level-cpu-1")};
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const int active = static_cast<int>(level_);
   for (int i = 0; i < 3; i++) {
@@ -528,10 +374,10 @@ void Ide::frame() {
   shortcuts();
   screenHasKeys_ = false;
   switch (level_) {
-    case Level::Edit:
-      sourcePane();
-      projectPane();
-      basicPane();
+    case Level::Project:
+      filesPane();
+      editorPane();
+      assemblyPane();
       messagesPane();
       screenPane();
       manualPane();
@@ -543,16 +389,20 @@ void Ide::frame() {
       breakpointsPane();
       listingPane("Listing##run");
       messagesPane();
+      manualPane();
       break;
-    case Level::Microcode:
+    case Level::Cpu:
       datapathPane();
       flowPane();
       microcodePane();
       listingPane("Listing##micro");
       registersPane("Registers##micro");
       messagesPane();
+      manualPane();
       break;
   }
+  dialog_.draw();
+  quitDialog();
 }
 
 // The first run of a level has no saved layout, so the panes get one
@@ -564,18 +414,19 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
   ImGui::DockBuilderRemoveNode(dockspace);
   ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
   ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
-  ImGuiID left = dockspace, right, bottom, mid, midBottom, rightBottom;
+  ImGuiID left = dockspace, right, bottom, mid, midBottom, rightBottom, files;
   switch (level) {
-    case Level::Edit:
-      // The editor on the left with the messages under it. The screen on
-      // the right, so a program's result is seen without leaving the
-      // editor, and the manual under it, where a reader keeps it open.
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.38f, &right, &left);
+    case Level::Project:
+      // The files on the far left, the editor beside them with the
+      // messages under it. The screen on the right, so a program's result
+      // is seen without leaving the editor, and the manual under it.
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.36f, &right, &left);
+      ImGui::DockBuilderSplitNode(left, ImGuiDir_Left, 0.26f, &files, &left);
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.22f, &bottom, &left);
       ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &rightBottom, &right);
-      ImGui::DockBuilderDockWindow("Source", left);
-      ImGui::DockBuilderDockWindow("Project", left);
-      ImGui::DockBuilderDockWindow("BASIC", left);
+      ImGui::DockBuilderDockWindow("Files", files);
+      ImGui::DockBuilderDockWindow("Editor", left);
+      ImGui::DockBuilderDockWindow("Assembly", left);
       ImGui::DockBuilderDockWindow("Messages", bottom);
       ImGui::DockBuilderDockWindow("Screen", right);
       ImGui::DockBuilderDockWindow("Manual", rightBottom);
@@ -593,9 +444,10 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
       ImGui::DockBuilderDockWindow("Screen", mid);
       ImGui::DockBuilderDockWindow("Registers##run", midBottom);
       ImGui::DockBuilderDockWindow("Memory", right);
+      ImGui::DockBuilderDockWindow("Manual", right);
       ImGui::DockBuilderDockWindow("Messages", rightBottom);
       break;
-    case Level::Microcode:
+    case Level::Cpu:
       // The datapath large with the flow under it. The listing and the
       // registers on the left, the rows on the right.
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.28f, &right, &left);
@@ -608,6 +460,7 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
       ImGui::DockBuilderDockWindow("Datapath", mid);
       ImGui::DockBuilderDockWindow("Flow", midBottom);
       ImGui::DockBuilderDockWindow("Microcode", right);
+      ImGui::DockBuilderDockWindow("Manual", right);
       ImGui::DockBuilderDockWindow("Messages", rightBottom);
       break;
   }
@@ -616,18 +469,73 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
 
 void Ide::menuBar() {
   if (!ImGui::BeginMainMenuBar()) return;
+  const fs::path startIn = projectDir_.empty() ? fs::current_path() : fs::path(projectDir_).parent_path();
   if (ImGui::BeginMenu("File")) {
-    if (ImGui::MenuItem("Assemble", "F7")) assembleSource();
-    if (ImGui::MenuItem("Save source", "Ctrl+S")) saveSource();
-    if (ImGui::MenuItem("Burn ROM", "F8")) burnRom();
+    if (ImGui::BeginMenu("New project")) {
+      const std::pair<const char*, project::Kind> KINDS[] = {
+          {"BASIC", project::Kind::Basic}, {"C", project::Kind::C},
+          {"Assembly", project::Kind::Assembly}, {"Microcode", project::Kind::Microcode}};
+      for (const auto& [label, kind] : KINDS) {
+        if (ImGui::MenuItem(label)) {
+          const project::Kind k = kind;
+          dialog_.open(FileDialog::Mode::OpenFolder, std::string("New ") + label + " project: pick or make its folder",
+                       startIn, {}, [this, k](const fs::path& p) { createProject(p.string(), k); });
+        }
+      }
+      ImGui::EndMenu();
+    }
+    if (ImGui::MenuItem("Open project folder...", "Ctrl+O")) {
+      dialog_.open(FileDialog::Mode::OpenFolder, "Open a project folder", startIn, {},
+                   [this](const fs::path& p) { openProject(p.string()); });
+    }
+    if (ImGui::MenuItem("Open ROM...")) {
+      dialog_.open(FileDialog::Mode::OpenFile, "Open a ROM", startIn, {".rom"},
+                   [this](const fs::path& p) { openRomAsProject(p.string()); });
+    }
+    if (ImGui::MenuItem("Open source file...")) {
+      dialog_.open(FileDialog::Mode::OpenFile, "Open a source file, which opens its project", startIn,
+                   {".c", ".h", ".asm", ".bas", ".txt"}, [this](const fs::path& p) { open(p.string()); });
+    }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Save", "Ctrl+S", false, activeDoc() != nullptr)) {
+      if (projectDir_.empty()) {
+        dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", startIn, {},
+                     [this](const fs::path& p) { saveProjectAs(p.string()); });
+      } else if (Doc* d = activeDoc()) {
+        saveDoc(*d);
+      }
+    }
+    if (ImGui::MenuItem("Save all", "Ctrl+Shift+S")) {
+      if (projectDir_.empty()) {
+        dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", startIn, {},
+                     [this](const fs::path& p) { saveProjectAs(p.string()); });
+      } else {
+        saveAll();
+      }
+    }
+    if (ImGui::MenuItem("Save project as...")) {
+      dialog_.open(FileDialog::Mode::OpenFolder, "Save the project as: pick or make its folder", startIn, {},
+                   [this](const fs::path& p) { saveProjectAs(p.string()); });
+    }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Build", "F7")) buildProject(false);
+    if (ImGui::MenuItem("Build and run", "Ctrl+F5")) buildProject(true);
+    if (ImGui::MenuItem("Burn ROM as...", "F8")) {
+      dialog_.open(FileDialog::Mode::SaveFile, "Burn the machine's ROM to a file",
+                   romPath_.empty() ? startIn : fs::path(romPath_).parent_path(), {".rom"},
+                   [this](const fs::path& p) { burnRom(p.string()); },
+                   romPath_.empty() ? projectTitle_ + ".rom" : fs::path(romPath_).filename().string());
+    }
     ImGui::Separator();
     if (ImGui::MenuItem("Boot the BASIC ROM")) bootBasic();
+    ImGui::Separator();
+    if (ImGui::MenuItem("Quit", "Cmd+Q")) requestQuit();
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Level")) {
-    if (ImGui::MenuItem("Edit", "F1", level_ == Level::Edit)) setLevel(Level::Edit);
+    if (ImGui::MenuItem("Project", "F1", level_ == Level::Project)) setLevel(Level::Project);
     if (ImGui::MenuItem("Run", "F2", level_ == Level::Run)) setLevel(Level::Run);
-    if (ImGui::MenuItem("Microcode", "F3", level_ == Level::Microcode)) setLevel(Level::Microcode);
+    if (ImGui::MenuItem("CPU", "F3", level_ == Level::Cpu)) setLevel(Level::Cpu);
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Run")) {
@@ -647,9 +555,23 @@ void Ide::menuBar() {
       }
       ImGui::EndMenu();
     }
-    ImGui::Separator();
+    ImGui::EndMenu();
+  }
+  if (ImGui::BeginMenu("Microcode")) {
     for (const char* name : {"@naive", "@optimal"}) {
       if (ImGui::MenuItem(name, nullptr, computer_.microcodeName() == name)) selectMicrocode(name);
+    }
+    const bool own = computer_.microcodeName() != "@naive" && computer_.microcodeName() != "@optimal";
+    ImGui::MenuItem("your own set", nullptr, own, false);
+    ImGui::Separator();
+    if (ImGui::MenuItem("Lock the running set", nullptr, lockedMicrocode_.has_value())) {
+      if (lockedMicrocode_) {
+        lockedMicrocode_.reset();
+        note("microcode unlocked: the next build or ROM brings its own set");
+      } else {
+        lockedMicrocode_ = computer_.microcodeName();
+        note("microcode locked: every project and ROM runs on the set in the machine now");
+      }
     }
     ImGui::EndMenu();
   }
@@ -663,23 +585,87 @@ void Ide::menuBar() {
     ImGui::MenuItem("Integer scale", nullptr, &display.integerScale);
     ImGui::EndMenu();
   }
+  if (lockedMicrocode_) {
+    ImGui::SameLine(ImGui::GetWindowWidth() - 180.0f);
+    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "microcode locked");
+  }
   ImGui::EndMainMenuBar();
 }
 
 void Ide::shortcuts() {
-  if (ImGui::IsKeyPressed(ImGuiKey_F1)) setLevel(Level::Edit);
+  if (dialog_.isOpen() || askQuit_) return;
+  const ImGuiIO& io = ImGui::GetIO();
+  if (ImGui::IsKeyPressed(ImGuiKey_F1)) setLevel(Level::Project);
   if (ImGui::IsKeyPressed(ImGuiKey_F2)) setLevel(Level::Run);
-  if (ImGui::IsKeyPressed(ImGuiKey_F3)) setLevel(Level::Microcode);
-  if (ImGui::IsKeyPressed(ImGuiKey_F7)) assembleSource();
-  if (ImGui::IsKeyPressed(ImGuiKey_F8)) burnRom();
+  if (ImGui::IsKeyPressed(ImGuiKey_F3)) setLevel(Level::Cpu);
+  if (ImGui::IsKeyPressed(ImGuiKey_F7)) buildProject(false);
   if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
-    if (ImGui::GetIO().KeyShift) powerOn();
+    if (io.KeyShift) powerOn();
+    else if (io.KeyCtrl) buildProject(true);
     else setRunning(!running_);
   }
   if (ImGui::IsKeyPressed(ImGuiKey_F6)) runOneFrame();
   if (ImGui::IsKeyPressed(ImGuiKey_F10)) stepInstruction();
   if (ImGui::IsKeyPressed(ImGuiKey_F11)) stepMicro();
-  if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S)) saveSource();
+  const bool cmd = io.KeyCtrl || io.KeySuper;
+  if (cmd && ImGui::IsKeyPressed(ImGuiKey_S)) {
+    if (projectDir_.empty()) {
+      dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", fs::current_path(), {},
+                   [this](const fs::path& p) { saveProjectAs(p.string()); });
+    } else if (io.KeyShift) {
+      saveAll();
+    } else if (Doc* d = activeDoc()) {
+      saveDoc(*d);
+    }
+  }
+  if (cmd && ImGui::IsKeyPressed(ImGuiKey_O)) {
+    dialog_.open(FileDialog::Mode::OpenFolder, "Open a project folder", fs::current_path(), {},
+                 [this](const fs::path& p) { openProject(p.string()); });
+  }
+}
+
+// The close gesture with unsaved documents: save them all and quit, quit
+// as things are, or stay. A project with no folder cannot save without
+// a folder, so its save opens the folder dialog first.
+void Ide::quitDialog() {
+  if (!askQuit_) return;
+  ImGui::OpenPopup("Unsaved changes");
+  if (ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::Text("These documents have unsaved changes:");
+    for (const Doc& d : docs_) {
+      if (d.dirty) ImGui::BulletText("%s", d.name.c_str());
+    }
+    ImGui::Spacing();
+    if (ImGui::Button("Save all and quit")) {
+      if (projectDir_.empty()) {
+        askQuit_ = false;
+        ImGui::CloseCurrentPopup();
+        dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", fs::current_path(), {},
+                     [this](const fs::path& p) {
+                       saveProjectAs(p.string());
+                       done_ = !anyDirty();
+                     });
+      } else {
+        saveAll();
+        done_ = !anyDirty();
+        if (!done_) note("a document could not be saved, so the IDE stays open");
+        askQuit_ = false;
+        ImGui::CloseCurrentPopup();
+      }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Quit without saving")) {
+      done_ = true;
+      askQuit_ = false;
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+      askQuit_ = false;
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
 }
 
 void Ide::messagesPane() {
