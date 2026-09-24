@@ -12,6 +12,7 @@ add_library(sc8_cc STATIC
   lex.cpp
   libs.cpp
   parse.cpp
+  peephole.cpp
   pp.cpp
   runtime.cpp
   softmath.cpp

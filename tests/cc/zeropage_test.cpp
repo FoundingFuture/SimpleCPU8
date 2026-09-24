@@ -53,7 +53,9 @@ TEST_SUITE("the compiler's own reservations come first") {
 
   TEST_CASE("reserves one temp slot per level of the deepest expression") {
     const int shallow = temps("int a, b; int main(void){ a = b; return 0; }");
-    const int deep = temps("int a, b, c, d; int main(void){ a = b + (c + (d + b)); return 0; }");
+    // A variable is named in the instruction and takes no temp, so the
+    // depth comes from subtractions of sums, which cannot swap sides.
+    const int deep = temps("int a, b, c, d; int main(void){ a = (b + c) - ((c + d) - (d + b)); return 0; }");
     CHECK(deep > shallow);
   }
 }

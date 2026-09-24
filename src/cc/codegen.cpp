@@ -10,6 +10,7 @@
 #include "cc/layout.h"
 #include "cc/lex.h"
 #include "cc/parse.h"
+#include "cc/peephole.h"
 #include "cc/runtime.h"
 #include "cc/softmath.h"
 #include "devices/constants.h"
@@ -223,7 +224,10 @@ class Gen {
     body();  // pass one, thrown away, run only to count the temps
     globalBase_ = zpReserve_ + RESERVED_BYTES + 2 * maxSlot_;
     reset();
-    return assemble(body());
+    std::vector<int> remap;
+    const std::vector<std::string> lines = peephole(body(), &remap);
+    for (auto& [k, v] : lineOf_) v = remap[static_cast<size_t>(v)];
+    return assemble(lines);
   }
 
  private:
@@ -633,29 +637,26 @@ class Gen {
     e("; " + typeName(f.ret) + " " + f.name + "(" + sig + ")");
     e("; " + f.pos.file + ":" + S(f.pos.line));
     lab(f.name);
+    // The frame is the space below __sp. D1 takes its base, and __sp moves
+    // down past it, through the address adder.
     const int own = localBytes_ + saveBytes_ + dSaveBytes_;
-    if (own > 0) addToSp(-own);
     op("LD D1 <- [" + S(ZP_SP) + "]");
+    if (own > 0) {
+      op("LD D1 <- D1-" + S(own));
+      op("LD [" + S(ZP_SP) + "] <- D1");
+    }
 
     genStmt(f.body);
 
     lab(f.name + "__end");
-    if (frameSize_ > 0) addToSp(frameSize_);
+    // D1 is still the frame base here: every call puts it back. The frame
+    // and the arguments the caller wrote below it go in one step.
+    if (frameSize_ > 0) {
+      op("LD D1 <- D1+" + S(frameSize_));
+      op("LD [" + S(ZP_SP) + "] <- D1");
+    }
     op("RET");
     fn_ = nullptr;
-  }
-
-  // __sp += n, in two bytes. n may be negative.
-  void addToSp(int n) {
-    const int v = n & 0xffff;
-    const int lo8 = v & 0xff;
-    const int hi8 = (v >> 8) & 0xff;
-    op("LD A <- [" + S(ZP_SP) + "+1]");
-    op("ADD A <- " + S(lo8));
-    op("LD [" + S(ZP_SP) + "+1] <- A");
-    op("LD A <- [" + S(ZP_SP) + "]");
-    op("ADC A <- " + S(hi8));
-    op("LD [" + S(ZP_SP) + "] <- A");
   }
 
   // ---- statements ------------------------------------------------------------
@@ -669,6 +670,7 @@ class Gen {
 
   void genStmt(const StmtPtr& sp) {
     const Stmt& s = *sp;
+    e(std::string("        ") + STMT_MARK);
     mark(s.pos);
     switch (s.k) {
       case StmtKind::Empty: return;
@@ -740,10 +742,7 @@ class Gen {
         return;
       }
 
-      case StmtKind::Expr:
-        if (isFloat(typeOf(s.e))) { genDouble(s.e, 0, 0); return; }
-        genExpr(s.e, 0);
-        return;
+      case StmtKind::Expr: genEffect(s.e); return;
 
       case StmtKind::Return: {
         if (s.e && isFloat(fn_->ret)) {
@@ -832,7 +831,7 @@ class Gen {
         breaks_.pop_back();
         continues_.pop_back();
         lab(cont);
-        if (s.step) genExpr(s.step, 0);
+        if (s.step) genEffect(s.step);
         lab(test);
         if (s.c) branch(s.c, true, top, 0);
         else op("JMP " + top);
@@ -879,9 +878,29 @@ class Gen {
         return;
 
       case StmtKind::Asm:
+        // The peephole pass knows nothing of what hand written lines
+        // expect, so it stops at them.
+        e(std::string("        ") + BARRIER_MARK);
         e("        " + s.text);
+        e(std::string("        ") + BARRIER_MARK);
         return;
     }
+  }
+
+  // An expression evaluated for what it does, its value unused.
+  void genEffect(const ExprPtr& ep) {
+    if (isFloat(typeOf(ep))) {
+      genDouble(ep, 0, 0);
+      return;
+    }
+    if (ep->k == ExprKind::Post) {
+      // The old value is not wanted, so i++ is ++i.
+      auto pre = std::make_shared<Expr>(*ep);
+      pre->k = ExprKind::Un;
+      genExpr(pre, 0);
+      return;
+    }
+    genExpr(ep, 0);
   }
 
   // ---- conditions ------------------------------------------------------------
@@ -896,11 +915,43 @@ class Gen {
   // the instructions as immediates.
   struct Side {
     std::string lo, hi;
+    std::optional<int> imm;  // the value, when the side is a constant
   };
-  Side sideOf(int slot) { return {lo(slot), hi(slot)}; }
+  Side sideOf(int slot) { return {lo(slot), hi(slot), std::nullopt}; }
   static Side immSide(int v) {
     v &= 0xffff;
-    return {S(v & 0xff), S(v >> 8)};
+    return {S(v & 0xff), S(v >> 8), v};
+  }
+
+  // A value the instructions can name directly, with no evaluation into a
+  // temp: a constant, a local at [D1+n], or a global in the zero page. The
+  // ALU takes all three as its operand. width is the width the value is
+  // used at. A byte used as a word needs its high byte made: 0 for an
+  // unsigned one, a sign extension for a signed one, which is code, so a
+  // signed byte is a leaf only at width 1. A word used at width 1 is its
+  // low byte.
+  std::optional<Side> leafSide(const ExprPtr& ep, int width) {
+    const Expr& e = *ep;
+    if (const auto v = foldConst(ep)) {
+      const CType t = typeOf(ep);
+      if (isFloat(t) || isWide(t)) return std::nullopt;
+      return immSide(toInt32(*v));
+    }
+    if (e.k != ExprKind::Id) return std::nullopt;
+    if (const auto c = constantNamed(e.name)) return immSide(*c);
+    const Sym* s = find(e.name);
+    if (!s || s->type.arrayLen || romSyms_.count(e.name) || isFloat(s->type) || isWide(s->type)) return std::nullopt;
+    const bool frame = s->where == Sym::Where::Frame;
+    if (!frame && !inZeroPage(*s)) return std::nullopt;
+    auto at = [&](int k) {
+      if (frame) return "[D1+" + S(s->offset + k) + "]";
+      return k ? "[" + s->label + "+" + S(k) + "]" : "[" + s->label + "]";
+    };
+    const int size = s->type.ptr > 0 ? 2 : sizeOf(s->type);
+    if (size == 2) return Side{at(1), at(0), std::nullopt};
+    if (width == 1) return Side{at(0), "", std::nullopt};
+    if (isSigned(s->type)) return std::nullopt;
+    return Side{at(0), "0", std::nullopt};
   }
 
   static bool isTrue(const ExprPtr& e) {
@@ -980,39 +1031,72 @@ class Gen {
       sgn = isSigned(rt0);
     }
     auto side = [&](const ExprPtr& x, int at) {
+      if (auto leaf = leafSide(x, width)) return *leaf;
       const CType got = genExpr(x, at);
       if (width == 2) convert(at, got, rtype);
       return sideOf(at);
     };
-    Side a;
-    Side b;
-    if (lc && !rc) {
-      a = immSide(toInt32(*lc));
-      b = side(e.r, slot);
-    } else if (rc) {
-      a = side(e.l, slot);
-      b = immSide(toInt32(*rc));
-    } else {
-      a = side(e.l, slot);
-      b = side(e.r, slot + 1);
-    }
+    // The left side goes to slot, the right to slot + 1 when both need
+    // evaluating. A leaf takes no slot.
+    const bool leftLeaf = leafSide(e.l, width).has_value();
+    const Side a = side(e.l, slot);
+    const Side b = side(e.r, leftLeaf ? slot : slot + 1);
     compareSides(e.op, a, b, width, sgn, when, label);
     return true;
   }
 
-  // The jump for a compare of two sides already in place.
-  void compareSides(const std::string& cop, const Side& a, const Side& b, int width, bool sgn, bool when,
+  static std::string mirror(const std::string& cop) {
+    if (cop == "<") return ">";
+    if (cop == ">") return "<";
+    if (cop == "<=") return ">=";
+    if (cop == ">=") return "<=";
+    return cop;
+  }
+
+  // The jump for a compare of two sides already in place. A constant goes
+  // to the right, and <= k and > k become < k+1 and >= k+1, so the
+  // variable is always the one in A and CMP leaves it there for the next
+  // compare of the same value.
+  void compareSides(const std::string& cop0, const Side& a0, const Side& b0, int width, bool sgn, bool when,
                     const std::string& label) {
-    if (cop == "==" || cop == "!=") {
-      // Equality does not care about order, so the constant, if any, goes
-      // on the right.
-      if (a.lo[0] != '[') {
-        compareSides(cop, b, a, width, sgn, when, label);
+    std::string cop = cop0;
+    Side a = a0;
+    Side b = b0;
+    if (a.imm && !b.imm) {
+      std::swap(a, b);
+      cop = mirror(cop);
+    }
+    if (b.imm && cop != "==" && cop != "!=") {
+      int k = *b.imm & (width == 1 ? 0xff : 0xffff);
+      if (sgn) k = width == 1 ? static_cast<int8_t>(k) : static_cast<int16_t>(k);
+      const int top = width == 1 ? (sgn ? 127 : 255) : (sgn ? 32767 : 65535);
+      if ((cop == "<=" || cop == ">") && k < top) {
+        cop = cop == "<=" ? "<" : ">=";
+        k++;
+        b = immSide(k);
+      }
+      if (k == 0 && (cop == "<" || cop == ">=")) {
+        if (!sgn) {
+          // Unsigned, nothing is below zero.
+          if ((cop == ">=") == when) op("JMP " + label);
+          return;
+        }
+        // Signed against zero is the sign bit, which the load sets as N.
+        op("LD A <- " + (width == 2 ? a.hi : a.lo));
+        op(((cop == "<") == when ? "JN " : "JP ") + label);
         return;
       }
+      if (!sgn && k == 1 && (cop == "<" || cop == ">=")) {
+        // Unsigned below one is zero.
+        compareSides(cop == "<" ? "==" : "!=", a, immSide(0), width, sgn, when, label);
+        return;
+      }
+    }
+
+    if (cop == "==" || cop == "!=") {
       const bool onEqual = (cop == "==") == when;
       const std::string jeq = onEqual ? "JZ " : "JNZ ";
-      if (b.lo == "0" && (width == 1 || b.hi == "0")) {
+      if (b.imm && (*b.imm & (width == 1 ? 0xff : 0xffff)) == 0 && !a.imm) {
         // Against zero the load is the test.
         if (width == 1) op("LD A <- " + a.lo);
         else op("LD D2 <- " + a.hi);
@@ -1020,7 +1104,7 @@ class Gen {
         return;
       }
       op("LD A <- " + a.lo);
-      op("SUB A <- " + b.lo);
+      op("CMP A, " + b.lo);
       if (width == 1) {
         op(jeq + label);
       } else if (onEqual) {
@@ -1028,13 +1112,13 @@ class Gen {
         const std::string skip = uniq("ne");
         op("JNZ " + skip);
         op("LD A <- " + a.hi);
-        op("SUB A <- " + b.hi);
+        op("CMP A, " + b.hi);
         op("JZ " + label);
         lab(skip);
       } else {
         op("JNZ " + label);
         op("LD A <- " + a.hi);
-        op("SUB A <- " + b.hi);
+        op("CMP A, " + b.hi);
         op("JNZ " + label);
       }
       return;
@@ -1051,9 +1135,12 @@ class Gen {
     const Side& x = swap ? b : a;
     const Side& y = swap ? a : b;
     op("LD A <- " + x.lo);
-    op("SUB A <- " + y.lo);
-    if (width == 2) {
-      // The load sets Z and N but leaves C, the borrow the SBC needs.
+    if (width == 1) {
+      op("CMP A, " + y.lo);
+    } else {
+      // A word compare chains the borrow, which only SUB and SBC do. The
+      // load between them leaves C alone.
+      op("SUB A <- " + y.lo);
       op("LD A <- " + x.hi);
       op("SBC A <- " + y.hi);
     }
@@ -1474,18 +1561,29 @@ class Gen {
       const std::string op2 = e.op.substr(0, e.op.size() - 1);
       return genAssign(mkAssign(e.l, mkBin(op2, e.l, e.r, e.pos), e.pos), slot);
     }
+    // A byte target keeps only the low byte, so only the low byte is
+    // worked out.
+    const bool low = sizeOf(target) == 1 && target.ptr == 0 && !romRef(e.r) && !isFloat(typeOf(e.r));
     // Simple names take the short path: no address to compute.
     if (e.l->k == ExprKind::Id) {
       const Sym& s = lookup(e.l->name, e.l->pos);
       if (s.type.arrayLen) fail(e.pos, s.name + " is an array and cannot be assigned");
-      const CType vt = genExpr(e.r, slot);
-      convert(slot, vt, target);
+      if (low) {
+        genLow(e.r, slot);
+      } else {
+        const CType vt = genExpr(e.r, slot);
+        convert(slot, vt, target);
+      }
       if (s.where == Sym::Where::Frame) storeFrame(s.offset, sizeOf(s.type), slot);
       else storeGlobal(s, slot);
       return target;
     }
-    const CType vt = genExpr(e.r, slot);
-    convert(slot, vt, target);
+    if (low) {
+      genLow(e.r, slot);
+    } else {
+      const CType vt = genExpr(e.r, slot);
+      convert(slot, vt, target);
+    }
     genAddress(e.l, slot + 1);
     storeThrough(slot + 1, slot, sizeOf(target));
     return target;
@@ -1606,6 +1704,11 @@ class Gen {
     const int width = sizeOf(rtype);
     if (compare && !isWide(rtype)) return boolValue(ep, slot);
 
+    if (bop == "+" || bop == "-" || bop == "&" || bop == "|" || bop == "^") {
+      aluBinary(ep, slot, rtype, width);
+      return rtype;
+    }
+
     const CType lt = genExpr(e.l, slot);
     convert(slot, lt, rtype);
     if (bop == ">>" && !isSigned(rtype) && width == 2) {
@@ -1641,6 +1744,104 @@ class Gen {
     else if (bop == ">>") callRuntime(isSigned(rtype) ? "__sshr16" : "__ushr16", slot, slot + 1);
     else fail(e.pos, bop + " is not in the subset");
     return rtype;
+  }
+
+  // +, -, &, | and ^ at a width, into slot. A side that is a leaf is named
+  // in the instruction, not copied to a temp first. For the commutative
+  // four, a leaf on the left swaps over, so only one side is ever
+  // evaluated when one is a leaf.
+  void aluBinary(const ExprPtr& ep, int slot, const CType& rtype, int width) {
+    const Expr& e = *ep;
+    const std::string& bop = e.op;
+    auto evaluate = [&](const ExprPtr& x, int at) {
+      if (width == 1) {
+        genLow(x, at);
+      } else {
+        const CType got = genExpr(x, at);
+        convert(at, got, rtype);
+      }
+      return sideOf(at);
+    };
+    std::optional<Side> ls = leafSide(e.l, width);
+    std::optional<Side> rs = leafSide(e.r, width);
+    Side a;
+    Side b;
+    if (rs) {
+      a = ls ? *ls : evaluate(e.l, slot);
+      b = *rs;
+    } else if (ls && bop != "-") {
+      a = evaluate(e.r, slot);
+      b = *ls;
+    } else {
+      a = evaluate(e.l, slot);
+      b = evaluate(e.r, slot + 1);
+    }
+    use(slot);
+    const std::string m1 = bop == "+" ? "ADD" : bop == "-" ? "SUB" : bop == "&" ? "AND" : bop == "|" ? "OR" : "XOR";
+    const std::string m2 = bop == "+" ? "ADC" : bop == "-" ? "SBC" : m1;
+    op("LD A <- " + a.lo);
+    if (!(b.imm && (*b.imm & 0xff) == 0 && m1 != "AND")) op(m1 + " A <- " + b.lo);
+    else if (m1 == "ADD" || m1 == "SUB") op(m1 + " A <- 0");
+    op("LD " + lo(slot) + " <- A");
+    if (width == 1) return;
+    const bool hiZero = b.hi == "0";
+    if (hiZero && m1 == "AND") {
+      op("LD A <- 0");
+    } else {
+      op("LD A <- " + a.hi);
+      if (!(hiZero && (m1 == "OR" || m1 == "XOR"))) op(m2 + " A <- " + b.hi);
+    }
+    op("LD " + hi(slot) + " <- A");
+  }
+
+  // A __ROM name, or one indexed. typeOf cannot answer for it, and genExpr
+  // refuses it with the advice.
+  bool romRef(const ExprPtr& ep) const {
+    const ExprPtr& named = ep->k == ExprKind::Index ? ep->a : ep;
+    return named->k == ExprKind::Id && romSyms_.count(named->name) > 0;
+  }
+
+  // The low byte of a value, into lo(slot), for a place that keeps one
+  // byte: a byte variable, a byte argument. Arithmetic modulo 256 needs
+  // only the low bytes of +, -, &, |, ^ and ~, so those run at width 1.
+  // Anything else is evaluated whole and its low byte taken.
+  void genLow(const ExprPtr& ep, int slot) {
+    const Expr& e = *ep;
+    use(slot);
+    // A __ROM name has no type to ask for. genExpr says what to do instead.
+    if (romRef(ep)) {
+      genExpr(ep, slot);
+      return;
+    }
+    const CType t = typeOf(ep);
+    if (!isFloat(t) && !isWide(t)) {
+      if (auto leaf = leafSide(ep, 1)) {
+        op("LD A <- " + leaf->lo);
+        op("LD " + lo(slot) + " <- A");
+        return;
+      }
+      if (e.k == ExprKind::Bin && (e.op == "+" || e.op == "-" || e.op == "&" || e.op == "|" || e.op == "^")) {
+        const CType lt0 = typeOf(e.l);
+        const CType rt0 = typeOf(e.r);
+        if (lt0.ptr == 0 && rt0.ptr == 0 && !isFloat(lt0) && !isFloat(rt0) && !isWide(lt0) && !isWide(rt0)) {
+          aluBinary(ep, slot, T(BaseType::UChar), 1);
+          return;
+        }
+      }
+      if (e.k == ExprKind::Un && e.op == "~" && !isFloat(typeOf(e.e))) {
+        genLow(e.e, slot);
+        op("LD A <- " + lo(slot));
+        op("XOR A <- $FF");
+        op("LD " + lo(slot) + " <- A");
+        return;
+      }
+      if (e.k == ExprKind::Cast && !isFloat(typeOf(e.e)) && !isWide(typeOf(e.e)) && e.type.ptr == 0 &&
+          !isFloat(e.type)) {
+        genLow(e.e, slot);
+        return;
+      }
+    }
+    genExpr(ep, slot);
   }
 
   // A shift left by a small constant is adds, which the CPU does in one or
@@ -1741,9 +1942,10 @@ class Gen {
 
     for (int i = 0; i < slot; i++) spill(i, true);
     for (int i = 0; i < dLive_; i++) spillDouble(i, true);
-    if (bytes > 0) addToSp(-bytes);
     if (bytes > 0) {
-      op("LD D2 <- [" + S(ZP_SP) + "]");
+      // __sp is D1 between calls, so the arguments' space starts below it.
+      op("LD D2 <- D1-" + S(bytes));
+      op("LD [" + S(ZP_SP) + "] <- D2");
       for (size_t i = 0; i < e.args.size(); i++) {
         const CType pt = i < f.params.size() ? f.params[i].type : T(BaseType::Int);
         const int size = std::max(sizeOf(pt), 1);
