@@ -1,4 +1,8 @@
-cmake_minimum_required(VERSION 3.24)
+# 3.24 is the floor. The range lets a newer CMake run with its own
+# policies, among them CMP0156: static libraries are listed once on the
+# link line when the linker copes, which Apple's does. The old repeated
+# form made it warn about duplicate libraries.
+cmake_minimum_required(VERSION 3.24...4.1)
 
 project(SimpleCPU8
   VERSION 0.1.0
