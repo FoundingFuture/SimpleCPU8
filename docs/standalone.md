@@ -330,7 +330,7 @@ Everything under src/. One library per layer, one executable per program.
 tests/ mirrors the libraries with one doctest executable each.
 
 Dependencies come through CMake FetchContent, pinned in
-cmake/Dependencies.cmake. The pins: raylib 5.5, miniaudio 0.11.25, Dear
+cmake/Dependencies.cmake. The pins: raylib 6.0, miniaudio 0.11.25, Dear
 ImGui 1.92.9b docking, rlImGui at a fixed commit, doctest 2.4.12. raylib's
 own audio module is switched off. miniaudio is compiled once, in
 src/vm/audio.cpp.
