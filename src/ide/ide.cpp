@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -104,7 +105,10 @@ Ide::Ide() {
 //   [SC8Sections][State]
 //   Memory=1,side
 //
-// A line names a section, whether it is open and where it shows.
+//   ScreenHeight=320
+//
+// A line names a section, whether it is open and where it shows. The
+// last line is the side pane's screen height, 0 to fit the width.
 void Ide::registerLayoutHandler() {
   static const char* const KEYS[SEC_COUNT] = {"Datapath", "Flow", "Registers", "Memory", "Stack", "Screen", "Manual"};
   ImGuiSettingsHandler h;
@@ -117,6 +121,10 @@ void Ide::registerLayoutHandler() {
     const std::string line = text;
     const size_t eq = line.find('=');
     if (eq == std::string::npos || eq + 1 >= line.size()) return;
+    if (line.compare(0, eq, "ScreenHeight") == 0) {
+      ide->sideScreenHeight_ = std::max(0.0f, std::strtof(line.c_str() + eq + 1, nullptr));
+      return;
+    }
     for (size_t i = 0; i < SEC_COUNT; i++) {
       if (line.compare(0, eq, KEYS[i]) != 0 || std::string_view(KEYS[i]).size() != eq) continue;
       SectionState& st = ide->sections_[i];
@@ -132,6 +140,7 @@ void Ide::registerLayoutHandler() {
       const SectionState& st = ide->sections_[i];
       out->appendf("%s=%d,%s\n", KEYS[i], st.open ? 1 : 0, st.place == Place::Side ? "side" : "cpu");
     }
+    out->appendf("ScreenHeight=%d\n", static_cast<int>(ide->sideScreenHeight_));
     out->append("\n");
   };
   ImGui::AddSettingsHandler(&h);
@@ -139,6 +148,7 @@ void Ide::registerLayoutHandler() {
 
 void Ide::resetSections() {
   std::copy(std::begin(SECTION_DEFAULTS), std::end(SECTION_DEFAULTS), std::begin(sections_));
+  sideScreenHeight_ = 0.0f;
 }
 
 // A ROM opens as a project. A folder opens as a project. A source file

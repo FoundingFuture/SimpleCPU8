@@ -528,15 +528,45 @@ void Ide::cpuPane() {
   ImGui::End();
 }
 
+// The screen in the side pane. The picture stays square and centred.
+// Its size is the pane's width, or less when the section was dragged
+// shorter: the grip under it sets the height, and the width follows.
+void Ide::sideScreen() {
+  const float status = ImGui::GetTextLineHeightWithSpacing();
+  const float width = ImGui::GetContentRegionAvail().x;
+  const float full = width + status;  // the height that fits the width
+  const float height = sideScreenHeight_ > 0.0f ? std::min(sideScreenHeight_, full) : full;
+  screenBody(std::max(64.0f, std::min(width, height - status)));
+
+  // The grip: a thin bar across the pane. Dragging it moves the bottom
+  // edge; a double click hands the size back to the width.
+  const float gripHeight = std::max(4.0f, ImGui::GetStyle().ItemSpacing.y * 1.5f);
+  ImGui::InvisibleButton("##screen-grip", ImVec2(std::max(1.0f, width), gripHeight));
+  const bool hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
+  if (hot) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+  if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
+    const float start = sideScreenHeight_ > 0.0f ? std::min(sideScreenHeight_, full) : full;
+    sideScreenHeight_ = std::clamp(start + ImGui::GetIO().MouseDelta.y, 64.0f + status, full);
+    // Dragged back to the full width, the section follows the width again.
+    if (sideScreenHeight_ >= full - 0.5f) sideScreenHeight_ = 0.0f;
+  }
+  if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) sideScreenHeight_ = 0.0f;
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("drag to size the screen, double click to fit the width");
+  const ImVec2 a = ImGui::GetItemRectMin();
+  const ImVec2 b = ImGui::GetItemRectMax();
+  const float mid = (a.y + b.y) * 0.5f;
+  ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x, mid), ImVec2(b.x, mid),
+                                      ImGui::GetColorU32(hot ? ImGuiCol_SeparatorActive : ImGuiCol_Separator),
+                                      hot ? 3.0f : 1.0f);
+}
+
 // The pane beside the CPU view: the screen, the registers, the memory,
 // the stack and the manual. The manual comes last and takes the height
 // that is left, so folding it leaves room for the rest.
 void Ide::sidePane() {
   ImGui::Begin("Side##cpu");
   const float line = ImGui::GetTextLineHeightWithSpacing();
-  if (sectionHeader(SecScreen, Place::Side)) {
-    screenBody(std::max(64.0f, ImGui::GetContentRegionAvail().x));
-  }
+  if (sectionHeader(SecScreen, Place::Side)) sideScreen();
   if (sectionHeader(SecRegisters, Place::Side)) {
     ImGui::BeginChild("side-registers", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY);
     registersBody();

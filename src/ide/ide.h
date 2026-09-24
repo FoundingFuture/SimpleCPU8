@@ -219,10 +219,15 @@ class Ide {
   SectionState sections_[SEC_COUNT] = {};
   // Draw a section's header in a pane. True when its body shows there.
   bool sectionHeader(Section s, Place here);
+  // The side pane's screen section height in pixels, picture and status
+  // line together. 0 fits the picture to the pane's width. A grip under
+  // the section drags it, a double click on the grip goes back to 0.
+  float sideScreenHeight_ = 0.0f;
+  void sideScreen();
   // The section states travel in the layout file, so Save layout keeps
   // them and Reset layout brings the defaults back.
   void registerLayoutHandler();
-  void resetSections();
+  void resetSections();  // also the side screen's height
   void runControls();
   void memoryPane(const char* name);
   void stackPane(const char* name);
