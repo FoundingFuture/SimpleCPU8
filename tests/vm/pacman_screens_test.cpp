@@ -42,6 +42,21 @@ bool overLetters(const Gpu& g) {
   return std::count(g.vram.begin(), g.vram.end(), static_cast<uint8_t>(0xE0)) > 500;
 }
 
+// The first and last screen columns holding the palette index, or -1 when
+// none does. Video RAM is 256 by 256, one byte a pixel.
+std::pair<int, int> columnSpan(const Gpu& g, uint8_t index) {
+  int first = -1;
+  int last = -1;
+  for (int y = 0; y < 256; y++) {
+    for (int x = 0; x < 256; x++) {
+      if (g.vram[static_cast<size_t>(y * 256 + x)] != index) continue;
+      if (first < 0 || x < first) first = x;
+      if (x > last) last = x;
+    }
+  }
+  return {first, last};
+}
+
 void runFrames(Computer& c, int frames) {
   for (int i = 0; i < frames; i++) {
     c.pumpTyping();
@@ -83,6 +98,15 @@ TEST_CASE("pacman: attract screen, a key into the game, game over, a key back ro
   CHECK_MESSAGE(screen.find("LIVES 3") != std::string::npos, screen);
   CHECK_MESSAGE(screen.find("PRESS A KEY") == std::string::npos, screen);
   CHECK(vramHas(c.gpu(), MAZE_WALL));
+
+  // The maze is centred: 28 tiles of 8 pixels on a 256 pixel screen leave
+  // 16 pixels each side. The outer wall's line sits two pixels inside its
+  // tile, so the leftmost blue is column 18 and the rightmost its mirror.
+  const auto [wallLeft, wallRight] = columnSpan(c.gpu(), MAZE_WALL);
+  CHECK(wallLeft == 18);
+  CHECK(wallLeft + wallRight == 255);
+  // The strip is the light grey, not the maze's yellow.
+  CHECK(c.gpu().textColor == 0xDB);
 
   // Nobody steers, so Blinky catches him three times. Fire is held down the
   // whole way, which is the held button the game over screen must ignore.

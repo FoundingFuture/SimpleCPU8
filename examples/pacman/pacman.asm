@@ -55,11 +55,14 @@
 
 ; --- the score strip, in the eight screen rows above the maze. The overlay
 ; rides over graphics and sprites, so it costs no video memory and no sprite.
-; The maze's fades never touch it. $FC is the default palette's yellow, which
-; is outside the entries 1 to 3 the maze rewrites. The style is set by the
-; screen that owns the overlay: newgame sets the strip's yellow and prints the
-; strip, and the attract screen sets its own colour. hud prints the strip
-; again whenever a value on it changes.
+; The maze's fades never touch it. $DB is the default palette's light grey,
+; rgb(6,6,3) in 3-3-2, which is outside the entries 1 to 3 the maze rewrites.
+; Grey rather than Pac-Man's yellow, so the strip reads as the frame and the
+; board keeps the colour. The style is set by the screen that owns the
+; overlay: newgame sets the strip's grey and prints the strip, and the attract
+; screen sets its own white. The game over screen keeps the strip up and
+; prints its prompt in the same grey. hud prints the strip again whenever a
+; value on it changes.
 
 ; --- the per-level difficulty table, out of the cartridge and into RAM.
 ; DESIGN: the CPU cannot read the cartridge, so the GPU moves the bytes, the
@@ -184,7 +187,7 @@ newgame: LD D1 <- score
         LD A <- 20
         LD [lvlrem] <- A     ; rows left to advance through before the last
         OUT GPU_CMD, CMD_TEXT_CLEAR
-        OUT GPU_TEXT_COLOR, $FC
+        OUT GPU_TEXT_COLOR, $DB  ; the strip's light grey, see the note at the top
         OUT GPU_CMD, CMD_TEXT_STYLE
         JSR hud
         JSR loadmaze
@@ -442,6 +445,7 @@ bgdone: RET
 ; which nobody sees because all five are hidden.
 atsetup: JSR hideall
         LD A <- 0
+        LD [mzxleft] <- A    ; no maze under the chase: screen pixels, see mzxleft
         LD [acti] <- A
         LD [ax] <- A
         LD [adir] <- A
@@ -731,6 +735,21 @@ lmgot:  LD A <- [D1]
         OUT GPU_CMD, CMD_COPY
         RET
 
+; --- mzxleft := (256 - mzcols * 8) / 2, the pixel column of tile column 0.
+; DESIGN: 128 - mzcols * 4, so the 256 never has to fit in a byte. No
+; multiply, so the four is two doublings. Called from drawmaze, because the
+; width is the maze's and the offset is per maze, like everything else the
+; draw resets. The result is 16 for every shipped maze; see mzxleft.
+mzcentre: LD A <- [mzcols]
+        ADD A <- [mzcols]
+        LD [t1] <- A
+        ADD A <- [t1]        ; mzcols * 4
+        LD [t1] <- A
+        LD A <- 128
+        SUB A <- [t1]
+        LD [mzxleft] <- A
+        RET
+
 ; --- the row table: 31 addresses, each the first byte of a maze row.
 ; DESIGN: the CPU has no multiply, so row times 28 is a lookup instead.
 ; Built once at startup by walking forward 28 bytes at a time.
@@ -900,6 +919,7 @@ tpdone: RET
 drawmaze:
         OUT GPU_COLOR, 0
         OUT GPU_CMD, CMD_CLEAR
+        JSR mzcentre         ; where tile column 0 lands, for this maze's width
         LD D1 <- dots
         LD A <- 0
         LD [D1] <- A
@@ -1486,17 +1506,20 @@ cellrect: LD A <- [px]
 ; with rx0 = rx1 or ry0 = ry1 is a one-pixel-wide line spanning the other
 ; axis, which is exactly what the wall outlines need: see CMD_RECT in
 ; gpu.ts, which fills min..max on each axis independently.
-; The rows are maze pixels and the GPU wants screen pixels, so mzytop is
-; added on the way out. ry1 is at most 247, so the sum stays in a byte.
+; The corners are maze pixels and the GPU wants screen pixels, so mzxleft and
+; mzytop are added on the way out. rx1 is at most 223 and ry1 at most 247, so
+; both sums stay in a byte.
 rectxy: OUT GPU_X_HI, 0
         OUT GPU_Y_HI, 0
         LD A <- [rx0]
+        ADD A <- [mzxleft]
         OUTA GPU_X
         LD A <- [ry0]
         ADD A <- [mzytop]
         OUTA GPU_Y
         OUT GPU_CMD, CMD_MOVE_TO
         LD A <- [rx1]
+        ADD A <- [mzxleft]
         OUTA GPU_X
         LD A <- [ry1]
         ADD A <- [mzytop]
@@ -1906,12 +1929,13 @@ wpcbr2: LD A <- [ndn]
 wpdone: POP D1
         RET
 
-; a 2 by 2 dot in the middle of the cell at (px, py). py is a maze pixel,
-; so mzytop goes on the way out, as in rectxy.
+; a 2 by 2 dot in the middle of the cell at (px, py). px and py are maze
+; pixels, so mzxleft and mzytop go on the way out, as in rectxy.
 dotrect: OUT GPU_X_HI, 0
         OUT GPU_Y_HI, 0
         LD A <- [px]
         ADD A <- 3
+        ADD A <- [mzxleft]
         OUTA GPU_X
         LD A <- [py]
         ADD A <- 3
@@ -1920,6 +1944,7 @@ dotrect: OUT GPU_X_HI, 0
         OUT GPU_CMD, CMD_MOVE_TO
         LD A <- [px]
         ADD A <- 4
+        ADD A <- [mzxleft]
         OUTA GPU_X
         LD A <- [py]
         ADD A <- 4
@@ -1933,6 +1958,7 @@ pillrect: OUT GPU_X_HI, 0
         OUT GPU_Y_HI, 0
         LD A <- [px]
         ADD A <- 2
+        ADD A <- [mzxleft]
         OUTA GPU_X
         LD A <- [py]
         ADD A <- 2
@@ -1941,6 +1967,7 @@ pillrect: OUT GPU_X_HI, 0
         OUT GPU_CMD, CMD_MOVE_TO
         LD A <- [px]
         ADD A <- 5
+        ADD A <- [mzxleft]
         OUTA GPU_X
         LD A <- [py]
         ADD A <- 5
@@ -4137,12 +4164,15 @@ adxy:   LD A <- [aspr]
         OUTA GPU_SPRITE
         OUT GPU_SPRITE_X_HI, 0
         OUT GPU_SPRITE_Y_HI, 0
+; ax and ay are maze pixels. Each offset goes on before the centring. A
+; sprite on tile column 0 then starts two pixels into the left margin, and
+; one on tile row 0 two pixels into the strip, so neither reaches adcent's
+; floor on a shipped maze. The floor stays for a maze that fills the width,
+; where mzxleft is 0; see adcent.
         LD A <- [ax]
+        ADD A <- [mzxleft]
         JSR adcent
         OUTA GPU_SPRITE_X
-; ay is a maze pixel. The strip's offset goes on before the centring. A
-; sprite on tile row 0 then starts two pixels into the strip rather than at
-; its floor, and only x can reach the floor in adcent.
         LD A <- [ay]
         ADD A <- [mzytop]
         JSR adcent
@@ -4234,14 +4264,18 @@ adsdone: RET
 ; sprite centred on that tile starts two pixels earlier on each axis.
 ; DESIGN: floored, not wrapped, and the floor is not decoration. CLASSIC's
 ; tunnel mouths are row 14 columns 0 and 27, so an actor walking onto the left
-; one holds ax 0, and 0 minus 2 in a byte is 254. Flooring costs that tile a
-; two pixel offset, which nobody can see; wrapping would throw the sprite to
-; the far side of the screen for every frame spent there, which everybody
-; can. The GPU does not save us either: CMD_SPRITE_MOVE takes the data byte as
-; an unsigned pixel column, so 254 is a real place and not an error.
-; ay arrives with mzytop already added, so it never reaches the floor. Tile
-; row 0 sits at screen row 8 and centring takes it to 6. One routine for
-; both axes costs nothing, and the floor stays for an x that needs it.
+; one holds ax 0. With the maze against the screen's edge that is 0 minus 2 in
+; a byte, which is 254. Flooring costs that tile a two pixel offset, which
+; nobody can see; wrapping would throw the sprite to the far side of the
+; screen for every frame spent there, which everybody can. The GPU does not
+; save us either: CMD_SPRITE_MOVE takes the data byte as an unsigned pixel
+; column, so 254 is a real place and not an error.
+; Both coordinates arrive with their offset already added. Tile row 0 sits at
+; screen row 8 and centring takes it to 6; tile column 0 sits at screen column
+; mzxleft, 16 on every shipped maze, and centring takes it to 14. So today
+; neither axis reaches the floor. It stays for a maze 32 columns wide, whose
+; mzxleft is 0 and whose left mouth is the case above. One routine for both
+; axes costs nothing.
 ; The considered alternative was a true negative: GPU_X_HI $FF with GPU_X $FE
 ; reads as -2 (the GPU sign-extends the 16 bit pair), which would keep the
 ; sprite exactly centred and let it clip off the edge. Rejected because it
@@ -5196,6 +5230,22 @@ ndr:    db 0
 ; rather than a literal, because the assembler has no named constant. Four
 ; copies of an 8 would drift apart.
 mzytop: db 8
+; --- and the pixel column of tile column 0, which centres the maze.
+; DESIGN: computed, not shipped. A 28 column maze is 224 pixels wide on a 256
+; pixel screen, so 16 pixels are spare and the maze takes half of them on
+; each side. mzcols is the width the offset is worked out from, and mzxleft
+; is (256 - mzcols * 8) / 2, which is 128 - mzcols * 4, written by mzcentre
+; at the top of every drawmaze. A maze of another width writes mzcols before
+; its draw and lands centred with no other change here. mzcols is also the
+; count the draw loop, mkrows and the grid tests hold as a literal 28, and
+; the 868 byte copy in loadmaze is 28 by 31: a maze of another width has to
+; change those as well, so today every maze is 28 wide and mzcols never
+; moves. Attract sets mzxleft to 0, because its chase has no maze under it
+; and lays its actors out in screen pixels. The offset goes on at the same
+; four places as mzytop, and nowhere else: every record, the tunnel table,
+; contact and wrap work in maze pixels, where tile column 0 is pixel 0.
+mzcols: db 28
+mzxleft: db 0
 ; the maze index, 1 to 4: which of the four mazes is on screen
 level:  db 1
 dots:   dw 0

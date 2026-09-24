@@ -49,28 +49,35 @@ level ten as at level one is not a game.
 
 ## The screen
 
-Graphics mode. The maze is 28 by 31 tiles of 8 pixels, so it occupies x 0 to
-223 and y 8 to 255. The eight rows above it are the score strip, one row of
-the 6 by 8 font. The 32 columns to the right are free.
+Graphics mode. The maze is 28 by 31 tiles of 8 pixels, so it occupies x 16 to
+239 and y 8 to 255. The eight rows above it are the score strip, one row of
+the 6 by 8 font. The 16 columns on each side are free, so the maze is centred.
 
 ```text
-  x=0                      224   255
+  x=0  16                     240  255
   +----------------------------+
   | SCORE 00000  LIVES 3  LEVEL 1  one text row, y 0 to 7
-  +----------------------+-----+
-  |                      |     |
-  |        maze          |     |   32 pixels wide,
-  |      28 x 31         |     |   unused
-  |                      |     |
-  +----------------------+-----+
+  +----+------------------+----+
+  |    |                  |    |
+  |    |       maze       |    |   16 pixels each side,
+  |    |     28 x 31      |    |   unused
+  |    |                  |    |
+  +----+------------------+----+
 ```
 
-The game works in maze pixels, where tile row 0 is pixel row 0. The records,
-the tunnel table and the pixel to tile table never see the strip. One byte,
-`mzytop`, is added where a maze pixel reaches the GPU. That is four places.
+The game works in maze pixels, where tile row 0 is pixel row 0 and tile
+column 0 is pixel column 0. The records, the tunnel table and the pixel to
+tile table never see the strip or the margin. Two bytes, `mzytop` and
+`mzxleft`, are added where a maze pixel reaches the GPU. That is four places.
 The rectangle the walls and cell clears use, the dot, the pill and the sprite
-move. The assembler has no named constant. So the offset is a byte in RAM
+move. The assembler has no named constant. So each offset is a byte in RAM
 rather than four copies of a literal.
+
+`mzxleft` is computed, not shipped. `mzcols` holds the maze width in tiles and
+`drawmaze` sets `mzxleft` to (256 - `mzcols` * 8) / 2 before every draw. Every
+shipped maze is 28 wide, so the offset is 16 on all of them. A maze of another
+width would centre itself the same way. The attract screen sets `mzxleft` to 0,
+because its chase has no maze under it and works in screen pixels.
 
 Walls and dots are drawn into video memory once when a level starts, and
 never redrawn. Eating a dot paints an 8 by 8 square of background over it.
@@ -79,8 +86,9 @@ Five sprites carry all the motion: Pac-Man is sprite 1 and the ghosts are 2
 to 5.
 
 The printf overlay draws the strip. It rides over graphics and sprites, so
-the score costs no video memory and no sprite. Its colour is $FC, the default
-palette's yellow, outside the entries the maze fades.
+the score costs no video memory and no sprite. Its colour is $DB, the default
+palette's light grey, rgb(6,6,3) in 3-3-2, outside the entries the maze fades.
+Grey rather than yellow, so the strip reads as the frame and not the board.
 
 Text mode cannot be used for the maze. `composeFrame` returns before the
 sprite loop in that mode, so sprites would not appear over it.
