@@ -194,9 +194,19 @@ int main(int argc, char** argv) {
   if (fullscreen < 0) fullscreen = (!romPath.empty() && screenshot.empty()) ? 1 : 0;
   SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
   InitWindow(SCREEN_W * scale, SCREEN_H * scale, ("SimpleCPU-8: " + title).c_str());
-  // Borderless rather than a mode switch: the desktop keeps its resolution
-  // and the quit gesture keeps working.
-  if (fullscreen == 1) ToggleBorderlessWindowed();
+  // A real fullscreen window, which is what hides the menu bar on macOS.
+  // The window takes the monitor's own size first, so the display keeps
+  // its mode and the picture is centred in it.
+  auto goFullscreen = [&] {
+    const int m = GetCurrentMonitor();
+    SetWindowSize(GetMonitorWidth(m), GetMonitorHeight(m));
+    ToggleFullscreen();
+  };
+  auto goWindow = [&] {
+    ToggleFullscreen();
+    SetWindowSize(SCREEN_W * scale, SCREEN_H * scale);
+  };
+  if (fullscreen == 1) goFullscreen();
   // Every key reaches the machine. Quitting belongs to the window.
   SetExitKey(KEY_NULL);
   SetTargetFPS(fps > 0 ? fps : 60);
@@ -225,7 +235,10 @@ int main(int argc, char** argv) {
       if (IsKeyPressed(KEY_F2)) display.setStrength(strength = std::max(0.0f, strength - 0.1f));
       if (IsKeyPressed(KEY_F3)) display.setStrength(strength = std::min(1.0f, strength + 0.1f));
       if (IsKeyPressed(KEY_F5)) computer.powerOn();
-      if (IsKeyPressed(KEY_F11)) ToggleBorderlessWindowed();
+      if (IsKeyPressed(KEY_F11)) {
+        if (IsWindowFullscreen()) goWindow();
+        else goFullscreen();
+      }
       pollKeyboard(computer.input());
       computer.pumpTyping();
 
