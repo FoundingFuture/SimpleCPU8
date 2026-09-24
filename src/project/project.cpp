@@ -6,9 +6,11 @@
 #include <iterator>
 
 #include "asm/asm.h"
+#include "asm/format.h"
 #include "assets/assets.h"
 #include "cc/cc.h"
 #include "core/cartridge.h"
+#include "core/conflicts.h"
 #include "core/isa.h"
 #include "core/mcparse.h"
 #include "core/microcode.h"
@@ -315,6 +317,51 @@ Layout layoutOf(const fs::path& dir) {
 // project's own set and from the optimal set. A program prints the lines
 // with CMD_PRINTF and finds them through cycles_addr, a table of cartridge
 // addresses laid down in RAM, three bytes each.
+// The rows of a set that break one of the eight row rules, as warnings
+// with their line in the text. The machine runs such a set and stops on
+// the row with a signal conflict, which is its own lesson, so the build
+// goes on. The warning says where to look before that happens.
+static std::vector<std::string> rowWarnings(const std::string& text, const Microcode& set) {
+  // The line of each row: a line ending in a colon opens a section, every
+  // other line with something on it before a # is a row of it.
+  std::map<std::pair<std::string, size_t>, int> lineOf;
+  std::string section;
+  size_t row = 0;
+  int lineNo = 0;
+  for (size_t at = 0; at <= text.size();) {
+    size_t nl = text.find('\n', at);
+    if (nl == std::string::npos) nl = text.size();
+    std::string line = text.substr(at, nl - at);
+    at = nl + 1;
+    lineNo++;
+    const size_t hash = line.find('#');
+    if (hash != std::string::npos) line.resize(hash);
+    while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) line.pop_back();
+    size_t first = 0;
+    while (first < line.size() && std::isspace(static_cast<unsigned char>(line[first]))) first++;
+    if (first >= line.size()) continue;
+    if (line.back() == ':') {
+      section = line.substr(first, line.size() - first - 1);
+      row = 0;
+    } else {
+      lineOf[{section, row++}] = lineNo;
+    }
+  }
+  std::vector<std::string> out;
+  for (const Microcode::Section& sec : set.sections()) {
+    for (size_t r = 0; r < sec.rows.size(); r++) {
+      const std::optional<Conflict> c = checkRow(sec.rows[r]);
+      if (!c) continue;
+      const auto hit = lineOf.find({sec.name, r});
+      const std::string where = hit == lineOf.end() ? "" : std::to_string(hit->second) + ":";
+      out.push_back(where + " warning: " + sec.name + ", row " + std::to_string(r + 1) + ", breaks rule " +
+                    std::to_string(c->rule) + ": " + c->message +
+                    ". The machine stops with a signal conflict when it runs this row.");
+    }
+  }
+  return out;
+}
+
 std::string cyclesUnit(const std::string& microcodeText, std::vector<std::string>* errors) {
   Microcode mine;
   if (microcodeText == "@naive") mine = buildNaive();
@@ -416,6 +463,9 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
       }
       if (!parsed.errors.empty()) return b;
       microcode = microcodeFile->text;
+      for (const std::string& w : rowWarnings(microcodeFile->text, parsed.microcode)) {
+        b.notes.push_back(at("microcode.txt") + ":" + w);
+      }
     } else if (onBase) {
       microcode = base->microcode;
     } else {
@@ -844,7 +894,7 @@ const char* const README_MICROCODE = R"(# %NAME%
 An assembly program with its own microcode set. src/microcode.txt started
 as the naive set, one section per instruction, one row of signals per
 line. Edit a row, build, and the machine runs your rows. The IDE's
-Microcode level shows them firing.
+CPU level shows them firing.
 
 src/main.asm shows what every instruction costs: its microcycles under
 your set and under the optimal set, side by side. The build counts the
@@ -895,12 +945,12 @@ Created create(const fs::path& dir, Kind kind) {
     case Kind::Assembly:
       fs::create_directories(dir / "assets", ec);
       put(dir / "README.md", README_ASM, name, out);
-      put(dir / "src" / "main.asm", MAIN_ASM, name, out);
+      put(dir / "src" / "main.asm", formatAssembly(MAIN_ASM), name, out);
       break;
     case Kind::Microcode:
       fs::create_directories(dir / "assets", ec);
       put(dir / "README.md", README_MICROCODE, name, out);
-      put(dir / "src" / "main.asm", CYCLES_ASM, name, out);
+      put(dir / "src" / "main.asm", formatAssembly(CYCLES_ASM), name, out);
       put(dir / "src" / "microcode.txt",
           "# " + name + ": the naive microcode set, yours to change.\n# One section per instruction, one row of "
           "signals per line.\n\n" + serializeMicrocode(buildNaive()),

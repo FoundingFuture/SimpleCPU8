@@ -12,7 +12,7 @@
 # builds what the machine it runs on can: macOS builds both architectures,
 # Linux and Windows build their own.
 #
-# The distribution holds the five programs, every example ROM, the example
+# The distribution holds the six programs, every example ROM, the example
 # sources, the docs and the README.
 set -euo pipefail
 cd "$(dirname "$0")"

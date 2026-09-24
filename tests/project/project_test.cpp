@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 
 #include "asm/asm.h"
@@ -89,6 +90,27 @@ TEST_SUITE("project layouts") {
     CHECK(b.assembly.find("cycles_addr:") != std::string::npos);
     CHECK(b.assembly.find("db \"HLT             2  2\", 0") != std::string::npos);
     CHECK(b.assembly.find("db \"NOP            --  1\", 0") != std::string::npos);
+  }
+
+  TEST_CASE("a row that breaks a rule builds, with a warning naming its line") {
+    TempDir t;
+    write(t.path / "src" / "main.asm", "HLT\n");
+    write(t.path / "src" / "microcode.txt", "fetch:\n  FETCH\n# a comment\nHLT:\n  HALT\n  RAM_TO_B, ADDR_D1, ADDR_D2\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    REQUIRE(b.cartridge);
+    bool warned = false;
+    for (const std::string& n : b.notes) {
+      warned = warned || (n.find("microcode.txt:6: warning: HLT, row 2, breaks rule 8") != std::string::npos);
+    }
+    CHECK_MESSAGE(warned, (b.notes.empty() ? std::string("no notes") : b.notes.back()));
+  }
+
+  TEST_CASE("a new assembly project starts laid out in columns") {
+    TempDir t;
+    REQUIRE(project::create(t.path / "p", project::Kind::Assembly).error.empty());
+    std::ifstream in(t.path / "p" / "src" / "main.asm");
+    const std::string text((std::istreambuf_iterator<char>(in)), {});
+    CHECK(text.find("loop:   OUT    GPU_X_HI, 0") != std::string::npos);
   }
 
   TEST_CASE("a microcode.txt that does not parse names its line") {

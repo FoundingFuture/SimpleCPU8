@@ -66,12 +66,21 @@ operating system's gesture. That is Command-Q on macOS, and Alt-F4 or the
 close button elsewhere. Every key reaches the machine. So Escape and Ctrl-C
 break a running BASIC program, as they did on the old home computers.
 
-Keys in simplecpu-ide: F7 assembles and F8 burns a ROM. F5 runs or pauses.
-F6 runs one frame. F10 steps an instruction and F11 steps a microcycle.
+Keys in simplecpu-ide: F1 to F4 switch the level: BASIC, Project, Run and
+CPU. F7 builds and F8 burns a ROM. F5 runs or pauses. F6 runs one frame.
+F10 steps an instruction and F11 steps a microcycle. F12 shows the
+machine's screen alone, and Escape comes back.
+
+## Manuals
+
+docs/guides holds five manuals. basic.md teaches BASIC from the start,
+c.md then C, assembly.md the machine's own instructions and microcode.md
+the rows inside them. command-line.md covers the tools. It explains how
+to start a project, build a ROM and run it without the IDE.
 
 ## Distributions
 
-`./d` builds the release version and packs the five programs, every
+`./d` builds the release version and packs the six programs, every
 example ROM, the example sources and the docs into
 `dist/simplecpu-<version>-<os>-<arch>`, as a tar.gz or a zip. On a Mac it
 builds a universal binary by default and `--arch arm64` or `--arch x86_64`
