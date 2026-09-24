@@ -9,6 +9,8 @@
 #   ./r --asm main.asm          simplecpu-asm, --cc, --make and --run likewise
 #
 # Builds first when the build directory is missing.
+# macOS ships bash 3, where an empty array counts as unbound under -u, so
+# the array is expanded as ${args[@]+"${args[@]}"} throughout.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -52,20 +54,21 @@ if [ ! -x "$bin" ] && [ -x "$(dirname "$bin")/$config/$(basename "$bin").exe" ];
 fi
 
 if [ "$prog" = simplecpu ]; then
-  if [ ${#args[@]} -eq 0 ]; then
+  if [ -z "${args+x}" ]; then
     exec "$bin" --basic
   fi
   first="${args[0]}"
   case "$first" in
-    -*) exec "$bin" "${args[@]}" ;;
-    *.rom) exec "$bin" --rom "${args[@]}" ;;
+    -*) exec "$bin" ${args[@]+"${args[@]}"} ;;
+    *.rom) exec "$bin" --rom ${args[@]+"${args[@]}"} ;;
     *)
       rom="$build/roms/$first.rom"
       if [ -f "$rom" ]; then
-        exec "$bin" --rom "$rom" "${args[@]:1}"
+        shift_args=("${args[@]:1}")
+        exec "$bin" --rom "$rom" ${shift_args[@]+"${shift_args[@]}"}
       fi
-      exec "$bin" --rom "${args[@]}"
+      exec "$bin" --rom ${args[@]+"${args[@]}"}
       ;;
   esac
 fi
-exec "$bin" "${args[@]}"
+exec "$bin" ${args[@]+"${args[@]}"}

@@ -65,7 +65,7 @@ generator=""
 if command -v ninja >/dev/null 2>&1; then generator="-G Ninja"; fi
 if [ ! -f "$build/CMakeCache.txt" ]; then
   # shellcheck disable=SC2086
-  cmake -S . -B "$build" $generator -DCMAKE_BUILD_TYPE=Release -DSC8_BUILD_TESTS=OFF "${extra[@]}"
+  cmake -S . -B "$build" $generator -DCMAKE_BUILD_TYPE=Release -DSC8_BUILD_TESTS=OFF ${extra[@]+"${extra[@]}"}
 fi
 cmake --build "$build" --config Release --parallel
 
