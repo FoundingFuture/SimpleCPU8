@@ -55,11 +55,25 @@ if(SC8_BUILD_IDE)
   # Audio goes through miniaudio directly, so raylib's own audio module is
   # left out to avoid two copies of it.
   set(SUPPORT_MODULE_RAUDIO OFF CACHE BOOL "" FORCE)
+  # The IDE never reads an image from the clipboard. With the option on,
+  # rcore.c prints a pragma message on Linux because JPG decoding is off.
+  set(SUPPORT_CLIPBOARD_IMAGE OFF CACHE BOOL "" FORCE)
+  # Nothing here records or replays input events. The module's reader
+  # ignores what fgets returns, and glibc marks that result as required.
+  set(SUPPORT_AUTOMATION_EVENTS OFF CACHE BOOL "" FORCE)
   FetchContent_Declare(raylib
     GIT_REPOSITORY https://github.com/raysan5/raylib.git
     GIT_TAG 5.5
     GIT_SHALLOW TRUE)
   FetchContent_MakeAvailable(raylib)
+
+  # With CUSTOMIZE_BUILD, raylib 5.5 turns every #define in config.h into a
+  # -D flag. MAX_MESH_VERTEX_BUFFERS is defined in both branches of an #ifdef
+  # there, so each raylib unit saw it twice and warned. Drop the branch for
+  # GPU skinning, which is off, and keep the 7 that config.h resolves to.
+  get_target_property(raylibDefines raylib COMPILE_DEFINITIONS)
+  list(REMOVE_ITEM raylibDefines "MAX_MESH_VERTEX_BUFFERS=9")
+  set_target_properties(raylib PROPERTIES COMPILE_DEFINITIONS "${raylibDefines}")
 
   # Dear ImGui, docking branch, so the IDE panes can be rearranged.
   FetchContent_Declare(imgui

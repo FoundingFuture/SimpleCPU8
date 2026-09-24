@@ -266,7 +266,8 @@ std::string stripComments(std::string_view src) {
 }
 
 Preprocessor::Preprocessor(PpOptions opts) : opts_(std::move(opts)) {
-  for (const auto& [k, v] : opts_.defines) macros_[k] = Macro{std::nullopt, v};
+  // A define from the options comes from no file, so `from` stays empty.
+  for (const auto& [k, v] : opts_.defines) macros_[k] = Macro{std::nullopt, v, {}};
 }
 
 PpResult Preprocessor::run(const std::string& src, const std::string& fileName) {

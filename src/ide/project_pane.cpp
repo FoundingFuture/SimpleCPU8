@@ -40,8 +40,6 @@ std::optional<std::string> readText(const fs::path& p) {
   return std::string(std::istreambuf_iterator<char>(in), {});
 }
 
-const ImVec4 ERROR_COLOR(1.0f, 0.4f, 0.35f, 1.0f);
-
 }  // namespace
 
 DocKind docKindOf(const std::string& name) {

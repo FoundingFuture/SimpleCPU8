@@ -72,12 +72,15 @@ class IoBus {
 // Deterministic default bus: writes are logged, reads return 0.
 class LogIoBus : public IoBus {
  public:
+  // A constructor rather than an aggregate: GCC 13 at -O3 misreads the
+  // push_back of a two byte aggregate as a one byte write past the buffer.
   struct Entry {
     uint8_t port, value;
+    Entry(uint8_t p, uint8_t v) : port(p), value(v) {}
     bool operator==(const Entry&) const = default;
   };
   std::vector<Entry> log;
-  void write(uint8_t port, uint8_t value) override { log.push_back({port, value}); }
+  void write(uint8_t port, uint8_t value) override { log.emplace_back(port, value); }
   uint8_t read(uint8_t) override { return 0; }
 };
 

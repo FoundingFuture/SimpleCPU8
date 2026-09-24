@@ -173,15 +173,16 @@ uint32_t hashBytes(const std::vector<uint8_t>& bytes) {
   return h;
 }
 
+// Every field has a default, so a site names only the fields its shape uses.
 struct Operand {
   enum class T { Reg, IndA, IndD, IdxD, DispD, Stack, Mem, Val, Round };
-  T t;
-  std::string r;     // Reg: A, D1, D2
+  T t{};
+  std::string r{};   // Reg: A, D1, D2
   int x = 0;         // IndD, IdxD, DispD: 1 or 2
   bool inc = false;  // IndA, IndD
   bool push = false; // Stack: [SP]- pushes, [SP]+ pops
-  std::string expr;  // DispD, Mem, Val
-  std::string was;   // Round: the operand as typed
+  std::string expr{}; // DispD, Mem, Val
+  std::string was{};  // Round: the operand as typed
 };
 
 // The six addressing shapes, spelled with one bracket pair. A dereference
@@ -199,23 +200,19 @@ std::optional<Operand> parseDeref(const std::string& s, char open, char close) {
   const std::string inner = body.substr(1, body.size() - 2);
   const bool dReg = inner == "D1" || inner == "D2";
   if (suffixed) {
-    if (last == '+' && inner == "A") return Operand{Operand::T::IndA, {}, 0, true};
-    if (last == '+' && dReg) return Operand{Operand::T::IndD, {}, inner[1] - '0', true};
-    if (inner == "SP") return Operand{Operand::T::Stack, {}, 0, false, last == '-'};
+    if (last == '+' && inner == "A") return Operand{.t = Operand::T::IndA, .inc = true};
+    if (last == '+' && dReg) return Operand{.t = Operand::T::IndD, .x = inner[1] - '0', .inc = true};
+    if (inner == "SP") return Operand{.t = Operand::T::Stack, .push = last == '-'};
     return std::nullopt;
   }
-  if (inner == "A") return Operand{Operand::T::IndA};
-  if (dReg) return Operand{Operand::T::IndD, {}, inner[1] - '0'};
-  if (inner == "D1+A" || inner == "D2+A") return Operand{Operand::T::IdxD, {}, inner[1] - '0'};
+  if (inner == "A") return Operand{.t = Operand::T::IndA};
+  if (dReg) return Operand{.t = Operand::T::IndD, .x = inner[1] - '0'};
+  if (inner == "D1+A" || inner == "D2+A") return Operand{.t = Operand::T::IdxD, .x = inner[1] - '0'};
   if ((startsWith(inner, "D1+") || startsWith(inner, "D2+")) && inner.size() > 3) {
-    Operand o{Operand::T::DispD, {}, inner[1] - '0'};
-    o.expr = inner.substr(3);
-    return o;
+    return Operand{.t = Operand::T::DispD, .x = inner[1] - '0', .expr = inner.substr(3)};
   }
   if (inner.empty()) return std::nullopt;
-  Operand o{Operand::T::Mem};
-  o.expr = inner;
-  return o;
+  return Operand{.t = Operand::T::Mem, .expr = inner};
 }
 
 // The same operand written the way it has to be written now. The suffix
@@ -234,25 +231,19 @@ std::string squareSpelling(const std::string& s) {
 
 std::optional<Operand> parseOperand(std::string_view raw) {
   const std::string s = stripSpaces(raw);
-  if (s == "A" || s == "D1" || s == "D2") return Operand{Operand::T::Reg, s};
+  if (s == "A" || s == "D1" || s == "D2") return Operand{.t = Operand::T::Reg, .r = s};
   if (auto d = parseDeref(s, '[', ']')) return d;
   // Round brackets did this job until every program was rewritten. They are
   // matched here only to be refused with the spelling that works. A group
   // holding an operator is arithmetic, and (1 + 2) has one reading.
   if (auto r = parseDeref(s, '(', ')')) {
     if (r->t == Operand::T::Mem && looksLikeExpression(r->expr)) {
-      Operand o{Operand::T::Val};
-      o.expr = r->expr;
-      return o;
+      return Operand{.t = Operand::T::Val, .expr = r->expr};
     }
-    Operand o{Operand::T::Round};
-    o.was = s;
-    return o;
+    return Operand{.t = Operand::T::Round, .was = s};
   }
   if (s.empty()) return std::nullopt;
-  Operand o{Operand::T::Val};
-  o.expr = s.front() == '&' ? s.substr(1) : s;
-  return o;
+  return Operand{.t = Operand::T::Val, .expr = s.front() == '&' ? s.substr(1) : s};
 }
 
 enum class ExprKind { Imm8, Addr8, Disp8, Imm16, Addr16, Target, Out8 };
