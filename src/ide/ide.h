@@ -57,7 +57,12 @@ class Ide {
   // The command line's --speed and --run: a label from the browser's
   // speed menu, then start running. False for a value the ladder lacks.
   bool setSpeed(const std::string& value);
-  void run() { setRunning(true); }
+  // With a BASIC program open and nothing else, --run means run it in
+  // BASIC, which boots the interpreter first.
+  void run() {
+    if (openedBasic_) runInBasic();
+    else setRunning(true);
+  }
 
   // Called once per host frame, before rlImGuiBegin. Paces the machine,
   // feeds the keyboard and the audio. Renders the screen through the CRT
@@ -165,6 +170,14 @@ class Ide {
   std::string basicSlot_ = "PROGRAM";
   std::string typing_;
   size_t typingPos_ = 0;
+  // Typing waits for this GPU frame, since BASIC drains the keys as it boots.
+  uint64_t typingAfterFrame_ = 0;
+  // Whether the cartridge in the slot is the built-in BASIC ROM.
+  bool basicBooted_ = false;
+  // The last file opened from the command line was a .bas.
+  bool openedBasic_ = false;
+  void bootBasic();
+  void runInBasic();
   std::vector<std::pair<std::string, std::string>> basicSlots_;
   bool basicDirty_ = false;  // slots changed and no ROM file to rewrite
 };

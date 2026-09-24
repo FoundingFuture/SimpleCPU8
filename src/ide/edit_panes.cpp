@@ -147,6 +147,7 @@ void Ide::cPane() {
 // The storage device will replace this with a load into the interpreter's
 // program memory.
 void Ide::typeIntoMachine() {
+  if (computer_.frameCounter() < typingAfterFrame_) return;
   InputBus& in = computer_.input();
   while (typingPos_ < typing_.size() && in.queued() <= 32) {
     const char c = typing_[typingPos_++];
@@ -207,11 +208,18 @@ void Ide::basicPane() {
     if (ImGui::SmallButton("Stop typing")) typing_.clear();
     ImGui::SameLine();
     ImGui::TextDisabled("typing %zu of %zu", typingPos_, typing_.size());
-  } else if (ImGui::SmallButton("Push to RAM")) {
-    typing_ = basicText_;
-    if (!typing_.empty() && typing_.back() != '\n') typing_ += '\n';
-    typingPos_ = 0;
-    if (!running_) note("the machine is paused: press Run so BASIC can read the lines");
+  } else {
+    if (ImGui::SmallButton("Run in BASIC")) runInBasic();
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Push to RAM")) {
+      typing_ = basicText_;
+      if (!typing_.empty() && typing_.back() != '\n') typing_ += '\n';
+      typingPos_ = 0;
+      typingAfterFrame_ = 0;
+      if (!running_) note("the machine is paused: press Run so BASIC can read the lines");
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Run boots BASIC, types the program in and runs it. Watch the Screen pane.");
   }
   if (!basicSlots_.empty()) {
     std::string slots = basicDirty_ ? "slots (unburned): " : "slots: ";

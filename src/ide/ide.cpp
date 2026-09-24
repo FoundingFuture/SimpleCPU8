@@ -108,6 +108,7 @@ Ide::Ide() : source_(DEFAULT_SOURCE) {
 }
 
 void Ide::open(const std::string& path) {
+  openedBasic_ = fs::path(path).extension() == ".bas";
   if (fs::path(path).extension() == ".rom") {
     loadRomFile(path);
     return;
@@ -175,8 +176,37 @@ void Ide::loadRomFile(const std::string& path) {
 // A cartridge from a file has no source, so the listing shows a
 // disassembly. The slot list mirrors the ROM's BAS chunk for the BASIC
 // pane. The machine's own cartridge is left alone once inserted.
+void Ide::bootBasic() {
+  CartridgeResult r = decodeCartridge(std::vector<uint8_t>(basicRom().begin(), basicRom().end()));
+  if (!r.cartridge) {
+    note("BASIC ROM: " + r.error);
+    return;
+  }
+  romPath_.clear();
+  loadCartridge(std::move(*r.cartridge), "the BASIC ROM");
+  basicBooted_ = true;
+}
+
+// The BASIC tab's Run: boot the interpreter unless it is already in the
+// slot, then type the program in and RUN it, the way a person would. The
+// typing waits twenty frames, because BASIC drains the keys while it boots.
+void Ide::runInBasic() {
+  if (!basicBooted_ || computer_.machine().status != Status::Running) {
+    bootBasic();
+    typingAfterFrame_ = computer_.frameCounter() + 20;
+  } else {
+    typingAfterFrame_ = 0;
+  }
+  typing_ = "NEW\n" + basicText_;
+  if (typing_.back() != '\n') typing_ += '\n';
+  typing_ += "RUN\n";
+  typingPos_ = 0;
+  setRunning(true);
+}
+
 void Ide::loadCartridge(Cartridge cart, const std::string& what) {
   setRunning(false);
+  basicBooted_ = false;
   basicSlots_ = cart.basic;
   basicDirty_ = false;
   haveSource_ = false;
@@ -453,6 +483,7 @@ void Ide::frame() {
       cPane();
       basicPane();
       messagesPane();
+      screenPane();
       manualPane();
       break;
     case Level::Run:
@@ -486,15 +517,18 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
   ImGuiID left = dockspace, right, bottom, mid, midBottom, rightBottom;
   switch (level) {
     case Level::Edit:
-      // The editor on the left with the messages under it. The manual on
-      // the right, where a reader keeps it open.
+      // The editor on the left with the messages under it. The screen on
+      // the right, so a program's result is seen without leaving the
+      // editor, and the manual under it, where a reader keeps it open.
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.38f, &right, &left);
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.22f, &bottom, &left);
+      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &rightBottom, &right);
       ImGui::DockBuilderDockWindow("Source", left);
       ImGui::DockBuilderDockWindow("C", left);
       ImGui::DockBuilderDockWindow("BASIC", left);
       ImGui::DockBuilderDockWindow("Messages", bottom);
-      ImGui::DockBuilderDockWindow("Manual", right);
+      ImGui::DockBuilderDockWindow("Screen", right);
+      ImGui::DockBuilderDockWindow("Manual", rightBottom);
       break;
     case Level::Run:
       // The screen large in the middle, the registers and the run
@@ -537,15 +571,7 @@ void Ide::menuBar() {
     if (ImGui::MenuItem("Save source", "Ctrl+S")) saveSource();
     if (ImGui::MenuItem("Burn ROM", "F8")) burnRom();
     ImGui::Separator();
-    if (ImGui::MenuItem("Boot the BASIC ROM")) {
-      CartridgeResult r = decodeCartridge(std::vector<uint8_t>(basicRom().begin(), basicRom().end()));
-      if (r.cartridge) {
-        romPath_.clear();
-        loadCartridge(std::move(*r.cartridge), "the BASIC ROM");
-      } else {
-        note("BASIC ROM: " + r.error);
-      }
-    }
+    if (ImGui::MenuItem("Boot the BASIC ROM")) bootBasic();
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Level")) {

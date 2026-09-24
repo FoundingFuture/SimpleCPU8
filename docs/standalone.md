@@ -47,8 +47,15 @@ examples/hello-c is the smallest case, and the build makes every example
 directory that holds C this way.
 
 In the IDE, the Edit level has a C tab beside Source and BASIC. Compile
-sends the assembly to the Source pane, assembled and ready to run, so the
-generated code can be read next to the C.
+sends the assembly to the Source pane, assembled and ready to run. The
+generated code can then be read next to the C.
+
+The Edit level also shows the machine's screen, so a program runs where it
+is written. The BASIC tab's Run in BASIC button boots the interpreter,
+types the program in and runs it. Push to RAM places the text
+in memory instead. `simplecpu-ide game.bas --run` does the same from the
+command line. The Run level, reached from the Level menu or F2, puts
+registers, memory, breakpoints and the listing around that screen.
 
 Command lines that are settled:
 
