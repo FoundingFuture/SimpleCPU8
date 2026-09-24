@@ -86,81 +86,136 @@ void Ide::sourcePane() {
 
 // ---- C
 
-// The headers beside the file are handed to the compiler, so #include
-// "basic.h" works the way it does on the simplecpu-cc command line.
-void Ide::compileC() {
-  cc::CcOptions opts;
-  const fs::path dir = cPath_.empty() ? fs::current_path() : fs::path(cPath_).parent_path();
+// ---- the project
+
+void Ide::openProject(const std::string& dir) {
+  projectDir_ = dir;
+  focusProject_ = true;
+  projectFiles_.clear();
+  projectFile_.clear();
+  projectText_.clear();
+  projectDirty_ = false;
+  const project::Layout l = project::layoutOf(dir);
   std::error_code ec;
-  for (const auto& entry : fs::directory_iterator(dir, ec)) {
-    if (!entry.is_regular_file() || entry.path().extension() != ".h") continue;
-    std::ifstream h(entry.path());
-    if (h) opts.extra[entry.path().filename().string()] = std::string(std::istreambuf_iterator<char>(h), {});
+  for (const auto& entry : fs::directory_iterator(l.sources, ec)) {
+    if (!entry.is_regular_file()) continue;
+    const std::string ext = entry.path().extension().string();
+    if (ext == ".c" || ext == ".h" || ext == ".asm" || ext == ".bas") projectFiles_.push_back(entry.path().filename().string());
   }
-  // An asset form names a file beside the C file, as .image does beside
-  // the assembly. A conversion note goes to the messages pane.
-  Assets assets;
-  std::vector<std::string> notes;
-  assets.loadFile = [&](std::string_view name) -> std::optional<std::vector<uint8_t>> {
-    std::ifstream f(dir / fs::path(name), std::ios::binary);
-    if (!f) return std::nullopt;
-    return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
-  };
-  assets.loadImage = [&](std::string_view name) {
-    std::string n;
-    auto img = loadImageFile(dir / fs::path(name), &n);
-    if (!n.empty()) notes.push_back(std::string(name) + ": " + n);
-    return img;
-  };
-  assets.loadSample = [&](std::string_view name) {
-    std::string n;
-    auto pcm = loadSampleFile(dir / fs::path(name), &n);
-    if (!n.empty()) notes.push_back(std::string(name) + ": " + n);
-    return pcm;
-  };
-  opts.assets = &assets;
-  const std::string name = cPath_.empty() ? "main.c" : fs::path(cPath_).filename().string();
-  CcResult r = compile({{name, cText_}}, opts);
-  messages_.clear();
-  for (const std::string& n : notes) note(n);
-  for (const std::string& e : r.errors) note(e);
-  if (!r.errors.empty()) return;
-  // The assembly lands in the Source pane and is assembled at once, so the
-  // program is ready to run and the generated code can be read.
-  source_ = r.assembly;
-  source_.reserve(source_.size() + (1 << 16));
-  sourcePath_ = cPath_.empty() ? "" : fs::path(cPath_).replace_extension(".asm").string();
-  assembleSource();
-  note("compiled " + name + " into " + std::to_string(std::count(r.assembly.begin(), r.assembly.end(), '\n')) +
-       " lines of assembly");
+  std::sort(projectFiles_.begin(), projectFiles_.end());
+  if (projectFiles_.empty()) {
+    note(l.sources.string() + " holds no .c, .h, .asm or .bas file");
+    return;
+  }
+  // main.c first when there is one, since that is where a reader starts.
+  const auto main = std::find(projectFiles_.begin(), projectFiles_.end(), "main.c");
+  openProjectFile(main != projectFiles_.end() ? *main : projectFiles_.front());
 }
 
-void Ide::cPane() {
-  ImGui::Begin("C");
-  ImGui::SetNextItemWidth(260);
-  panes::inputLine("file", cPath_, "path of a .c file");
+void Ide::openProjectFile(const std::string& name) {
+  if (projectDirty_) saveProjectFile();
+  const project::Layout l = project::layoutOf(projectDir_);
+  std::ifstream in(l.sources / name);
+  if (!in) {
+    note("cannot read " + (l.sources / name).string());
+    return;
+  }
+  projectText_.assign(std::istreambuf_iterator<char>(in), {});
+  projectText_.reserve(projectText_.size() + (1 << 16));
+  projectFile_ = name;
+  projectDirty_ = false;
+  if (std::find(projectFiles_.begin(), projectFiles_.end(), name) == projectFiles_.end()) {
+    projectFiles_.push_back(name);
+    std::sort(projectFiles_.begin(), projectFiles_.end());
+  }
+}
+
+void Ide::saveProjectFile() {
+  if (projectFile_.empty()) return;
+  const project::Layout l = project::layoutOf(projectDir_);
+  std::ofstream o(l.sources / projectFile_);
+  o << projectText_;
+  note(o ? "saved " + projectFile_ : "cannot write " + (l.sources / projectFile_).string());
+  projectDirty_ = !o;
+}
+
+// Build is what simplecpu-make does: every source in the folder into one
+// ROM, written to the build folder. The assembly it made lands in the
+// Source pane and is assembled there, so the listing, the breakpoints and
+// the machine all come from it and the generated code can be read.
+void Ide::buildProject(bool run) {
+  if (projectDir_.empty()) {
+    note("open a project folder first");
+    return;
+  }
+  if (projectDirty_) saveProjectFile();
+  const project::Layout l = project::layoutOf(projectDir_);
+  project::Options o;
+  project::Written w = project::buildAndWrite(l, o);
+  messages_.clear();
+  for (const std::string& n : w.built.notes) note(n);
+  for (const std::string& e : w.built.errors) note(e);
+  if (!w.built.cartridge) return;
+  projectLayout_ = l;
+  source_ = w.built.assembly;
+  source_.reserve(source_.size() + (1 << 16));
+  sourcePath_ = (l.build / (l.name + ".asm")).string();
+  assembleSource();
+  romPath_ = w.rom.string();
+  note("built " + w.rom.string() + ": " + std::to_string(w.built.instructions) + " instructions, " +
+       std::to_string(w.built.ramBytes) + " bytes of RAM, " + std::to_string(w.built.dataBytes) + " bytes of data");
+  if (run && assembledOk_) setRunning(true);
+}
+
+void Ide::projectPane() {
+  if (focusProject_) {
+    ImGui::SetNextWindowFocus();
+    focusProject_ = false;
+  }
+  ImGui::Begin("Project");
+  ImGui::SetNextItemWidth(300);
+  panes::inputLine("folder", projectDir_, "a folder of .c and .h files, or one with src/");
   ImGui::SameLine();
-  if (ImGui::SmallButton("Load")) {
-    std::ifstream in(cPath_);
-    if (in) {
-      cText_.assign(std::istreambuf_iterator<char>(in), {});
-      note("loaded " + cPath_);
-    } else {
-      note("cannot read " + cPath_);
+  if (ImGui::SmallButton("Open")) openProject(projectDir_);
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Build")) buildProject(false);
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Build and Run")) buildProject(true);
+  ImGui::SameLine();
+  ImGui::TextDisabled("every .c, .asm and .bas in the folder goes into one ROM in build/");
+
+  ImGui::BeginChild("##files", ImVec2(150.0f, -1.0f), ImGuiChildFlags_Borders);
+  for (const std::string& f : projectFiles_) {
+    if (ImGui::Selectable(f.c_str(), f == projectFile_)) openProjectFile(f);
+  }
+  ImGui::Spacing();
+  static char newName[64] = "";
+  ImGui::SetNextItemWidth(-1.0f);
+  if (ImGui::InputTextWithHint("##new", "new file, Enter", newName, sizeof newName, ImGuiInputTextFlags_EnterReturnsTrue)) {
+    const std::string n = newName;
+    if (!n.empty() && !projectDir_.empty()) {
+      const project::Layout l = project::layoutOf(projectDir_);
+      std::error_code ec;
+      fs::create_directories(l.sources, ec);
+      if (!fs::exists(l.sources / n)) std::ofstream(l.sources / n) << "";
+      openProjectFile(n);
+      newName[0] = 0;
     }
   }
+  ImGui::EndChild();
   ImGui::SameLine();
-  if (ImGui::SmallButton("Save")) {
-    if (cPath_.empty()) cPath_ = "main.c";
-    std::ofstream o(cPath_);
-    o << cText_;
-    note(o ? "saved " + cPath_ : "cannot write " + cPath_);
+  ImGui::BeginChild("##edit", ImVec2(-1.0f, -1.0f));
+  if (projectFile_.empty()) {
+    ImGui::TextDisabled("no file open");
+  } else {
+    ImGui::Text("%s%s", projectFile_.c_str(), projectDirty_ ? " (unsaved)" : "");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Save")) saveProjectFile();
+    if (panes::inputMultiline("##ptext", projectText_, ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) {
+      projectDirty_ = true;
+    }
   }
-  ImGui::SameLine();
-  if (ImGui::SmallButton("Compile")) compileC();
-  ImGui::SameLine();
-  ImGui::TextDisabled("the assembly appears in Source, assembled and ready to run");
-  panes::inputMultiline("##csource", cText_, ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput);
+  ImGui::EndChild();
   ImGui::End();
 }
 

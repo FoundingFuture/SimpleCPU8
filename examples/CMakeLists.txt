@@ -28,9 +28,16 @@ foreach(dir IN LISTS SC8_EXAMPLE_DIRS)
   # A directory holding C is built by simplecpu-make, which compiles every
   # .c file in it together and appends any .asm. The ROM lands beside the
   # others. Its README's first line is the title, as simplecpu-make reads it.
-  file(GLOB c_sources CONFIGURE_DEPENDS "${dir}/*.c")
+  # A project with a src/ directory is the larger layout: sources in src/,
+  # assets in assets/. Both shapes are what simplecpu-make reads.
+  set(srcdir "${dir}")
+  if(IS_DIRECTORY "${dir}/src")
+    set(srcdir "${dir}/src")
+  endif()
+  file(GLOB c_sources CONFIGURE_DEPENDS "${srcdir}/*.c")
   if(c_sources)
-    file(GLOB c_inputs CONFIGURE_DEPENDS "${dir}/*.c" "${dir}/*.h" "${dir}/*.asm" "${dir}/*.bas")
+    file(GLOB c_inputs CONFIGURE_DEPENDS "${srcdir}/*.c" "${srcdir}/*.h" "${srcdir}/*.asm" "${srcdir}/*.bas"
+         "${dir}/assets/*" "${srcdir}/*.png" "${srcdir}/*.wav")
     set(rom "${SC8_ROM_DIR}/${name}.rom")
     add_custom_command(
       OUTPUT "${rom}"

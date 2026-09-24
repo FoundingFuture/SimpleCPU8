@@ -5,6 +5,7 @@
 #   asm/       the assembler and its constant expression evaluator
 #   assets/    image and audio decoding into what the assembler places
 #   cc/        the C compiler
+#   project/   a project folder into a ROM, behind simplecpu-make and the IDE
 #   basic/     the BASIC interpreter, written in the machine's own C
 #   tools/     command line front ends: simplecpu-asm, simplecpu-run, simplecpu-cc
 #   vm/        the virtual computer and the simplecpu executable
@@ -15,6 +16,7 @@ add_subdirectory(devices)
 add_subdirectory(asm)
 add_subdirectory(assets)
 add_subdirectory(cc)
+add_subdirectory(project)
 
 if(SC8_BUILD_TOOLS)
   add_subdirectory(tools)

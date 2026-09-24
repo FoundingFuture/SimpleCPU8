@@ -27,9 +27,9 @@ namespace sc8::cc {
 // one to one onto the header, which is the point of naming them this way.
 std::string wrapperName(std::string_view prefix, std::string_view cmd);
 
-// Which port aliases each GPU command reads, in argument order. The browser
-// project keeps this beside the command table in gpu.ts. It moves to
-// src/devices/gpu.h once the GPU lands in this tree.
+// Which port aliases each GPU command reads, in argument order. The GPU
+// owns the table, in src/devices/gpu.cpp. This is its shape for callers
+// that want one vector per command.
 struct CmdArgs {
   std::string_view cmd;
   std::vector<std::string_view> aliases;

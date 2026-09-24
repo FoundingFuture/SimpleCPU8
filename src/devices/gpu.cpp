@@ -39,7 +39,7 @@ const std::vector<CmdArgs> CMD_ARGS = {
      {"GPU_CART_BANK", "GPU_CART_HI", "GPU_CART_LO", "GPU_DEST_HI", "GPU_DEST_LO", "GPU_LEN_HI", "GPU_LEN_LO"}},
     {"CMD_RAM_MOVE", {"GPU_FROM_HI", "GPU_FROM_LO", "GPU_DEST_HI", "GPU_DEST_LO", "GPU_LEN_HI", "GPU_LEN_LO"}},
     {"CMD_MEMMAP", {"GPU_MAP", "GPU_MAP_HI", "GPU_MAP_LO"}},
-    {"CMD_SPRITE_DEF", {"GPU_SPRITE", "GPU_MESH", "GPU_SRC_BANK", "GPU_SRC_HI", "GPU_SRC_LO", "GPU_SPRITE_GROUP"}},
+    {"CMD_SPRITE_DEF", {"GPU_SPRITE", "GPU_SRC_BANK", "GPU_SRC_HI", "GPU_SRC_LO", "GPU_SPRITE_GROUP"}},
     {"CMD_SPRITE_MOVE", {"GPU_SPRITE", "GPU_SPRITE_X_HI", "GPU_SPRITE_X", "GPU_SPRITE_Y_HI", "GPU_SPRITE_Y"}},
     {"CMD_STAMP", {"GPU_SPRITE", "GPU_SPRITE_X_HI", "GPU_SPRITE_X", "GPU_SPRITE_Y_HI", "GPU_SPRITE_Y"}},
     {"CMD_SPRITE_SHOW", {"GPU_SPRITE"}},
@@ -322,13 +322,18 @@ void Gpu::command(uint8_t cmd) {
       break;
     }
     case CMD_CIRCLE: {
-      const int r = u8(0);
-      for (int dy = -r; dy <= r; dy++) {
-        // Integer square root, so circle edges never depend on float rounding.
-        const int n = r * r - dy * dy;
+      // A second radius on GPU_RADIUS_Y makes an ellipse. Zero, the value
+      // a cleared port holds, keeps the circle round, so a program written
+      // before ellipses draws what it drew.
+      const int rx = u8(0);
+      const int ry = u8(1) == 0 ? rx : u8(1);
+      for (int dy = -ry; dy <= ry; dy++) {
+        // Integer square root, so edges never depend on float rounding.
+        // half = rx * sqrt(ry^2 - dy^2) / ry, in 64 bit so 255^4 fits.
+        const int64_t n = ry == 0 ? 0 : (int64_t{rx} * rx * (int64_t{ry} * ry - int64_t{dy} * dy)) / (int64_t{ry} * ry);
         int half = static_cast<int>(std::sqrt(static_cast<double>(n)));
-        while ((half + 1) * (half + 1) <= n) half++;
-        while (half * half > n) half--;
+        while (int64_t{half + 1} * (half + 1) <= n) half++;
+        while (int64_t{half} * half > n) half--;
         const int py = penY + dy;
         if (py < 0 || py >= SCREEN_H) continue;
         const int x0 = std::max(penX - half, 0);
@@ -339,8 +344,15 @@ void Gpu::command(uint8_t cmd) {
       break;
     }
     case CMD_RING: {
+      const int rx = u8(0);
+      const int ry = u8(1);
+      if (ry != 0 && ry != rx) {
+        ellipseOutline(rx, ry);
+        version++;
+        break;
+      }
       // Midpoint circle: the outline only.
-      const int r = u8(0);
+      const int r = rx;
       int dx = r;
       int dy = 0;
       int err = 1 - r;

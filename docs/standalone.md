@@ -40,15 +40,24 @@ A directory is a program. `simplecpu-make mygame/` compiles every `.c` in
 it together, with the `.h` files beside them reachable by `#include`. It
 appends every `.asm` after the generated assembly, so a driver sits at its
 `.org` slot. Every `.bas` goes into the ROM as a slot named after the file.
-`.file`, `.image` and `.sample` resolve inside the directory. The ROM is
-`mygame/mygame.rom` and its title is the first line of README.md. There is
-no manifest to learn. `--asm-out` keeps the generated assembly for reading.
-examples/hello-c is the smallest case, and the build makes every example
-directory that holds C this way.
+A picture or a sound named by `__sprite`, `__image` or `__sample` in C, or
+by `.image` and `.sample` in assembly, resolves inside the directory. The
+title is the first line of README.md. There is no manifest to learn.
 
-In the IDE, the Edit level has a C tab beside Source and BASIC. Compile
-sends the assembly to the Source pane, assembled and ready to run. The
-generated code can then be read next to the C.
+Two layouts are read. The flat one keeps everything in one folder and
+writes `mygame/mygame.rom`. The larger one has `src/` for the sources,
+`assets/` for the pictures and sounds, and writes `build/mygame.rom`. A
+folder with a `src/` directory is the larger layout. examples/hello-c is
+the flat case and examples/bounce the larger one. The build makes every
+example that holds C this way. src/project is the code behind both
+`simplecpu-make` and the IDE.
+
+In the IDE, the Edit level has a Project tab beside Source and BASIC. It
+opens a folder, lists its files, edits one at a time and has one Build
+button. Build is `simplecpu-make` on the folder: the ROM lands in `build/`
+and the machine. The assembly it made goes to the Source pane, so the
+generated code can be read next to the C. Opening a `.c` file from the
+command line opens its project and builds it, and `--run` starts it.
 
 The Edit level also shows the machine's screen, so a program runs where it
 is written. The editor and the interpreter's program memory are two views

@@ -1,4 +1,5 @@
 // The GPU's drawing primitives and the 2D and 3D path projection.
+#include <cstdint>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -39,6 +40,54 @@ int shr7(int v) { return v >> 7; }
 void Gpu::plotAt(int px, int py, uint8_t c) {
   if (px < 0 || px >= SCREEN_W || py < 0 || py >= SCREEN_H) return;  // clip
   vram[static_cast<size_t>(py * SCREEN_W + px)] = c;
+}
+
+// Midpoint ellipse, the outline only, in 64 bit so 255^4 fits. Region one
+// walks x while the slope is shallow, region two walks y.
+void Gpu::ellipseOutline(int rx, int ry) {
+  const uint8_t c = static_cast<uint8_t>(color);
+  auto four = [&](int64_t x, int64_t y) {
+    plotAt(penX + static_cast<int>(x), penY + static_cast<int>(y), c);
+    plotAt(penX - static_cast<int>(x), penY + static_cast<int>(y), c);
+    plotAt(penX + static_cast<int>(x), penY - static_cast<int>(y), c);
+    plotAt(penX - static_cast<int>(x), penY - static_cast<int>(y), c);
+  };
+  const int64_t a2 = int64_t{rx} * rx;
+  const int64_t b2 = int64_t{ry} * ry;
+  int64_t x = 0;
+  int64_t y = ry;
+  int64_t d1 = b2 - a2 * ry + a2 / 4;
+  int64_t dx = 2 * b2 * x;
+  int64_t dy = 2 * a2 * y;
+  while (dx < dy) {
+    four(x, y);
+    if (d1 < 0) {
+      x++;
+      dx += 2 * b2;
+      d1 += dx + b2;
+    } else {
+      x++;
+      y--;
+      dx += 2 * b2;
+      dy -= 2 * a2;
+      d1 += dx - dy + b2;
+    }
+  }
+  int64_t d2 = b2 * (x * 2 + 1) * (x * 2 + 1) / 4 + a2 * (y - 1) * (y - 1) - a2 * b2;
+  while (y >= 0) {
+    four(x, y);
+    if (d2 > 0) {
+      y--;
+      dy -= 2 * a2;
+      d2 += a2 - dy;
+    } else {
+      y--;
+      x++;
+      dx += 2 * b2;
+      dy -= 2 * a2;
+      d2 += dx - dy + a2;
+    }
+  }
 }
 
 void Gpu::ringPoints(int dx, int dy) {

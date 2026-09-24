@@ -1,6 +1,9 @@
 #include "cc/codegen.h"
 
+#include "assets/assets.h"
+
 #include <algorithm>
+#include <array>
 #include <set>
 
 #include "cc/doubles.h"
@@ -1404,6 +1407,19 @@ class Gen {
 
     const CType lt = genExpr(e.l, slot);
     convert(slot, lt, rtype);
+    if (bop == ">>" && !isSigned(rtype) && width == 2) {
+      // An unsigned shift by eight is the high byte moved down, four
+      // instructions where the coprocessor costs fifty. Every port write of
+      // a 16 bit value does it, so the library wrappers ride on this.
+      const auto n = foldConst(e.r);
+      if (n && *n == 8) {
+        op("LD A <- " + hi(slot));
+        op("LD " + lo(slot) + " <- A");
+        op("LD A <- 0");
+        op("LD " + hi(slot) + " <- A");
+        return rtype;
+      }
+    }
     const CType rt = genExpr(e.r, slot + 1);
     convert(slot + 1, rt, rtype);
 
@@ -1812,7 +1828,9 @@ class Gen {
         moveConst(emitter(), slotAt(d), dlit(e.value));
         return;
 
-      case ExprKind::Id: {
+      case ExprKind::Id:
+      case ExprKind::Index: {
+        // A named double, or one in an array: read from where it lives.
         const CType t = typeOf(ep);
         if (!isFloat(t)) { widenToDouble(ep, d, slot); return; }
         moveDyn(emitter(), Where::at(slotAt(d)), dAddr(ep, slot));
@@ -1824,6 +1842,10 @@ class Gen {
         break;
 
       case ExprKind::Un:
+        if (e.op == "*" && isFloat(typeOf(ep))) {
+          moveDyn(emitter(), Where::at(slotAt(d)), dAddr(ep, slot));
+          return;
+        }
         if (e.op == "+") { genDouble(e.e, d, slot); return; }
         if (e.op == "-") {
           genDouble(e.e, d, slot);
@@ -2007,6 +2029,24 @@ namespace {
 // blob the device command reads: CMD_BLIT for __image, CMD_SPRITE_DEF for
 // __sprite, CMD_LOAD_PALETTE for __palette, CMD_DEF_SAMPLE for __sample.
 // __file is the bytes as they are.
+// A picture drawn in any colours comes out in the machine's palette. An
+// image whose colours all exist there arrives already indexed to it. Any
+// other keeps its own palette, which .image in assembly loads on request.
+// C has no such step, so each pixel goes to the nearest machine colour and
+// index 0, the transparent one, stays 0.
+ImageAsset onMachinePalette(ImageAsset img) {
+  const std::vector<uint8_t> machine = machinePalette();
+  if (img.palette.size() != 768 || img.palette == machine) return img;
+  std::array<uint8_t, 256> map{};
+  for (size_t i = 1; i < 256; i++) {
+    map[i] = nearestIndex(machine, img.palette[i * 3], img.palette[i * 3 + 1], img.palette[i * 3 + 2]);
+    if (map[i] == 0) map[i] = 1;  // a black pixel is drawn, not skipped
+  }
+  for (uint8_t& p : img.pixels) p = map[p];
+  img.palette = machine;
+  return img;
+}
+
 std::vector<uint8_t> assetBytes(const VarDecl& v, const AssetInit& a, const Assets* assets) {
   const std::string& name = a.name;
   const char* what = a.form == AssetForm::File ? "file" : a.form == AssetForm::Sample ? "sample" : "image";
@@ -2035,7 +2075,7 @@ std::vector<uint8_t> assetBytes(const VarDecl& v, const AssetInit& a, const Asse
       return out;
     }
     case AssetForm::Image: {
-      const ImageAsset img = find(assets->images, assets->loadImage);
+      const ImageAsset img = onMachinePalette(find(assets->images, assets->loadImage));
       if (img.width < 1 || img.height < 1 || img.width > 256 || img.height > 256) {
         fail(v.pos, name + ": " + size(img.width, img.height) + " does not fit CMD_BLIT, which draws at most 256 "
                                                                     "pixels a side");
@@ -2050,7 +2090,7 @@ std::vector<uint8_t> assetBytes(const VarDecl& v, const AssetInit& a, const Asse
       if (a.frames > gpu::SPRITE_FRAMES_MAX) {
         fail(v.pos, name + ": __sprite takes at most " + std::to_string(gpu::SPRITE_FRAMES_MAX) + " frames");
       }
-      const ImageAsset img = find(assets->images, assets->loadImage);
+      const ImageAsset img = onMachinePalette(find(assets->images, assets->loadImage));
       if (img.width < 1 || img.height < 1 || img.width % a.frames != 0) {
         fail(v.pos, name + ": " + std::to_string(img.width) + " pixels wide does not divide into " +
                         std::to_string(a.frames) + " frames for __sprite");

@@ -114,15 +114,19 @@ void Ide::open(const std::string& path) {
     loadRomFile(path);
     return;
   }
-  if (fs::path(path).extension() == ".c") {
-    std::ifstream in(path);
-    if (!in) {
-      note("cannot read " + path);
-      return;
-    }
-    cText_.assign(std::istreambuf_iterator<char>(in), {});
-    cPath_ = path;
-    compileC();
+  // A C file opens its project: the folder it sits in, or the folder
+  // above a src/ directory. A folder opens as a project too.
+  if (fs::is_directory(path)) {
+    openProject(path);
+    buildProject(false);
+    return;
+  }
+  if (fs::path(path).extension() == ".c" || fs::path(path).extension() == ".h") {
+    fs::path dir = fs::absolute(path).parent_path();
+    if (dir.filename() == "src") dir = dir.parent_path();
+    openProject(dir.string());
+    openProjectFile(fs::path(path).filename().string());
+    buildProject(false);
     return;
   }
   if (fs::path(path).extension() == ".bas") {
@@ -274,28 +278,13 @@ void Ide::loadCartridge(Cartridge cart, const std::string& what) {
 }
 
 void Ide::assembleSource() {
-  Assets assets;
-  const fs::path dir = sourcePath_.empty() ? fs::current_path() : fs::path(sourcePath_).parent_path();
-  assets.loadFile = [&](std::string_view name) -> std::optional<std::vector<uint8_t>> {
-    std::ifstream f(dir / fs::path(name), std::ios::binary);
-    if (!f) return std::nullopt;
-    return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
-  };
-  // A conversion that lost something is worth a line in the messages
-  // pane. The browser's asset card carried the same note.
+  // An asset name resolves beside the source, or in the project's folders
+  // once a project built. A conversion that lost something is worth a line
+  // in the messages pane. The browser's asset card carried the same note.
   std::vector<std::string> notes;
-  assets.loadImage = [&](std::string_view name) {
-    std::string n;
-    auto img = loadImageFile(dir / fs::path(name), &n);
-    if (!n.empty()) notes.push_back(std::string(name) + ": " + n);
-    return img;
-  };
-  assets.loadSample = [&](std::string_view name) {
-    std::string n;
-    auto pcm = loadSampleFile(dir / fs::path(name), &n);
-    if (!n.empty()) notes.push_back(std::string(name) + ": " + n);
-    return pcm;
-  };
+  const fs::path dir = sourcePath_.empty() ? fs::current_path() : fs::path(sourcePath_).parent_path();
+  const project::Layout layout = projectLayout_ ? *projectLayout_ : project::layoutOf(dir);
+  Assets assets = project::loaders(layout, &notes);
   assembled_ = assemble(source_, &assets);
   assembledOk_ = assembled_.errors.empty();
   messages_ = std::move(notes);
@@ -520,8 +509,11 @@ void Ide::update() {
 // hidden levels are submitted with KeepAliveOnly. That keeps their
 // windows docked while they are not drawn.
 void Ide::frame() {
-  static const ImGuiID IDS[3] = {ImHashStr("sc8-level-edit"), ImHashStr("sc8-level-run"),
-                                 ImHashStr("sc8-level-microcode")};
+  // The number in the id is the layout's version. A new pane bumps it, so
+  // an imgui.ini from before the pane rebuilds the level once rather than
+  // leaving the newcomer floating.
+  static const ImGuiID IDS[3] = {ImHashStr("sc8-level-edit-2"), ImHashStr("sc8-level-run-1"),
+                                 ImHashStr("sc8-level-microcode-1")};
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const int active = static_cast<int>(level_);
   for (int i = 0; i < 3; i++) {
@@ -538,7 +530,7 @@ void Ide::frame() {
   switch (level_) {
     case Level::Edit:
       sourcePane();
-      cPane();
+      projectPane();
       basicPane();
       messagesPane();
       screenPane();
@@ -582,7 +574,7 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.22f, &bottom, &left);
       ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &rightBottom, &right);
       ImGui::DockBuilderDockWindow("Source", left);
-      ImGui::DockBuilderDockWindow("C", left);
+      ImGui::DockBuilderDockWindow("Project", left);
       ImGui::DockBuilderDockWindow("BASIC", left);
       ImGui::DockBuilderDockWindow("Messages", bottom);
       ImGui::DockBuilderDockWindow("Screen", right);

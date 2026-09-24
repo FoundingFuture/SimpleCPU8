@@ -105,6 +105,45 @@ what lets the assembler see `GPU_CMD` rather than a number.
 
 ## The libraries
 
+Two layers. The friendly one is where a program starts:
+
+`#include <graphics.h>`, `<sound.h>`, `<keys.h>`, `<math.h>`, `<disk.h>`.
+
+Plain int coordinates, the usual names, and no port in sight. `graphics.h`
+draws: `setcolor`, `cls`, `plot`, `line`, `rect`, `circle`, `ellipse`, each
+shape with a `fill` twin, `at` and `printf` for text, `image`, `sprite`,
+`spriteat`, `show`, `hide`, `hit`, `nextframe` and `random`. `sound.h`
+beeps with a built in square wave and plays samples and MIDI tunes:
+`sound_init`, `beep`, `noteon`, `sample`, `play`, `tune`. `keys.h` reads
+the arrows and the keyboard: `left`, `fire`, `key`, `waitkey`. `math.h` is
+`sqrt`, `sin`, `cos`, `atan2`, `pow` and the rest on `double`, run by the
+coprocessor. `disk.h` is `save`, `load`, `erase` and `catalog` on the named
+files BASIC uses.
+
+```c
+#include <graphics.h>
+#include <keys.h>
+int main(void) {
+    int x = 128;
+    while (1) {
+        if (left()) x = x - 1;
+        if (right()) x = x + 1;
+        cls();
+        setcolor(YELLOW);
+        fillcircle(x, 128, 20);
+        nextframe();
+    }
+}
+```
+
+Each header has a library unit behind it, compiled in when the header is
+included. A function the program never reaches is dropped, so an unused
+library costs nothing. The names are short and common on purpose. A
+program that wants `line` for itself leaves `graphics.h` out. Every header
+in src/cc/libs.cpp opens with its own reference.
+
+Below them sit the machine's own headers:
+
 `#include <gpu.h>`, `<apu.h>`, `<acp.h>`, `<io.h>`, `<sys.h>`, `<rom.h>`.
 
 There is one wrapper per device command, named after it in lower case, so
@@ -151,7 +190,8 @@ Four rules make it airtight.
   CPU gets, and the error says so.
 - `const` without `__ROM` is ordinary RAM, readable as usual.
 
-`ROM.h` is generated on every build and lists the cartridge as built:
+`ROM.h` is generated on every build and lists the cartridge as built. Its
+names are in scope without the include, which exists for reading:
 
 ```c
 #include "ROM.h"

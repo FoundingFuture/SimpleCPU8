@@ -362,6 +362,26 @@ TEST_SUITE("gpu drawing commands") {
     CHECK_EQ(vram(c.g, 100, 100), 5);  // center untouched
   }
 
+  TEST_CASE("a second radius on GPU_RADIUS_Y makes CIRCLE and RING ellipses") {
+    gpu_rig::Clock c;
+    cmd(c.g, CMD_SET_COLOR, {5});
+    moveTo(c.g, 100, 100);
+    cmd(c.g, CMD_CIRCLE, {20, 10});
+    CHECK_EQ(vram(c.g, 100, 100), 5);
+    CHECK_EQ(vram(c.g, 120, 100), 5);  // rx along x
+    CHECK_EQ(vram(c.g, 121, 100), 0);
+    CHECK_EQ(vram(c.g, 100, 110), 5);  // ry along y
+    CHECK_EQ(vram(c.g, 100, 111), 0);
+    CHECK_EQ(vram(c.g, 118, 108), 0);  // outside the ellipse, inside the circle
+    cmd(c.g, CMD_SET_COLOR, {8});
+    cmd(c.g, CMD_RING, {30, 12});
+    CHECK_EQ(vram(c.g, 130, 100), 8);
+    CHECK_EQ(vram(c.g, 100, 112), 8);
+    CHECK_EQ(vram(c.g, 100, 88), 8);
+    CHECK_EQ(vram(c.g, 100, 100), 5);  // centre untouched
+    CHECK_EQ(vram(c.g, 125, 100), 0);  // inside the ring
+  }
+
   TEST_CASE("SAVE and RESTORE shift the screen by the latched offset, clipped") {
     gpu_rig::Clock c;
     cmdv(c.g, CMD_PLOT, cat(xy(10, 10), 0x42));
@@ -763,6 +783,7 @@ TEST_SUITE("the command and port tables") {
       {"GPU_PIXEL", GPU_PIXEL},
       {"GPU_COLOR", GPU_COLOR},
       {"GPU_RADIUS", GPU_RADIUS},
+      {"GPU_RADIUS_Y", GPU_RADIUS_Y},
       {"GPU_CART_BANK", GPU_CART_BANK},
       {"GPU_CART_HI", GPU_CART_HI},
       {"GPU_CART_LO", GPU_CART_LO},

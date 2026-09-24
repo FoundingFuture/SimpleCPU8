@@ -17,4 +17,4 @@ target_link_libraries(simplecpu-cc PRIVATE sc8::cc sc8::assets sc8_warnings)
 # simplecpu-make: a directory is a program. C, assembly, BASIC and assets
 # in one folder become one ROM.
 add_executable(simplecpu-make make_main.cpp)
-target_link_libraries(simplecpu-make PRIVATE sc8::cc sc8::assets sc8_warnings)
+target_link_libraries(simplecpu-make PRIVATE sc8::project sc8_warnings)

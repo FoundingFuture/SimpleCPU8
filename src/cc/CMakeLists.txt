@@ -10,6 +10,7 @@ add_library(sc8_cc STATIC
   doubles.cpp
   headers.cpp
   lex.cpp
+  libs.cpp
   parse.cpp
   pp.cpp
   runtime.cpp
@@ -17,5 +18,5 @@ add_library(sc8_cc STATIC
   zeropage.cpp)
 
 target_include_directories(sc8_cc PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
-target_link_libraries(sc8_cc PUBLIC sc8::asm PRIVATE sc8_warnings)
+target_link_libraries(sc8_cc PUBLIC sc8::asm sc8::assets PRIVATE sc8_warnings)
 add_library(sc8::cc ALIAS sc8_cc)

@@ -6,6 +6,7 @@
 #include <set>
 
 #include "cc/headers.h"
+#include "cc/libs.h"
 #include "cc/lex.h"
 #include "cc/parse.h"
 
@@ -193,6 +194,23 @@ Merged merge(const std::vector<SourceFile>& sources, const Resolve& resolve, con
     if (f.name != LIBC_FILE) m.builds.insert(m.builds.end(), u.builds.begin(), u.builds.end());
     units.push_back(std::move(u));
   }
+  // A friendly library's unit joins the build when its header was
+  // included, by a source or by another library. What nothing reaches is
+  // dropped below like any other function.
+  for (size_t k = 0; k < m.included.size(); k++) {
+    for (const Library& l : libraries()) {
+      if (l.header != m.included[k]) continue;
+      bool have = false;
+      for (const Unit& u : units) have = have || u.file == l.unit;
+      if (have) continue;
+      PpOptions po;
+      po.resolve = resolve;
+      po.defines = opts.defines;
+      Unit u = parse(l.source, l.unit, &po);
+      for (const std::string& i : u.included) if (!contains(m.included, i)) m.included.push_back(i);
+      units.push_back(std::move(u));
+    }
+  }
 
   std::map<std::string, VarDecl> seenVar;
   std::vector<std::map<std::string, std::string>> renamed(units.size());
@@ -344,7 +362,24 @@ Program compileProgram(const std::vector<SourceFile>& files, const CcOptions& op
   std::vector<SourceFile> compileSet = chosen;
   if (!opts.noLibc) compileSet.push_back({LIBC_FILE, LIBC_SOURCE});
 
-  Merged m = merge(compileSet, resolve, opts);
+  // The cartridge map is in scope without an include: every ROM_ name in
+  // ROM.h is a predefined macro on this pass. The include still works and
+  // is what a reader opens to see the addresses.
+  CcOptions withRom = opts;
+  for (size_t at = 0; at < romHeader.size();) {
+    size_t nl = romHeader.find('\n', at);
+    if (nl == std::string::npos) nl = romHeader.size();
+    const std::string line = romHeader.substr(at, nl - at);
+    at = nl + 1;
+    if (line.rfind("#define ROM_", 0) != 0) continue;
+    const size_t sp = line.find(' ', 8);
+    if (sp == std::string::npos) continue;
+    const std::string name = line.substr(8, sp - 8);
+    std::string value = line.substr(sp);
+    value.erase(0, value.find_first_not_of(' '));
+    if (!withRom.defines.count(name)) withRom.defines[name] = value;
+  }
+  Merged m = merge(compileSet, resolve, withRom);
 
   // Reachability from main. Program memory is 64K slots and the whole budget,
   // so a program that never divides must not carry the divide.

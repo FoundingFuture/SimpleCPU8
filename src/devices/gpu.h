@@ -92,6 +92,7 @@ enum Alias : uint8_t {
   GPU_PIXEL = 0x06,
   GPU_COLOR = 0x02,
   GPU_RADIUS = 0x02,
+  GPU_RADIUS_Y = 0x03,
   GPU_CART_BANK = 0x02,
   GPU_CART_HI = 0x03,
   GPU_CART_LO = 0x04,
@@ -477,6 +478,7 @@ class Gpu : public ChainedDevice {
   void plotAt(int px, int py, uint8_t c);
   void line(int x0, int y0, int x1, int y1, uint8_t c);
   void ringPoints(int dx, int dy);
+  void ellipseOutline(int rx, int ry);
   void drawPath(uint32_t base, bool threeD);
 
   // Sprites and collision.

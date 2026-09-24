@@ -1,9 +1,12 @@
 #include "cc/headers.h"
 
+#include "cc/libs.h"
+
 #include <cctype>
 
 #include "devices/acp_ports.h"
 #include "devices/apu_ports.h"
+#include "devices/gpu.h"
 #include "devices/gpu_ports.h"
 #include "devices/storage_ports.h"
 
@@ -115,74 +118,16 @@ std::string wrapperName(std::string_view prefix, std::string_view cmd) {
   return std::string(prefix) + "_" + lower(bare);
 }
 
-// DESIGN: this table is the GPU's, beside its command table in the browser
-// project's gpu.ts. Another port brings the GPU into src/devices/gpu.h and
-// this table moves there with it. Until then it lives here so the header
-// generator has what it needs.
+// The GPU's own table, in src/devices/gpu.cpp, reshaped for the callers
+// that want a vector per command.
 const std::vector<CmdArgs>& gpuCmdArgs() {
-  static const std::vector<CmdArgs> TABLE = {
-      {"CMD_CLEAR", {"GPU_COLOR"}},
-      {"CMD_SET_COLOR", {"GPU_COLOR"}},
-      {"CMD_MOVE_TO", {"GPU_X_HI", "GPU_X", "GPU_Y_HI", "GPU_Y"}},
-      {"CMD_LINE_TO", {"GPU_X_HI", "GPU_X", "GPU_Y_HI", "GPU_Y"}},
-      {"CMD_RECT", {"GPU_X_HI", "GPU_X", "GPU_Y_HI", "GPU_Y"}},
-      {"CMD_PLOT", {"GPU_X_HI", "GPU_X", "GPU_Y_HI", "GPU_Y", "GPU_PIXEL"}},
-      {"CMD_READ_PIXEL", {"GPU_X_HI", "GPU_X", "GPU_Y_HI", "GPU_Y"}},
-      {"CMD_RESTORE_SCREEN", {"GPU_X_HI", "GPU_X", "GPU_Y_HI", "GPU_Y"}},
-      {"CMD_CIRCLE", {"GPU_RADIUS"}},
-      {"CMD_RING", {"GPU_RADIUS"}},
-      {"CMD_SAVE_SCREEN", {}},
-      {"CMD_RESET_PALETTE", {}},
-      {"CMD_LOAD_PALETTE", {"GPU_CART_BANK", "GPU_CART_HI", "GPU_CART_LO"}},
-      {"CMD_STORE_PALETTE", {}},
-      {"CMD_FETCH_PALETTE", {}},
-      {"CMD_ROTATE_LEFT", {}},
-      {"CMD_ROTATE_RIGHT", {}},
-      {"CMD_ROTATE_SPEED", {"GPU_SPEED"}},
-      {"CMD_ROTATE_DIR", {"GPU_DIR"}},
-      {"CMD_ROTATE_RANGE", {"GPU_FIRST", "GPU_LAST"}},
-      {"CMD_COPY", {"GPU_CART_BANK", "GPU_CART_HI", "GPU_CART_LO", "GPU_DEST_HI", "GPU_DEST_LO",
-                    "GPU_LEN_HI", "GPU_LEN_LO"}},
-      {"CMD_RAM_MOVE", {"GPU_FROM_HI", "GPU_FROM_LO", "GPU_DEST_HI", "GPU_DEST_LO", "GPU_LEN_HI",
-                        "GPU_LEN_LO"}},
-      {"CMD_MEMMAP", {"GPU_MAP", "GPU_MAP_HI", "GPU_MAP_LO"}},
-      {"CMD_SPRITE_DEF", {"GPU_SPRITE", "GPU_MESH", "GPU_SRC_BANK", "GPU_SRC_HI", "GPU_SRC_LO",
-                          "GPU_SPRITE_GROUP"}},
-      {"CMD_SPRITE_MOVE", {"GPU_SPRITE", "GPU_SPRITE_X_HI", "GPU_SPRITE_X", "GPU_SPRITE_Y_HI",
-                           "GPU_SPRITE_Y"}},
-      {"CMD_STAMP", {"GPU_SPRITE", "GPU_SPRITE_X_HI", "GPU_SPRITE_X", "GPU_SPRITE_Y_HI", "GPU_SPRITE_Y"}},
-      {"CMD_SPRITE_SHOW", {"GPU_SPRITE"}},
-      {"CMD_SPRITE_HIDE", {"GPU_SPRITE"}},
-      {"CMD_SPRITE_FRAME", {"GPU_SPRITE", "GPU_SPRITE_FRAME"}},
-      {"CMD_SPRITE_FLIP", {"GPU_SPRITE", "GPU_SPRITE_FLIP"}},
-      {"CMD_BLIT", {"GPU_CART_BANK", "GPU_CART_HI", "GPU_CART_LO"}},
-      {"CMD_HIT_TEST", {"GPU_SPRITE", "GPU_SPRITE_B"}},
-      {"CMD_HIT_SCAN", {"GPU_SPRITE"}},
-      {"CMD_COLLIDE_ALL", {}},
-      {"CMD_SPRITE_HITS", {"GPU_SPRITE"}},
-      {"CMD_GROUP_HITS", {"GPU_GROUP"}},
-      {"CMD_HIT_IN_GROUP", {"GPU_SPRITE", "GPU_GROUP_B", "GPU_HIT_FROM"}},
-      {"CMD_COLLIDE_GROUP_ALL", {}},
-      {"CMD_ROT_X", {"GPU_ANGLE"}},
-      {"CMD_ROT_Y", {"GPU_ANGLE"}},
-      {"CMD_ROT_Z", {"GPU_ANGLE"}},
-      {"CMD_SET_SCALE", {"GPU_SCALE"}},
-      {"CMD_DRAW_PATH", {"GPU_CART_BANK", "GPU_CART_HI", "GPU_CART_LO"}},
-      {"CMD_DRAW_PATH3D", {"GPU_CART_BANK", "GPU_CART_HI", "GPU_CART_LO"}},
-      {"CMD_SET_TEXTMODE", {"GPU_ADDR_HI", "GPU_ADDR_LO"}},
-      {"CMD_SET_GRAPHICSMODE", {}},
-      {"CMD_TEXT_STYLE", {"GPU_TEXT_COLOR", "GPU_TEXT_BG", "GPU_TEXT_FLAGS"}},
-      {"CMD_TEXT_AT", {"GPU_TEXT_COL", "GPU_TEXT_ROW"}},
-      {"CMD_TEXT_CHAR", {"GPU_TEXT_CHAR"}},
-      {"CMD_TEXT_CLEAR", {}},
-      {"CMD_PRINTF", {"GPU_CART_BANK", "GPU_CART_HI", "GPU_CART_LO", "GPU_TEXT_ARG_HI", "GPU_TEXT_ARG_LO"}},
-      {"CMD_LOAD_FONT", {"GPU_CART_BANK", "GPU_CART_HI", "GPU_CART_LO"}},
-      {"CMD_SET_WORLDMODE", {"GPU_ADDR_HI", "GPU_ADDR_LO", "GPU_COUNT_HI", "GPU_COUNT_LO"}},
-      {"CMD_MESH_LOAD", {"GPU_MESH", "GPU_SPRITE", "GPU_SRC_BANK", "GPU_SRC_HI", "GPU_SRC_LO"}},
-      {"CMD_MESH_WRITE", {"GPU_MESH_BYTE"}},
-      {"CMD_WORLD_RAMP", {"GPU_RAMP", "GPU_RED", "GPU_GREEN", "GPU_BLUE"}},
-      {"CMD_MATRIX_MAP", {"GPU_ADDR_HI", "GPU_ADDR_LO", "GPU_COUNT_HI", "GPU_COUNT_LO"}},
-  };
+  static const std::vector<CmdArgs> TABLE = [] {
+    std::vector<CmdArgs> out;
+    for (const gpu::CmdArgs& c : gpu::CMD_ARGS) {
+      out.push_back({c.cmd, std::vector<std::string_view>(c.args().begin(), c.args().end())});
+    }
+    return out;
+  }();
   return TABLE;
 }
 
@@ -447,15 +392,19 @@ void acp_run(unsigned char cmd) {
 )";
 
 const std::map<std::string, std::string>& headers() {
-  static const std::map<std::string, std::string> H = {
-      {"gpu.h", gpuHeader()},
-      {"apu.h", apuHeader()},
-      {"acp.h", acpHeader()},
-      {"storage.h", storageHeader()},
-      {"io.h", ioHeader()},
-      {"sys.h", sysHeader()},
-      {"rom.h", romHeader()},
-  };
+  static const std::map<std::string, std::string> H = [] {
+    std::map<std::string, std::string> h = {
+        {"gpu.h", gpuHeader()},
+        {"apu.h", apuHeader()},
+        {"acp.h", acpHeader()},
+        {"storage.h", storageHeader()},
+        {"io.h", ioHeader()},
+        {"sys.h", sysHeader()},
+        {"rom.h", romHeader()},
+    };
+    for (const Library& l : libraries()) h[l.header] = l.headerText;
+    return h;
+  }();
   return H;
 }
 

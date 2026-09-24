@@ -51,6 +51,8 @@ constexpr NamedValue ALIASES[] = {
     {"GPU_PIXEL", 0x06},
     {"GPU_COLOR", 0x02},
     {"GPU_RADIUS", 0x02},
+    // The second radius of an ellipse. Zero, the cleared value, means round.
+    {"GPU_RADIUS_Y", 0x03},
     // A cartridge address, where the command takes no index.
     {"GPU_CART_BANK", 0x02},
     {"GPU_CART_HI", 0x03},

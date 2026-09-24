@@ -15,6 +15,7 @@
 
 #include "asm/asm.h"
 #include "vm/audio.h"
+#include "project/project.h"
 #include "vm/computer.h"
 #include "vm/display.h"
 #include "vm/keys.h"
@@ -104,8 +105,11 @@ class Ide {
   // The panes. A pane shared by two levels takes the level's window name.
   void sourcePane();
   void basicPane();
-  void cPane();
-  void compileC();
+  void projectPane();
+  void openProject(const std::string& dir);
+  void openProjectFile(const std::string& name);
+  void saveProjectFile();
+  void buildProject(bool run);
   void messagesPane();
   void manualPane();
   void screenPane();
@@ -159,10 +163,18 @@ class Ide {
   std::string manualFilter_;
   std::string manualPage_ = "LD";
 
-  // The C pane: one file, its headers read from beside it. The assembly
-  // the compiler writes goes into the Source pane and is assembled there.
-  std::string cText_;
-  std::string cPath_;
+  // The Project pane: a folder of .c, .h, .asm and .bas files, one open
+  // in the editor at a time. Build hands the folder to the project
+  // library, which is what simplecpu-make runs. The assembly it made goes
+  // into the Source pane and the ROM into the machine.
+  std::string projectDir_;
+  std::vector<std::string> projectFiles_;
+  std::string projectFile_;
+  std::string projectText_;
+  bool projectDirty_ = false;
+  bool focusProject_ = false;  // bring the tab to the front next frame
+  // Set once a project built, so Source assembles with its asset folders.
+  std::optional<project::Layout> projectLayout_;
 
   // The BASIC pane. The editor and the interpreter's program memory are
   // two views of one program. Push writes the editor's text into the

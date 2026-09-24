@@ -286,7 +286,7 @@ TEST_SUITE("the build line reaches the compiler") {
 
 TEST_SUITE("what the libraries refuse") {
   TEST_CASE("names the libraries when a header is misspelled") {
-    CHECK(has(refuses("#include <graphics.h>\nint main(void){return 0;}"), "gpu.h"));
+    CHECK(has(refuses("#include <grafics.h>\nint main(void){return 0;}"), "graphics.h"));
   }
 
   TEST_CASE("counts a wrapper's arguments") {

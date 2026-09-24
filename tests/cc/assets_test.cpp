@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "assets/assets.h"
 #include "harness.h"
 
 using namespace sc8;
@@ -21,8 +22,8 @@ ImageAsset strip() {
   img.width = 4;
   img.height = 2;
   img.pixels = {1, 2, 3, 4, 5, 6, 7, 8};
-  img.palette.assign(768, 0);
-  for (size_t i = 0; i < 768; i++) img.palette[i] = static_cast<uint8_t>(i & 0xff);
+  // On the machine's palette, so the pixel indexes come through as they are.
+  img.palette = machinePalette();
   return img;
 }
 
@@ -96,9 +97,7 @@ TEST_SUITE("an asset initializer puts a file on the cartridge") {
     const std::vector<uint8_t> b = bytesOf(p, "pal");
     REQUIRE(b.size() == 769);
     CHECK(b[0] == 0);
-    CHECK(b[1] == 0);
-    CHECK(b[2] == 1);
-    CHECK(b[768] == 255);
+    CHECK(std::vector<uint8_t>(b.begin() + 1, b.end()) == machinePalette());
   }
 
   TEST_CASE("__sample is the raw unsigned 8 bit bytes") {
@@ -327,5 +326,29 @@ TEST_SUITE("a __ROM object holds bytes and words") {
     )"}});
     REQUIRE(p.rom.size() == 1);
     CHECK(p.rom[0].bytes == std::vector<uint8_t>{0x12, 0x34});
+  }
+}
+
+TEST_SUITE("C images land on the machine palette") {
+  TEST_CASE("a picture in its own colours maps each pixel to the nearest machine colour, 0 stays clear") {
+    ImageAsset img;
+    img.width = 3;
+    img.height = 1;
+    img.pixels = {0, 1, 2};
+    img.palette.assign(768, 0);
+    // Entry 1 is pure red and entry 2 is a near black, which must still draw.
+    img.palette[3] = 250;
+    img.palette[6] = 5;
+    img.palette[7] = 5;
+    img.palette[8] = 5;
+    Assets a;
+    a.images["pic.png"] = img;
+    const std::vector<uint8_t> machine = machinePalette();
+    const cc::Program p = prog("__ROM const unsigned char pic[] = __image(\"pic.png\");\nint main(void) { return 0; }", a);
+    const std::vector<uint8_t> b = bytesOf(p, "pic");
+    REQUIRE_EQ(b.size(), 5u);
+    CHECK_EQ(b[2], 0);
+    CHECK_EQ(b[3], nearestIndex(machine, 250, 0, 0));
+    CHECK_NE(b[4], 0);
   }
 }
