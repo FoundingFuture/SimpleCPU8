@@ -163,6 +163,44 @@ Every object gets `ROM_<name>` for its address, `_SIZE`, and `_BANK`, `_HI`
 and `_LO` for the three bytes a device port wants. Two objects with
 identical bytes share one address, and `ROM.h` says so.
 
+An asset file goes on the cartridge through one of five initializer forms.
+Each is allowed only on `__ROM const unsigned char name[]`, with the
+brackets empty, because the file decides the length:
+
+| form | the bytes | read by |
+|---|---|---|
+| `__image("bg.png")` | width, height, then the pixels row-major | `CMD_BLIT` |
+| `__sprite("ship.png", 4)` | frames, frame width, frame height, then each frame | `CMD_SPRITE_DEF` |
+| `__palette("bg.png")` | a count byte of 0, then 256 RGB triples | `CMD_LOAD_PALETTE` |
+| `__sample("beep.wav")` | unsigned 8 bit mono at 8000 Hz | `CMD_DEF_SAMPLE` |
+| `__file("level.bin")` | the file as it is | anything |
+
+A width or height of 256 is written as 0, since a byte cannot hold 256.
+`__sprite` reads a horizontal strip with the frames side by side. The
+frame width is the image width divided by the count, which defaults to 1.
+The compiler refuses a width that does not divide, a count of zero, and a
+frame past 64 pixels a side. The file is looked up beside the source, the
+way `.image` is beside an assembly file. A missing file is a compile error
+that names the file and the form.
+
+```c
+#include <gpu.h>
+#include <rom.h>
+#include "ROM.h"
+
+__ROM const unsigned char bg[] = __image("bg.png");
+__ROM const unsigned char ship[] = __sprite("ship.png", 4);
+
+int main(void) {
+  gpu_blit(ROM_BANK(ROM_bg), ROM_HI(ROM_bg), ROM_LO(ROM_bg));
+  gpu_sprite_def(0, 0, ROM_BANK(ROM_ship), ROM_HI(ROM_ship), ROM_LO(ROM_ship), 0);
+  return 0;
+}
+```
+
+The bytes land in `.data` as plain `db` lines. The generated assembly
+needs no asset beside it, and `ROM.h` carries the sizes as usual.
+
 ## Many files
 
 A project holds many files, each a tab. A `static` function or variable is

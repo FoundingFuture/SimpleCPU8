@@ -12,7 +12,7 @@ add_executable(simplecpu-run run_main.cpp)
 target_link_libraries(simplecpu-run PRIVATE sc8::asm sc8_warnings)
 
 add_executable(simplecpu-cc cc_main.cpp)
-target_link_libraries(simplecpu-cc PRIVATE sc8::cc sc8_warnings)
+target_link_libraries(simplecpu-cc PRIVATE sc8::cc sc8::assets sc8_warnings)
 
 # simplecpu-make: a directory is a program. C, assembly, BASIC and assets
 # in one folder become one ROM.

@@ -73,12 +73,28 @@ using StmtPtr = std::shared_ptr<Stmt>;
 
 enum class Storage { Auto, Static, Extern };
 
-// An initializer is one expression, a brace list, or absent. A string for a
-// char array is the one expression case with a Str node.
+// An asset initializer: `__image("ship.png")` and its four siblings. The
+// bytes come from a file beside the source when the cartridge is laid out,
+// so the tree carries the name and the form, never the bytes.
+enum class AssetForm { Image, Sprite, Palette, Sample, File };
+
+struct AssetInit {
+  AssetForm form = AssetForm::File;
+  std::string name;
+  // Sprite only: how many frames the strip holds, side by side.
+  int frames = 1;
+};
+
+std::string assetFormName(AssetForm f);
+
+// An initializer is one expression, a brace list, an asset form, or absent.
+// A string for a char array is the one expression case with a Str node. An
+// asset form leaves `one` empty and `isList` false.
 struct Initializer {
   bool isList = false;
   ExprPtr one;
   std::vector<ExprPtr> list;
+  std::optional<AssetInit> asset;
 };
 
 struct VarDecl {

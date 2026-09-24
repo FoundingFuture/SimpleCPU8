@@ -10,7 +10,8 @@
 // file is appended after the generated assembly, in name order, so a
 // driver sits at its .org slot in the same ROM. Every .bas file becomes a
 // slot in the ROM's BAS chunk, named after the file. .file, .image and
-// .sample resolve inside the directory. The title is the first line of
+// .sample resolve inside the directory, and so do the C asset forms
+// __image, __sprite, __palette, __sample and __file. The title is the first line of
 // README.md when there is one, else the directory's name.
 //
 // A directory with no .c file is an assembly program: its .asm files
@@ -166,6 +167,27 @@ int main(int argc, char** argv) {
     lineCount += 1 + static_cast<int>(std::count(part.begin(), part.end(), '\n'));
   };
 
+  // The compiler and the assembler resolve an asset name the same way, in
+  // the directory, so one Assets serves both.
+  Assets assets;
+  assets.loadFile = [&](std::string_view name) { return readBytes(dir / fs::path(name)); };
+  auto report = [&](std::string_view name, const std::string& note) {
+    if (!note.empty()) std::fprintf(stderr, "%.*s: %s\n", static_cast<int>(name.size()), name.data(), note.c_str());
+  };
+  assets.loadImage = [&](std::string_view name) {
+    std::string note;
+    auto img = loadImageFile(dir / fs::path(name), &note);
+    report(name, note);
+    return img;
+  };
+  assets.loadSample = [&](std::string_view name) {
+    std::string note;
+    auto pcm = loadSampleFile(dir / fs::path(name), &note);
+    report(name, note);
+    return pcm;
+  };
+  ccOpts.assets = &assets;
+
   if (!cFiles.empty()) {
     std::vector<CcInput> inputs;
     for (const fs::path& p : cFiles) {
@@ -203,24 +225,6 @@ int main(int argc, char** argv) {
       if (sp.firstLine <= line) s = &sp;
     }
     return (dir / s->file).string() + ":" + std::to_string(line - s->firstLine);
-  };
-
-  Assets assets;
-  assets.loadFile = [&](std::string_view name) { return readBytes(dir / fs::path(name)); };
-  auto report = [&](std::string_view name, const std::string& note) {
-    if (!note.empty()) std::fprintf(stderr, "%.*s: %s\n", static_cast<int>(name.size()), name.data(), note.c_str());
-  };
-  assets.loadImage = [&](std::string_view name) {
-    std::string note;
-    auto img = loadImageFile(dir / fs::path(name), &note);
-    report(name, note);
-    return img;
-  };
-  assets.loadSample = [&](std::string_view name) {
-    std::string note;
-    auto pcm = loadSampleFile(dir / fs::path(name), &note);
-    report(name, note);
-    return pcm;
   };
 
   Assembled a = assemble(text, &assets);

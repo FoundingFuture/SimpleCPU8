@@ -10,6 +10,7 @@
 #include "cc/runtime.h"
 #include "cc/softmath.h"
 #include "devices/constants.h"
+#include "devices/gpu.h"
 
 namespace sc8::cc {
 
@@ -156,9 +157,9 @@ int intBytes(const std::string& length) {
 
 class Gen {
  public:
-  Gen(const Unit& unit, bool softMul, const Profile* profile, int zpReserve)
+  Gen(const Unit& unit, bool softMul, const Profile* profile, int zpReserve, const Assets* assets)
       : unit_(unit), softMul_(softMul), profile_(profile), zpReserve_(zpReserve) {
-    for (const RomEntry& e : layoutRom(unit.vars)) romPlan_[e.name] = e;
+    for (const RomEntry& e : layoutRom(unit.vars, assets)) romPlan_[e.name] = e;
   }
 
   // DESIGN: two passes over the body, and the reason is a chicken and egg.
@@ -419,7 +420,7 @@ class Gen {
       romItems_.push_back(v.name + ":" + pad + "; the same bytes as " + *entry.sameAs);
       return;
     }
-    romItems_.push_back(v.name + ":" + pad + "db " + joinBytes(romBytesOf(v), false));
+    romItems_.push_back(v.name + ":" + pad + "db " + joinBytes(entry.bytes, false));
   }
 
   void declareGlobal(const VarDecl& v) {
@@ -1995,7 +1996,92 @@ class Gen {
 
 }  // namespace
 
-std::vector<RomEntry> layoutRom(const std::vector<VarDecl>& vars) {
+namespace {
+
+// The name of a blob that could not be read, and the form that asked for it.
+[[noreturn]] void noAsset(const VarDecl& v, const AssetInit& a, const char* what) {
+  fail(v.pos, a.name + ": cannot read the " + what + " for " + assetFormName(a.form) + " (is it beside the source?)");
+}
+
+// The bytes an asset initializer puts on the cartridge. Each form emits the
+// blob the device command reads: CMD_BLIT for __image, CMD_SPRITE_DEF for
+// __sprite, CMD_LOAD_PALETTE for __palette, CMD_DEF_SAMPLE for __sample.
+// __file is the bytes as they are.
+std::vector<uint8_t> assetBytes(const VarDecl& v, const AssetInit& a, const Assets* assets) {
+  const std::string& name = a.name;
+  const char* what = a.form == AssetForm::File ? "file" : a.form == AssetForm::Sample ? "sample" : "image";
+  if (!assets) noAsset(v, a, what);
+  // The map first, then the loader, the way the assembler's asset() resolves
+  // a directive's name.
+  auto find = [&](const auto& map, const auto& loader) {
+    auto it = map.find(name);
+    if (it != map.end()) return it->second;
+    if (loader) {
+      if (auto got = loader(name)) return *got;
+    }
+    noAsset(v, a, what);
+  };
+  auto size = [](int w, int h) { return std::to_string(w) + " x " + std::to_string(h); };
+
+  std::vector<uint8_t> out;
+  switch (a.form) {
+    case AssetForm::File: return find(assets->files, assets->loadFile);
+    case AssetForm::Sample: return find(assets->samples, assets->loadSample);
+    case AssetForm::Palette: {
+      const ImageAsset img = find(assets->images, assets->loadImage);
+      if (img.palette.size() != 768) fail(v.pos, name + ": the image carries no 256 entry palette for __palette");
+      out.push_back(0);  // 0 means 256 entries, as a byte cannot say 256
+      out.insert(out.end(), img.palette.begin(), img.palette.end());
+      return out;
+    }
+    case AssetForm::Image: {
+      const ImageAsset img = find(assets->images, assets->loadImage);
+      if (img.width < 1 || img.height < 1 || img.width > 256 || img.height > 256) {
+        fail(v.pos, name + ": " + size(img.width, img.height) + " does not fit CMD_BLIT, which draws at most 256 "
+                                                                    "pixels a side");
+      }
+      out.push_back(static_cast<uint8_t>(img.width & 0xff));  // 256 is written as 0
+      out.push_back(static_cast<uint8_t>(img.height & 0xff));
+      out.insert(out.end(), img.pixels.begin(), img.pixels.end());
+      return out;
+    }
+    case AssetForm::Sprite: {
+      if (a.frames < 1) fail(v.pos, name + ": __sprite needs at least one frame");
+      if (a.frames > gpu::SPRITE_FRAMES_MAX) {
+        fail(v.pos, name + ": __sprite takes at most " + std::to_string(gpu::SPRITE_FRAMES_MAX) + " frames");
+      }
+      const ImageAsset img = find(assets->images, assets->loadImage);
+      if (img.width < 1 || img.height < 1 || img.width % a.frames != 0) {
+        fail(v.pos, name + ": " + std::to_string(img.width) + " pixels wide does not divide into " +
+                        std::to_string(a.frames) + " frames for __sprite");
+      }
+      const int fw = img.width / a.frames;
+      const int fh = img.height;
+      if (fw > gpu::SPRITE_MAX || fh > gpu::SPRITE_MAX) {
+        fail(v.pos, name + ": a frame is " + size(fw, fh) + " and a sprite is at most " +
+                        std::to_string(gpu::SPRITE_MAX) + " pixels a side");
+      }
+      out.push_back(static_cast<uint8_t>(a.frames));
+      out.push_back(static_cast<uint8_t>(fw));
+      out.push_back(static_cast<uint8_t>(fh));
+      // The strip is one row-major image. Each frame comes out as its own
+      // row-major block, which is how CMD_SPRITE_DEF reads them.
+      for (int f = 0; f < a.frames; f++) {
+        for (int y = 0; y < fh; y++) {
+          const size_t row = static_cast<size_t>(y * img.width + f * fw);
+          out.insert(out.end(), img.pixels.begin() + static_cast<long>(row),
+                     img.pixels.begin() + static_cast<long>(row + static_cast<size_t>(fw)));
+        }
+      }
+      return out;
+    }
+  }
+  return out;
+}
+
+}  // namespace
+
+std::vector<RomEntry> layoutRom(const std::vector<VarDecl>& vars, const Assets* assets) {
   std::vector<RomEntry> out;
   std::map<std::string, std::string> seen;  // byte key -> first label
   std::map<std::string, int> at;
@@ -2006,11 +2092,11 @@ std::vector<RomEntry> layoutRom(const std::vector<VarDecl>& vars) {
       fail(v.pos, v.name + " is __ROM and needs a constant initializer. The cartridge is built at assembly time "
                           "and there is nothing else it could be built from.");
     }
-    const std::vector<uint8_t> bytes = romBytesOf(v);
+    const std::vector<uint8_t> bytes = romBytesOf(v, assets);
     const std::string key = bytesKey(bytes);
     auto first = seen.find(key);
     RomEntry entry{v.name, first != seen.end() ? at[first->second] : addr, static_cast<int>(bytes.size()),
-                   v.pos.file, v.pos.line, std::nullopt};
+                   v.pos.file, v.pos.line, std::nullopt, bytes};
     if (first != seen.end()) {
       entry.sameAs = first->second;
     } else {
@@ -2023,8 +2109,15 @@ std::vector<RomEntry> layoutRom(const std::vector<VarDecl>& vars) {
   return out;
 }
 
-std::vector<uint8_t> romBytesOf(const VarDecl& v) {
-  const int elem = sizeOf(CType{v.type.base, v.type.ptr, std::nullopt});
+std::vector<uint8_t> romBytesOf(const VarDecl& v, const Assets* assets) {
+  if (v.init->asset) return assetBytes(v, *v.init->asset, assets);
+  const CType elemType{v.type.base, v.type.ptr, std::nullopt};
+  if (elemType.ptr == 0 && elemType.base != BaseType::Char && elemType.base != BaseType::UChar &&
+      elemType.base != BaseType::Int && elemType.base != BaseType::UInt) {
+    fail(v.pos, v.name + " is __ROM and holds " + typeName(elemType) +
+                    ". The cartridge holds bytes and words: declare it char, unsigned char, int or unsigned int.");
+  }
+  const int elem = sizeOf(elemType);
   auto push = [&](std::vector<uint8_t>& out, int n) {
     if (elem == 1) {
       out.push_back(static_cast<uint8_t>(n & 0xff));
@@ -2074,11 +2167,12 @@ std::vector<int> templateArgWidths(const std::vector<uint8_t>& tmpl) {
 
 Compiled compileUnit(const std::string& src, const std::string& file) {
   const Unit unit = parse(src, file);
-  return Gen(unit, false, nullptr, 0).compile();
+  return Gen(unit, false, nullptr, 0, nullptr).compile();
 }
 
-Compiled compileUnitTree(const Unit& unit, bool softMul, const Profile* profile, int zpReserve) {
-  return Gen(unit, softMul, profile, zpReserve).compile();
+Compiled compileUnitTree(const Unit& unit, bool softMul, const Profile* profile, int zpReserve,
+                         const Assets* assets) {
+  return Gen(unit, softMul, profile, zpReserve, assets).compile();
 }
 
 }  // namespace sc8::cc

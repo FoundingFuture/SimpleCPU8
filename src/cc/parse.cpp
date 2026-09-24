@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 
 namespace sc8::cc {
 
@@ -23,6 +24,13 @@ const std::set<std::string_view> TYPE_WORDS = {
     "char", "short", "int", "long", "unsigned", "signed", "float",
     "double", "void", "const", "static", "extern", "__ROM", "__zp",
     "inline", "typedef",
+};
+
+// The asset initializers, by the form each spells. `__ROM const unsigned
+// char ship[] = __image("ship.png");` takes its bytes from the file.
+const std::map<std::string_view, AssetForm> ASSET_FORMS = {
+    {"__image", AssetForm::Image},   {"__sprite", AssetForm::Sprite}, {"__palette", AssetForm::Palette},
+    {"__sample", AssetForm::Sample}, {"__file", AssetForm::File},
 };
 
 const std::set<std::string_view> TYPE_AHEAD_WORDS = {
@@ -550,26 +558,66 @@ VarDecl Parser::declarator(const Spec& spec, const Pos& p) {
   decl.rom = spec.rom;
   decl.isConst = spec.isConst;
   decl.pos = p;
+  declaratorRest(decl);
+  return decl;
+}
+
+// The array bound and the initializer of one declarator, after its name. An
+// open bound is filled from the initializer. An asset form leaves it open:
+// its length is a file's, known only when the cartridge is laid out.
+void Parser::declaratorRest(VarDecl& decl) {
   bool open = false;
   if (eat("[")) {
     if (at("]")) open = true;  // filled from the initializer
     else decl.type.arrayLen = static_cast<int>(constExpr());
     want("]");
   }
+  const Tok& initTok = t();
   if (eat("=")) decl.init = initializer();
+  if (decl.init && decl.init->asset) {
+    const std::string form = assetFormName(decl.init->asset->form);
+    if (!decl.rom) err(form + " fills a __ROM object. Declare " + decl.name + " __ROM.", initTok);
+    if (decl.type.ptr != 0 || decl.type.base != BaseType::UChar || (!open && !decl.type.arrayLen)) {
+      err(form + " fills an unsigned char array. Declare " + decl.name + " as unsigned char " + decl.name + "[].",
+          initTok);
+    }
+    if (!open) {
+      err(form + " sets the length itself. Leave the brackets of " + decl.name + " empty.", initTok);
+    }
+    return;
+  }
   if (open) {
     if (decl.init && decl.init->isList) decl.type.arrayLen = static_cast<int>(decl.init->list.size());
     else if (decl.init && decl.init->one->k == ExprKind::Str) {
       decl.type.arrayLen = static_cast<int>(decl.init->one->bytes.size()) + 1;
     } else {
-      err(name + " needs a length or an initializer");
+      err(decl.name + " needs a length or an initializer");
     }
   }
-  return decl;
 }
 
 Initializer Parser::initializer() {
   Initializer init;
+  if (t().kind == TokKind::Id) {
+    auto form = ASSET_FORMS.find(t().text);
+    if (form != ASSET_FORMS.end()) {
+      const std::string word = t().text;
+      i_++;
+      want("(");
+      if (t().kind != TokKind::Str) err(word + " takes a file name in quotes");
+      AssetInit a;
+      a.form = form->second;
+      a.name = std::string(t().bytes.begin(), t().bytes.end());
+      i_++;
+      if (eat(",")) {
+        if (a.form != AssetForm::Sprite) err(word + " takes one argument, the file name");
+        a.frames = static_cast<int>(constExpr());
+      }
+      want(")");
+      init.asset = a;
+      return init;
+    }
+  }
   if (!eat("{")) { init.one = assign(); return init; }
   init.isList = true;
   if (!at("}")) {
@@ -620,21 +668,7 @@ Unit Parser::parseUnit() {
     first.rom = spec.rom;
     first.isConst = spec.isConst;
     first.pos = p;
-    bool open = false;
-    if (eat("[")) {
-      if (at("]")) open = true;
-      else first.type.arrayLen = static_cast<int>(constExpr());
-      want("]");
-    }
-    if (eat("=")) first.init = initializer();
-    if (open) {
-      if (first.init && first.init->isList) first.type.arrayLen = static_cast<int>(first.init->list.size());
-      else if (first.init && first.init->one->k == ExprKind::Str) {
-        first.type.arrayLen = static_cast<int>(first.init->one->bytes.size()) + 1;
-      } else {
-        err(name + " needs a length or an initializer");
-      }
-    }
+    declaratorRest(first);
     unit.vars.push_back(std::move(first));
     while (eat(",")) unit.vars.push_back(declarator(spec, p));
     want(";");

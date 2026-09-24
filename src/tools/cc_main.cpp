@@ -8,16 +8,32 @@
 //   -msoft-mul       multiply, divide and shift on the CPU, not the ACP
 //   -zp-reserve N    leave the first N bytes of the zero page to the program
 //   --rom-header f   also write ROM.h, the cartridge map, to f
+//
+// __image, __sprite, __palette, __sample and __file name a file beside the
+// first source file.
 
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
 #include <vector>
 
+#include "assets/assets.h"
 #include "cc/cc.h"
 
+namespace fs = std::filesystem;
 using namespace sc8;
+
+namespace {
+
+std::optional<std::vector<uint8_t>> readBytes(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  if (!in) return std::nullopt;
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(in), {});
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
   std::vector<CcInput> inputs;
@@ -60,6 +76,25 @@ int main(int argc, char** argv) {
     std::fprintf(stderr, "usage: simplecpu-cc <file.c>... [-o out.asm] [-D NAME[=VALUE]] [-msoft-mul] [-zp-reserve N] [--rom-header ROM.h]\n");
     return 2;
   }
+  const fs::path dir = fs::path(inputs.front().path).parent_path();
+  Assets assets;
+  assets.loadFile = [&](std::string_view name) { return readBytes(dir / fs::path(name)); };
+  auto report = [&](std::string_view name, const std::string& note) {
+    if (!note.empty()) std::fprintf(stderr, "%.*s: %s\n", static_cast<int>(name.size()), name.data(), note.c_str());
+  };
+  assets.loadImage = [&](std::string_view name) {
+    std::string note;
+    auto img = loadImageFile(dir / fs::path(name), &note);
+    report(name, note);
+    return img;
+  };
+  assets.loadSample = [&](std::string_view name) {
+    std::string note;
+    auto pcm = loadSampleFile(dir / fs::path(name), &note);
+    report(name, note);
+    return pcm;
+  };
+  opts.assets = &assets;
   CcResult r = compile(inputs, opts);
   for (const std::string& e : r.errors) std::fprintf(stderr, "%s\n", e.c_str());
   if (!r.errors.empty()) return 1;

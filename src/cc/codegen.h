@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include "asm/asm.h"
 #include "cc/ast.h"
 #include "cc/zeropage.h"
 
@@ -38,6 +39,9 @@ struct RomEntry {
   // Set when this object's bytes are identical to an earlier one's, which the
   // assembler deduplicates. Both labels then name one address.
   std::optional<std::string> sameAs;
+  // The bytes themselves. An asset form reads a file to get them, so the
+  // layout keeps them rather than reading the file again for the emit.
+  std::vector<uint8_t> bytes;
 };
 
 struct Compiled {
@@ -54,11 +58,13 @@ struct Compiled {
 };
 
 // The cartridge layout, from the declarations alone. No code is generated to
-// work it out, which is what lets ROM.h exist before codegen runs.
-std::vector<RomEntry> layoutRom(const std::vector<VarDecl>& vars);
+// work it out, which is what lets ROM.h exist before codegen runs. An asset
+// initializer resolves through `assets`, the maps first and then the
+// loaders, the way the assembler's directives do.
+std::vector<RomEntry> layoutRom(const std::vector<VarDecl>& vars, const Assets* assets = nullptr);
 
 // A ROM object's bytes, from its initializer.
-std::vector<uint8_t> romBytesOf(const VarDecl& v);
+std::vector<uint8_t> romBytesOf(const VarDecl& v, const Assets* assets = nullptr);
 
 // How many bytes each conversion in a printf template reads, in order. The
 // browser project asks the GPU's own formatter. The GPU is not in this tree
@@ -71,6 +77,6 @@ Compiled compileUnit(const std::string& src, const std::string& file = "main.c")
 // zpReserve leaves that many bytes at the start of the zero page to the
 // program, as a system page it reaches through fixed addresses.
 Compiled compileUnitTree(const Unit& unit, bool softMul = false, const Profile* profile = nullptr,
-                         int zpReserve = 0);
+                         int zpReserve = 0, const Assets* assets = nullptr);
 
 }  // namespace sc8::cc

@@ -54,6 +54,7 @@ class Parser {
   double constExpr();
   StmtPtr localDecl();
   VarDecl declarator(const Spec& spec, const Pos& pos);
+  void declaratorRest(VarDecl& decl);
   Initializer initializer();
   FuncDecl functionRest(const std::string& name, const CType& ret, const Spec& spec, const Pos& pos);
 

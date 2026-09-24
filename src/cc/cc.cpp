@@ -321,7 +321,7 @@ Program compileProgram(const std::vector<SourceFile>& files, const CcOptions& op
     if (h == H.end()) return std::nullopt;
     return h->second;
   };
-  romHeader = romHeaderText(layoutRom(merge(sources, resolve, opts).vars));
+  romHeader = romHeaderText(layoutRom(merge(sources, resolve, opts).vars, opts.assets));
 
   // The build line decides which files are compiled and in what order, and
   // carries the machine options. Exactly one file may hold it.
@@ -412,7 +412,7 @@ Program compileProgram(const std::vector<SourceFile>& files, const CcOptions& op
   merged.included = m.included;
 
   const Compiled out = compileUnitTree(merged, plan.softMul || opts.defines.count("SOFT_MUL") > 0, opts.profile,
-                                       opts.zpReserve);
+                                       opts.zpReserve, opts.assets);
   Program p;
   static_cast<Compiled&>(p) = out;
   for (const SourceFile& f : chosen) p.files.push_back(f.name);

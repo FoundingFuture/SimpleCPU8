@@ -13,6 +13,7 @@
 #include "core/cartridge.h"
 #include "ide/ide.h"
 
+#include "assets/assets.h"
 #include "basic/program.h"
 #include "cc/cc.h"
 #include "ide/manual.h"
@@ -96,9 +97,32 @@ void Ide::compileC() {
     std::ifstream h(entry.path());
     if (h) opts.extra[entry.path().filename().string()] = std::string(std::istreambuf_iterator<char>(h), {});
   }
+  // An asset form names a file beside the C file, as .image does beside
+  // the assembly. A conversion note goes to the messages pane.
+  Assets assets;
+  std::vector<std::string> notes;
+  assets.loadFile = [&](std::string_view name) -> std::optional<std::vector<uint8_t>> {
+    std::ifstream f(dir / fs::path(name), std::ios::binary);
+    if (!f) return std::nullopt;
+    return std::vector<uint8_t>(std::istreambuf_iterator<char>(f), {});
+  };
+  assets.loadImage = [&](std::string_view name) {
+    std::string n;
+    auto img = loadImageFile(dir / fs::path(name), &n);
+    if (!n.empty()) notes.push_back(std::string(name) + ": " + n);
+    return img;
+  };
+  assets.loadSample = [&](std::string_view name) {
+    std::string n;
+    auto pcm = loadSampleFile(dir / fs::path(name), &n);
+    if (!n.empty()) notes.push_back(std::string(name) + ": " + n);
+    return pcm;
+  };
+  opts.assets = &assets;
   const std::string name = cPath_.empty() ? "main.c" : fs::path(cPath_).filename().string();
   CcResult r = compile({{name, cText_}}, opts);
   messages_.clear();
+  for (const std::string& n : notes) note(n);
   for (const std::string& e : r.errors) note(e);
   if (!r.errors.empty()) return;
   // The assembly lands in the Source pane and is assembled at once, so the

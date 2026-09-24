@@ -39,6 +39,10 @@ struct CcOptions {
   // Bytes at the start of the zero page left to the program as a system
   // page of fixed addresses. BASIC keeps its vectors and pointers there.
   int zpReserve = 0;
+  // Where __image, __sprite, __palette, __sample and __file find their
+  // bytes: the preloaded maps first, then the loaders, as the assembler's
+  // directives resolve a name. Without it every asset form is an error.
+  const Assets* assets = nullptr;
 };
 
 struct Program : Compiled {
