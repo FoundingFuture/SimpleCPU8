@@ -61,8 +61,8 @@ int keypadChar(int key) {
   }
 }
 
-// Every key that sends an event or drives a button. The poll scans this
-// short list rather than every raylib code.
+// Every key that drives a button or sends a key event. The poll reads the
+// buttons from this short list rather than every raylib code.
 const std::vector<int>& trackedKeys() {
   static const std::vector<int> keys = [] {
     std::vector<int> k;
@@ -143,6 +143,11 @@ uint8_t modsHeld() {
   return m;
 }
 
+// Two paths, as the device has two. The key queue (IO_KEY) is typing:
+// every press in the order it happened, from raylib's own press queue, so
+// two keys hit within one host frame arrive in the order they were hit.
+// The controller (IO_CONTROLLER) is levels: which buttons are held right
+// now, read fresh at every poll, the way a game reads a joystick.
 void Keyboard::poll(InputBus& in) {
   // A lost focus can swallow the release. Release everything, so no button
   // or key stays stuck down, and read nothing until focus returns.
@@ -154,28 +159,38 @@ void Keyboard::poll(InputBus& in) {
   if (mods != mods_) in.mods = mods_ = mods;
   const bool shift = (mods & 0x01) != 0;
   const bool ctrl = (mods & 0x02) != 0;
+
+  // The buttons held now.
+  uint8_t buttons = 0;
   for (int key : trackedKeys()) {
-    // IsKeyPressed fires once per physical press, so auto-repeat sends one
-    // press event, the browser's downKeys rule.
-    if (IsKeyPressed(key)) {
-      // The button first, so a key with no code (Control) still fires.
-      buttons_ = static_cast<uint8_t>(buttons_ | buttonBitFor(key));
-      in.buttons = buttons_;
-      const int code = keyCodeFor(key, shift, ctrl);
-      if (code >= 0 && !down_.count(key)) {
-        down_[key] = code;
-        in.pushKey(static_cast<uint8_t>(code), false);
-      }
+    if (IsKeyDown(key)) buttons = static_cast<uint8_t>(buttons | buttonBitFor(key));
+  }
+  if (buttons != buttons_) in.buttons = buttons_ = buttons;
+
+  // Releases of keys that went down in an earlier frame come first: they
+  // happened before anything pressed since.
+  for (auto it = down_.begin(); it != down_.end();) {
+    if (!IsKeyDown(it->first)) {
+      in.pushKey(static_cast<uint8_t>(it->second), true);
+      it = down_.erase(it);
+    } else {
+      ++it;
     }
-    if (IsKeyReleased(key)) {
-      buttons_ = static_cast<uint8_t>(buttons_ & ~buttonBitFor(key));
-      in.buttons = buttons_;
-      auto it = down_.find(key);
-      if (it != down_.end()) {
-        in.pushKey(static_cast<uint8_t>(it->second), true);
-        down_.erase(it);
-      }
+  }
+  // Then this frame's presses in order. raylib queues a press, not an
+  // auto-repeat, so a held key sends one press, the browser's rule. A key
+  // pressed and let go within the frame sends its release at once.
+  for (int key = GetKeyPressed(); key != 0; key = GetKeyPressed()) {
+    const int code = keyCodeFor(key, shift, ctrl);
+    if (code < 0) continue;
+    auto held = down_.find(key);
+    if (held != down_.end()) {
+      in.pushKey(static_cast<uint8_t>(held->second), true);
+      down_.erase(held);
     }
+    in.pushKey(static_cast<uint8_t>(code), false);
+    if (IsKeyDown(key)) down_[key] = code;
+    else in.pushKey(static_cast<uint8_t>(code), true);
   }
 }
 

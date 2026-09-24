@@ -32,8 +32,11 @@ uint8_t modsHeld();
 // its press did. Also the last button and modifier bytes sent.
 class Keyboard {
  public:
-  // Read raylib once for this host frame and feed the device. Losing the
-  // window's focus releases everything, so nothing sticks down.
+  // Read raylib once for this host frame and feed the device: the buttons
+  // held now, then the key presses of the frame in the order they
+  // happened. Losing the window's focus releases everything, so nothing
+  // sticks down. It drains raylib's press queue, so call it at most once
+  // per frame and before anything else reads GetKeyPressed.
   void poll(InputBus& in);
   void releaseAll(InputBus& in);
 
