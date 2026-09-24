@@ -54,6 +54,7 @@ build/src/vm/simplecpu --basic
 build/src/vm/simplecpu --basic hello.bas --run
 build/src/vm/simplecpu --rom build/roms/basic.rom
 build/src/vm/simplecpu --rom build/roms/pacman.rom --fps 60
+build/src/tools/simplecpu-make examples/hello-c
 ```
 
 The build burns every example into build/roms. examples/README.md lists

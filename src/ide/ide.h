@@ -99,6 +99,8 @@ class Ide {
   // The panes. A pane shared by two levels takes the level's window name.
   void sourcePane();
   void basicPane();
+  void cPane();
+  void compileC();
   void messagesPane();
   void manualPane();
   void screenPane();
@@ -154,6 +156,10 @@ class Ide {
 
   // The BASIC pane. Typing state for Push to RAM. The text goes into the
   // input device's key queue at the rate the machine drains it.
+  // The C pane: one file, its headers read from beside it. The assembly
+  // the compiler writes goes into the Source pane and is assembled there.
+  std::string cText_;
+  std::string cPath_;
   std::string basicText_;
   std::string basicPath_;
   std::string basicSlot_ = "PROGRAM";

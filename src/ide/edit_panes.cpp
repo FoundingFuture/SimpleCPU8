@@ -12,6 +12,8 @@
 
 #include "core/cartridge.h"
 #include "ide/ide.h"
+
+#include "cc/cc.h"
 #include "ide/manual.h"
 #include "ide/panes.h"
 
@@ -77,6 +79,63 @@ void Ide::sourcePane() {
   ImGui::SameLine();
   if (ImGui::SmallButton("Burn ROM")) burnRom();
   panes::inputMultiline("##source", source_, ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput);
+  ImGui::End();
+}
+
+// ---- C
+
+// The headers beside the file are handed to the compiler, so #include
+// "basic.h" works the way it does on the simplecpu-cc command line.
+void Ide::compileC() {
+  cc::CcOptions opts;
+  const fs::path dir = cPath_.empty() ? fs::current_path() : fs::path(cPath_).parent_path();
+  std::error_code ec;
+  for (const auto& entry : fs::directory_iterator(dir, ec)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".h") continue;
+    std::ifstream h(entry.path());
+    if (h) opts.extra[entry.path().filename().string()] = std::string(std::istreambuf_iterator<char>(h), {});
+  }
+  const std::string name = cPath_.empty() ? "main.c" : fs::path(cPath_).filename().string();
+  CcResult r = compile({{name, cText_}}, opts);
+  messages_.clear();
+  for (const std::string& e : r.errors) note(e);
+  if (!r.errors.empty()) return;
+  // The assembly lands in the Source pane and is assembled at once, so the
+  // program is ready to run and the generated code can be read.
+  source_ = r.assembly;
+  source_.reserve(source_.size() + (1 << 16));
+  sourcePath_ = cPath_.empty() ? "" : fs::path(cPath_).replace_extension(".asm").string();
+  assembleSource();
+  note("compiled " + name + " into " + std::to_string(std::count(r.assembly.begin(), r.assembly.end(), '\n')) +
+       " lines of assembly");
+}
+
+void Ide::cPane() {
+  ImGui::Begin("C");
+  ImGui::SetNextItemWidth(260);
+  panes::inputLine("file", cPath_, "path of a .c file");
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Load")) {
+    std::ifstream in(cPath_);
+    if (in) {
+      cText_.assign(std::istreambuf_iterator<char>(in), {});
+      note("loaded " + cPath_);
+    } else {
+      note("cannot read " + cPath_);
+    }
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Save")) {
+    if (cPath_.empty()) cPath_ = "main.c";
+    std::ofstream o(cPath_);
+    o << cText_;
+    note(o ? "saved " + cPath_ : "cannot write " + cPath_);
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Compile")) compileC();
+  ImGui::SameLine();
+  ImGui::TextDisabled("the assembly appears in Source, assembled and ready to run");
+  panes::inputMultiline("##csource", cText_, ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput);
   ImGui::End();
 }
 

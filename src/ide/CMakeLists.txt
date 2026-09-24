@@ -12,4 +12,4 @@ add_executable(simplecpu-ide
   manual.cpp
   datapath.cpp)
 
-target_link_libraries(simplecpu-ide PRIVATE sc8::vm sc8::basic rlimgui imgui sc8_warnings)
+target_link_libraries(simplecpu-ide PRIVATE sc8::vm sc8::basic sc8::cc rlimgui imgui sc8_warnings)

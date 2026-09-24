@@ -6,7 +6,7 @@
 #   ./r pacman                  simplecpu --rom build/release/roms/pacman.rom
 #   ./r game.rom --fps 30       any ROM path, flags go to simplecpu
 #   ./r --ide [file]            simplecpu-ide
-#   ./r --asm main.asm          simplecpu-asm, --cc and --run likewise
+#   ./r --asm main.asm          simplecpu-asm, --cc, --make and --run likewise
 #
 # Builds first when the build directory is missing.
 set -euo pipefail
@@ -22,6 +22,7 @@ while [ $# -gt 0 ]; do
     --ide) prog=simplecpu-ide ;;
     --asm) prog=simplecpu-asm ;;
     --cc) prog=simplecpu-cc ;;
+    --make) prog=simplecpu-make ;;
     --run) prog=simplecpu-run ;;
     -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
     *) args+=("$1") ;;

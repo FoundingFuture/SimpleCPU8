@@ -28,9 +28,27 @@ Four executables come out of one build.
 | simplecpu-ide | Editor, assembler, debugger, microcode tools and ROM browser around the same computer. |
 | simplecpu-asm | Assembles a source file and burns a ROM. |
 | simplecpu-run | Runs a ROM or source headless and prints the machine state. For tests and scripts. |
+| simplecpu-cc | Compiles the machine's C dialect to assembly. |
+| simplecpu-make | Builds a directory of C, assembly, BASIC and assets into one ROM. |
 
 simplecpu-cc compiles C to assembly. `simplecpu-cc main.c lib.c -o main.asm`,
-with `-D NAME=VALUE`, `-msoft-mul` and `--rom-header ROM.h`.
+with `-D NAME=VALUE`, `-msoft-mul`, `-zp-reserve N` and `--rom-header ROM.h`.
+
+## Making a program
+
+A directory is a program. `simplecpu-make mygame/` compiles every `.c` in
+it together, with the `.h` files beside them reachable by `#include`. It
+appends every `.asm` after the generated assembly, so a driver sits at its
+`.org` slot. Every `.bas` goes into the ROM as a slot named after the file.
+`.file`, `.image` and `.sample` resolve inside the directory. The ROM is
+`mygame/mygame.rom` and its title is the first line of README.md. There is
+no manifest to learn. `--asm-out` keeps the generated assembly for reading.
+examples/hello-c is the smallest case, and the build makes every example
+directory that holds C this way.
+
+In the IDE, the Edit level has a C tab beside Source and BASIC. Compile
+sends the assembly to the Source pane, assembled and ready to run, so the
+generated code can be read next to the C.
 
 Command lines that are settled:
 
@@ -210,7 +228,7 @@ Everything under src/. One library per layer, one executable per program.
 | src/asm | sc8_asm | core, devices |
 | src/cc | sc8_cc | asm |
 | src/basic | sc8_basic, the interpreter's ROM from its C sources | cc and asm at build time |
-| src/tools | simplecpu-asm, simplecpu-run, simplecpu-cc | asm, cc |
+| src/tools | simplecpu-asm, simplecpu-run, simplecpu-cc, simplecpu-make | asm, cc, assets |
 | src/vm | sc8_vm, simplecpu | asm, raylib, miniaudio |
 | src/ide | simplecpu-ide | vm, Dear ImGui, rlImGui |
 

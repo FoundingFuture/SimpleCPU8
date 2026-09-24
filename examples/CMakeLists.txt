@@ -24,6 +24,28 @@ foreach(dir IN LISTS SC8_EXAMPLE_DIRS)
   endif()
   get_filename_component(name "${dir}" NAME)
   set(src "${dir}/${name}.asm")
+
+  # A directory holding C is built by simplecpu-make, which compiles every
+  # .c file in it together and appends any .asm. The ROM lands beside the
+  # others. Its README's first line is the title, as simplecpu-make reads it.
+  file(GLOB c_sources CONFIGURE_DEPENDS "${dir}/*.c")
+  if(c_sources)
+    file(GLOB c_inputs CONFIGURE_DEPENDS "${dir}/*.c" "${dir}/*.h" "${dir}/*.asm" "${dir}/*.bas")
+    set(rom "${SC8_ROM_DIR}/${name}.rom")
+    add_custom_command(
+      OUTPUT "${rom}"
+      COMMAND simplecpu-make "${dir}" -o "${rom}" --microcode "${SC8_ROM_MICROCODE}"
+      DEPENDS simplecpu-make ${c_inputs} "${dir}/README.md"
+      COMMENT "Making ${name}.rom"
+      VERBATIM)
+    list(APPEND SC8_ROMS "${rom}")
+    if(SC8_BUILD_TESTS)
+      add_test(NAME rom_${name} COMMAND simplecpu-run "${rom}" --max ${SC8_TEST_MAX_INSTRUCTIONS})
+      set_tests_properties(rom_${name} PROPERTIES PASS_REGULAR_EXPRESSION "status: (halted|running)")
+    endif()
+    continue()
+  endif()
+
   if(NOT EXISTS "${src}")
     continue()
   endif()

@@ -112,6 +112,17 @@ void Ide::open(const std::string& path) {
     loadRomFile(path);
     return;
   }
+  if (fs::path(path).extension() == ".c") {
+    std::ifstream in(path);
+    if (!in) {
+      note("cannot read " + path);
+      return;
+    }
+    cText_.assign(std::istreambuf_iterator<char>(in), {});
+    cPath_ = path;
+    compileC();
+    return;
+  }
   if (fs::path(path).extension() == ".bas") {
     std::ifstream in(path);
     if (!in) {
@@ -439,6 +450,7 @@ void Ide::frame() {
   switch (level_) {
     case Level::Edit:
       sourcePane();
+      cPane();
       basicPane();
       messagesPane();
       manualPane();
@@ -479,6 +491,7 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.38f, &right, &left);
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.22f, &bottom, &left);
       ImGui::DockBuilderDockWindow("Source", left);
+      ImGui::DockBuilderDockWindow("C", left);
       ImGui::DockBuilderDockWindow("BASIC", left);
       ImGui::DockBuilderDockWindow("Messages", bottom);
       ImGui::DockBuilderDockWindow("Manual", right);
