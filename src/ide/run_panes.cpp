@@ -9,6 +9,7 @@
 #include "raylib.h"
 #include "rlImGui.h"
 
+#include "ide/highlight.h"
 #include "ide/ide.h"
 #include "ide/panes.h"
 
@@ -372,9 +373,16 @@ void Ide::listingPane(const char* name) {
         }
       }
       ImGui::SameLine(0.0f, 0.0f);
-      ImGui::TextUnformatted(line.text.c_str() + line.label.size());
+      // The rest of the line after the label: its colon, then the code.
+      std::string_view rest = std::string_view(line.text).substr(line.label.size());
+      if (!rest.empty() && rest.front() == ':') {
+        ImGui::TextUnformatted(":");
+        ImGui::SameLine(0.0f, 0.0f);
+        rest.remove_prefix(1);
+      }
+      codeLine(Syntax::Assembly, rest);
     } else {
-      ImGui::TextUnformatted(line.text.empty() ? " " : line.text.c_str());
+      codeLine(Syntax::Assembly, line.text);
     }
     ImGui::PopID();
   }

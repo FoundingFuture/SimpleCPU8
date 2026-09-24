@@ -302,6 +302,23 @@ controls. Reset restarts the CPU with RAM as it is. Reboot powers on
 again with the RAM image reloaded. Power off blanks the screen until
 Power on.
 
+The editor colours C, assembly and BASIC. Keywords, comments, strings
+and numbers get a colour in all three. Assembly adds labels, mnemonics,
+directives and registers. BASIC adds line numbers. The Assembly pane and
+the listing use the same colours. The colours come from a small lexer
+per language, drawn over Dear ImGui's text box, so editing works as
+before.
+
+Format lays an `.asm` document out in assembler columns. Every mnemonic
+starts in column 8. The operands start two places after the longest
+mnemonic, `PUSHW`, so in column 15. A code label too long for column 8
+goes on a line of its own. Labels in `.ram` and `.data` stay beside their
+directive, because `.addr` needs one in front. Trailing comments move to
+the column the file uses most, or 32. Comment lines keep their
+indentation. Preferences can lay out every `.asm` document on save, and
+that is on by default. `src/asm/format.cpp` does the layout, and a test
+checks that every example assembles to the same bytes after it.
+
 Save is the whole project: every changed document into its folder. A
 project opened from a ROM saves into that ROM. The documents are built
 and the file is written again with the project inside. Save asks first,

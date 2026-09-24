@@ -13,6 +13,7 @@ namespace sc8 {
 struct Settings {
   std::string projectsDir;  // where New project and Open project start
   float uiScale = 1.0f;     // every font and spacing times this
+  bool formatAssembly = true;  // lay out .asm documents when they are saved
 
   // The folder, created when missing. Empty when no home is known.
   static std::filesystem::path dir();

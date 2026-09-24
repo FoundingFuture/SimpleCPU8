@@ -115,6 +115,9 @@ class Ide {
   void createProject(const std::string& dir, project::Kind kind);
   void saveProjectAs(const std::string& dir);
   void saveDoc(Doc& doc);
+  // Lay an .asm document out in assembler columns (asm/format.h). True
+  // when the text changed. The editor, when it holds the text, reloads it.
+  bool layOut(Doc& doc);
   void saveAll();
   void saveProject();
   // A project opened from a ROM saves into that ROM: the documents are

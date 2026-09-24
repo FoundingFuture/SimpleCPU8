@@ -43,6 +43,8 @@ void Settings::load() {
     else if (key == "scale") {
       const float f = std::strtof(value.c_str(), nullptr);
       if (f >= 0.5f && f <= 4.0f) uiScale = f;
+    } else if (key == "format_asm") {
+      formatAssembly = value != "0";
     }
   }
 }
@@ -54,6 +56,7 @@ bool Settings::save() const {
   o << "# SimpleCPU-8 IDE settings\n";
   o << "projects = " << projectsDir << "\n";
   o << "scale = " << uiScale << "\n";
+  o << "format_asm = " << (formatAssembly ? 1 : 0) << "\n";
   return static_cast<bool>(o);
 }
 

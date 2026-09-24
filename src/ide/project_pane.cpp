@@ -7,11 +7,14 @@
 #include <iterator>
 
 #include "imgui.h"
+#include "imgui_internal.h"
 
+#include "asm/format.h"
 #include "basic/basic_rom.h"
 #include "basic/program.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
+#include "ide/highlight.h"
 #include "ide/ide.h"
 #include "ide/panes.h"
 
@@ -249,11 +252,25 @@ void Ide::saveProjectAs(const std::string& dir) {
   note("project saved in " + projectDir_);
 }
 
+bool Ide::layOut(Doc& doc) {
+  if (docKindOf(doc.name) != DocKind::Assembly) return false;
+  std::string laid = formatAssembly(doc.text);
+  if (laid == doc.text) return false;
+  doc.text = std::move(laid);
+  // A text box that is being edited keeps its own copy of the text and
+  // would write it back over the new one.
+  if (ImGuiInputTextState* state = ImGui::GetInputTextState(ImGui::GetActiveID())) {
+    state->ReloadUserBufAndKeepSelection();
+  }
+  return true;
+}
+
 void Ide::saveDoc(Doc& doc) {
   if (projectDir_.empty()) {
     note("the project has no folder yet: use File, Save project as");
     return;
   }
+  if (settings_.formatAssembly) layOut(doc);
   const project::Layout l = layout();
   std::error_code ec;
   fs::create_directories(l.sources, ec);
@@ -287,6 +304,11 @@ std::string Ide::saveTarget() const {
 // documents unsaved. The machine keeps running what it runs: Build puts
 // the new ROM in.
 bool Ide::saveIntoRom() {
+  if (settings_.formatAssembly) {
+    for (Doc& d : docs_) {
+      if (d.dirty) layOut(d);
+    }
+  }
   project::Built built = buildInMemory();
   for (const std::string& n : built.notes) note(n);
   for (const std::string& e : built.errors) note(e);
@@ -672,8 +694,20 @@ void Ide::editorPane() {
   } else if (kind == DocKind::C) {
     ImGui::SameLine();
     ImGui::TextDisabled("Build compiles every .c together; the Assembly pane shows the result");
+  } else if (kind == DocKind::Assembly) {
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Format")) {
+      if (layOut(*d)) d->dirty = true;
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("mnemonics in one column, operands in the next, long labels on a line of their own");
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled(settings_.formatAssembly ? "laid out in columns on every save" : "Format lays it out in columns");
   }
-  if (panes::inputMultiline("##doc", d->text, ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) d->dirty = true;
+  if (codeEditor("##doc", d->text, syntaxOf(d->name), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) {
+    d->dirty = true;
+  }
   ImGui::End();
 }
 
@@ -687,7 +721,7 @@ void Ide::assemblyPane() {
                                  : "build the project to see the assembly it makes");
   } else {
     ImGui::TextDisabled("what the assembler saw at the last build, read only");
-    panes::inputMultiline("##asm", builtAssembly_, ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_ReadOnly);
+    codeEditor("##asm", builtAssembly_, Syntax::Assembly, ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_ReadOnly);
   }
   ImGui::End();
 }

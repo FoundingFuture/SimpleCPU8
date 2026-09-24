@@ -903,6 +903,11 @@ void Ide::settingsDialog() {
     applyScale();
   }
   ImGui::Spacing();
+  ImGui::Checkbox("Lay out assembly in columns on save", &editing_.formatAssembly);
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("mnemonics in one column, operands in the next, long labels on a line of their own");
+  }
+  ImGui::Spacing();
   if (ImGui::Button("Save", ImVec2(90, 0))) {
     settings_ = editing_;
     applyScale();
