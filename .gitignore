@@ -5,3 +5,5 @@ imgui.ini
 .DS_Store
 _to_delete*
 dist/
+examples/*/*.rom
+examples/*/build/

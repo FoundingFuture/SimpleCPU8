@@ -21,7 +21,10 @@
 #include "raylib.h"
 #include "rlImGui.h"
 
+#include <filesystem>
+
 #include "ide/ide.h"
+#include "ide/settings.h"
 
 int main(int argc, char** argv) {
   SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI);
@@ -30,9 +33,17 @@ int main(int argc, char** argv) {
   SetTargetFPS(60);
   rlImGuiSetup(true);
   ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+  // The layout is kept in the settings folder and written only by Save
+  // layout in the Settings menu, never on every change.
+  ImGui::GetIO().IniFilename = nullptr;
+  {
+    const std::filesystem::path layout = sc8::Settings::layoutFile();
+    if (!layout.empty() && std::filesystem::exists(layout)) ImGui::LoadIniSettingsFromDisk(layout.string().c_str());
+  }
 
   {
     sc8::Ide ide;
+    ide.applyScale();
     std::string screenshot;
     bool run = false;
     for (int i = 1; i < argc; i++) {

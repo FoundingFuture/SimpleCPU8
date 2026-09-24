@@ -91,6 +91,7 @@ std::span<const Speed> speedLadder() { return LADDER; }
 
 Ide::Ide() {
   customText_.reserve(1 << 15);
+  settings_.load();
   audio_.start();
   newScratchProject();
 }
@@ -288,9 +289,70 @@ void Ide::runOneFrame() {
   if (computer_.hitBreakpoint) note("stopped at breakpoint, PC " + hex(computer_.machine().pc, 4));
 }
 
+// Power on reloads the RAM image and starts from the first slot, the
+// cold start. Reset restarts the CPU and keeps RAM, the warm one. Power
+// off stops everything and blanks the screen until the next power on.
 void Ide::powerOn() {
   setRunning(false);
+  poweredOff_ = false;
   computer_.powerOn();
+  applyLock();
+  pushBreakpoints();
+}
+
+void Ide::reset() {
+  setRunning(false);
+  poweredOff_ = false;
+  computer_.reset();
+  pushBreakpoints();
+}
+
+void Ide::powerOff() {
+  setRunning(false);
+  poweredOff_ = true;
+}
+
+// The machine's state at the right of the menu bar, and the power
+// controls under it: one place for what is otherwise a button in a pane.
+void Ide::statusMenu() {
+  const Machine& m = computer_.machine();
+  std::string label;
+  ImVec4 color(1.0f, 1.0f, 1.0f, 1.0f);
+  if (poweredOff_) {
+    label = "CPU: off";
+    color = ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
+  } else if (m.status == Status::Crashed) {
+    label = "CPU: crashed, " + (m.crash ? m.crash->message : std::string("no message"));
+    color = ImVec4(1.0f, 0.4f, 0.35f, 1.0f);
+  } else if (m.status == Status::Halted) {
+    label = "CPU: halted";
+    color = ImVec4(1.0f, 0.8f, 0.3f, 1.0f);
+  } else if (running_) {
+    label = "CPU: running";
+    color = ImVec4(0.35f, 0.85f, 0.4f, 1.0f);
+  } else {
+    label = "CPU: paused";
+  }
+  const float width = ImGui::CalcTextSize(label.c_str()).x + ImGui::GetStyle().FramePadding.x * 4.0f;
+  ImGui::SameLine(ImGui::GetWindowWidth() - width - 8.0f);
+  ImGui::PushStyleColor(ImGuiCol_Text, color);
+  const bool open = ImGui::BeginMenu(label.c_str());
+  ImGui::PopStyleColor();
+  if (!open) return;
+  const bool live = !poweredOff_ && m.status == Status::Running;
+  if (ImGui::MenuItem(running_ ? "Pause" : "Run", "F5", false, live)) setRunning(!running_);
+  if (ImGui::MenuItem("Step instruction", "F10", false, live)) stepInstruction();
+  ImGui::Separator();
+  if (ImGui::MenuItem("Reset", nullptr, false, !poweredOff_)) reset();
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("restart the CPU at the first slot, RAM as it is");
+  if (ImGui::MenuItem("Reboot", "Shift+F5")) powerOn();
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("power on again: the RAM image reloaded, everything fresh");
+  if (poweredOff_) {
+    if (ImGui::MenuItem("Power on")) powerOn();
+  } else {
+    if (ImGui::MenuItem("Power off")) powerOff();
+  }
+  ImGui::EndMenu();
 }
 
 void Ide::selectMicrocode(const std::string& name) {
@@ -335,18 +397,22 @@ void Ide::update() {
   // The keyboard belongs to the machine only while the screen pane has it
   // and the machine runs. Otherwise the editor owns the keys and the
   // machine sees everything released.
-  if (screenHasKeys_ && running_) keyboard_.poll(computer_.input());
+  if (screenHasKeys_ && running_ && !poweredOff_) keyboard_.poll(computer_.input());
   else keyboard_.releaseAll(computer_.input());
-  typeIntoMachine();
-  if (running_) pace();
-  syncBasic();
+  if (!poweredOff_) {
+    typeIntoMachine();
+    if (running_) pace();
+    syncBasic();
+  }
   // The chip renders on its own clock, so a tune plays on while the CPU
   // sits paused.
   computer_.pumpAudio(audio_);
-  screen_.upload(computer_.frame());
   BeginTextureMode(panes::target());
   ClearBackground(BLACK);
-  screen_.draw(0, 0, panes::PANE_SIDE, panes::PANE_SIDE, display);
+  if (!poweredOff_) {
+    screen_.upload(computer_.frame());
+    screen_.draw(0, 0, panes::PANE_SIDE, panes::PANE_SIDE, display);
+  }
   EndTextureMode();
 }
 
@@ -358,8 +424,8 @@ void Ide::frame() {
   // The number in the id is the layout's version. A new pane bumps it, so
   // an imgui.ini from before the pane rebuilds the level once rather than
   // leaving the newcomer floating.
-  static const ImGuiID IDS[3] = {ImHashStr("sc8-level-project-3"), ImHashStr("sc8-level-run-1"),
-                                 ImHashStr("sc8-level-cpu-1")};
+  static const ImGuiID IDS[3] = {ImHashStr("sc8-level-project-3"), ImHashStr("sc8-level-run-2"),
+                                 ImHashStr("sc8-level-cpu-3")};
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const int active = static_cast<int>(level_);
   for (int i = 0; i < 3; i++) {
@@ -369,6 +435,12 @@ void Ide::frame() {
   if (!layoutBuilt_[active]) {
     layoutBuilt_[active] = true;
     buildLayout(level_, dockspace);
+    // Which tab is in front is decided by focus, and every window of a
+    // fresh layout asks for it. The one a person wants first wins here.
+    focusAfterLayout_ = level_ == Level::Project ? "Editor" : level_ == Level::Run ? "Memory##run" : "Microcode";
+  } else if (!focusAfterLayout_.empty()) {
+    ImGui::SetWindowFocus(focusAfterLayout_.c_str());
+    focusAfterLayout_.clear();
   }
   menuBar();
   shortcuts();
@@ -379,30 +451,30 @@ void Ide::frame() {
       editorPane();
       assemblyPane();
       messagesPane();
-      screenPane();
-      manualPane();
+      screenPane("Screen##project");
+      manualPane("Manual##project");
       break;
     case Level::Run:
-      screenPane();
+      screenPane("Screen##run");
       registersPane("Registers##run");
-      memoryPane();
+      memoryPane("Memory##run");
+      stackPane("Stack##run");
       breakpointsPane();
       listingPane("Listing##run");
       messagesPane();
-      manualPane();
+      manualPane("Manual##run");
       break;
     case Level::Cpu:
-      datapathPane();
-      flowPane();
+      cpuPane();
       microcodePane();
       listingPane("Listing##micro");
-      registersPane("Registers##micro");
       messagesPane();
-      manualPane();
+      manualPane("Manual##cpu");
       break;
   }
   dialog_.draw();
   quitDialog();
+  settingsDialog();
 }
 
 // The first run of a level has no saved layout, so the panes get one
@@ -428,8 +500,8 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
       ImGui::DockBuilderDockWindow("Editor", left);
       ImGui::DockBuilderDockWindow("Assembly", left);
       ImGui::DockBuilderDockWindow("Messages", bottom);
-      ImGui::DockBuilderDockWindow("Screen", right);
-      ImGui::DockBuilderDockWindow("Manual", rightBottom);
+      ImGui::DockBuilderDockWindow("Screen##project", right);
+      ImGui::DockBuilderDockWindow("Manual##project", rightBottom);
       break;
     case Level::Run:
       // The screen large in the middle, the registers and the run
@@ -441,26 +513,24 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
       ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.30f, &rightBottom, &right);
       ImGui::DockBuilderDockWindow("Listing##run", left);
       ImGui::DockBuilderDockWindow("Breakpoints", bottom);
-      ImGui::DockBuilderDockWindow("Screen", mid);
+      ImGui::DockBuilderDockWindow("Screen##run", mid);
       ImGui::DockBuilderDockWindow("Registers##run", midBottom);
-      ImGui::DockBuilderDockWindow("Memory", right);
-      ImGui::DockBuilderDockWindow("Manual", right);
+      // The last window docked into a node is the tab in front.
+      ImGui::DockBuilderDockWindow("Manual##run", right);
+      ImGui::DockBuilderDockWindow("Stack##run", right);
+      ImGui::DockBuilderDockWindow("Memory##run", right);
       ImGui::DockBuilderDockWindow("Messages", rightBottom);
       break;
     case Level::Cpu:
-      // The datapath large with the flow under it. The listing and the
-      // registers on the left, the rows on the right.
+      // The CPU view large in the middle, its sections stacked. The
+      // listing on the left, the microcode rows on the right.
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.28f, &right, &left);
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.62f, &mid, &left);
-      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Down, 0.40f, &midBottom, &mid);
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.34f, &bottom, &left);
-      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.20f, &rightBottom, &right);
+      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.25f, &rightBottom, &right);
       ImGui::DockBuilderDockWindow("Listing##micro", left);
-      ImGui::DockBuilderDockWindow("Registers##micro", bottom);
-      ImGui::DockBuilderDockWindow("Datapath", mid);
-      ImGui::DockBuilderDockWindow("Flow", midBottom);
+      ImGui::DockBuilderDockWindow("CPU", mid);
+      ImGui::DockBuilderDockWindow("Manual##cpu", right);
       ImGui::DockBuilderDockWindow("Microcode", right);
-      ImGui::DockBuilderDockWindow("Manual", right);
       ImGui::DockBuilderDockWindow("Messages", rightBottom);
       break;
   }
@@ -469,7 +539,10 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
 
 void Ide::menuBar() {
   if (!ImGui::BeginMainMenuBar()) return;
-  const fs::path startIn = projectDir_.empty() ? fs::current_path() : fs::path(projectDir_).parent_path();
+  const fs::path startIn = !settings_.projectsDir.empty() && fs::is_directory(settings_.projectsDir)
+                               ? fs::path(settings_.projectsDir)
+                           : projectDir_.empty() ? fs::current_path()
+                                                 : fs::path(projectDir_).parent_path();
   if (ImGui::BeginMenu("File")) {
     if (ImGui::BeginMenu("New project")) {
       const std::pair<const char*, project::Kind> KINDS[] = {
@@ -543,7 +616,8 @@ void Ide::menuBar() {
     if (ImGui::MenuItem("Step instruction", "F10")) stepInstruction();
     if (ImGui::MenuItem("Step microcycle", "F11", false, computer_.microcodeInspectable())) stepMicro();
     if (ImGui::MenuItem("Run one frame", "F6")) runOneFrame();
-    if (ImGui::MenuItem("Power on", "Shift+F5")) powerOn();
+    if (ImGui::MenuItem("Reset")) reset();
+    if (ImGui::MenuItem("Reboot", "Shift+F5")) powerOn();
     ImGui::Separator();
     if (ImGui::BeginMenu("Speed")) {
       for (size_t i = 0; i < std::size(LADDER); i++) {
@@ -575,6 +649,31 @@ void Ide::menuBar() {
     }
     ImGui::EndMenu();
   }
+  if (ImGui::BeginMenu("Settings")) {
+    if (ImGui::MenuItem("Preferences...")) {
+      editing_ = settings_;
+      askSettings_ = true;
+    }
+    ImGui::Separator();
+    if (ImGui::MenuItem("Save layout")) {
+      const fs::path f = Settings::layoutFile();
+      if (f.empty()) {
+        note("no settings folder is known on this machine, so the layout cannot be saved");
+      } else {
+        ImGui::SaveIniSettingsToDisk(f.string().c_str());
+        note("layout saved to " + f.string());
+      }
+    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("the panes as they are now, for every level, kept for the next start");
+    if (ImGui::MenuItem("Reset layout")) {
+      std::error_code ec;
+      fs::remove(Settings::layoutFile(), ec);
+      ImGui::ClearIniSettings();
+      for (bool& b : layoutBuilt_) b = false;
+      note("layout reset to the built in one");
+    }
+    ImGui::EndMenu();
+  }
   if (ImGui::BeginMenu("Display")) {
     ImGui::MenuItem("CRT look", nullptr, &display.enabled);
     ImGui::SliderFloat("Scanlines", &display.scanlines, 0.0f, 1.0f);
@@ -586,9 +685,10 @@ void Ide::menuBar() {
     ImGui::EndMenu();
   }
   if (lockedMicrocode_) {
-    ImGui::SameLine(ImGui::GetWindowWidth() - 180.0f);
-    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "microcode locked");
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "  microcode locked");
   }
+  statusMenu();
   ImGui::EndMainMenuBar();
 }
 
@@ -666,6 +766,64 @@ void Ide::quitDialog() {
     }
     ImGui::EndPopup();
   }
+}
+
+// The style is scaled from a copy taken at startup, so a second apply
+// never compounds the first. FontScaleMain rasterizes the fonts at the
+// new size, which is what keeps them sharp.
+void Ide::applyScale() {
+  static const ImGuiStyle base = ImGui::GetStyle();
+  ImGuiStyle& style = ImGui::GetStyle();
+  const float scale = std::clamp(settings_.uiScale, 0.5f, 4.0f);
+  style = base;
+  style.ScaleAllSizes(scale);
+  style.FontScaleMain = scale;
+}
+
+void Ide::settingsDialog() {
+  if (!askSettings_) return;
+  ImGui::OpenPopup("Preferences");
+  ImGui::SetNextWindowSize(ImVec2(560, 0), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Preferences", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+  ImGui::TextDisabled("kept in %s", Settings::dir().empty() ? "(no settings folder on this machine)"
+                                                             : Settings::dir().string().c_str());
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Projects folder");
+  ImGui::SetNextItemWidth(400.0f);
+  panes::inputLine("##projects", editing_.projectsDir, "where New project and Open project start");
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Browse...")) {
+    dialog_.open(FileDialog::Mode::OpenFolder, "The folder your projects live in",
+                 editing_.projectsDir.empty() ? fs::current_path() : fs::path(editing_.projectsDir), {},
+                 [this](const fs::path& p) { editing_.projectsDir = p.string(); });
+  }
+  ImGui::Spacing();
+  ImGui::TextUnformatted("UI size");
+  ImGui::SetNextItemWidth(400.0f);
+  if (ImGui::SliderFloat("##scale", &editing_.uiScale, 0.75f, 2.5f, "%.2f x")) {
+    // Applied as the slider moves, so the size is seen; Cancel puts it back.
+    settings_.uiScale = editing_.uiScale;
+    applyScale();
+  }
+  ImGui::Spacing();
+  if (ImGui::Button("Save", ImVec2(90, 0))) {
+    settings_ = editing_;
+    applyScale();
+    if (!settings_.save()) note("the settings could not be written");
+    else note("settings saved to " + Settings::settingsFile().string());
+    askSettings_ = false;
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel", ImVec2(90, 0))) {
+    settings_.load();
+    applyScale();
+    askSettings_ = false;
+    ImGui::CloseCurrentPopup();
+  }
+  // The folder dialog is drawn above this one while it is open.
+  dialog_.draw();
+  ImGui::EndPopup();
 }
 
 void Ide::messagesPane() {

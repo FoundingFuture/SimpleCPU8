@@ -336,8 +336,8 @@ void inputRefPage() {
 // right. Typing a prefix filters the mnemonics, as the browser did.
 // manualTab_ selects a tab from elsewhere, for the guide of an open
 // file. The tabs stay, so the person can always pick another.
-void Ide::manualPane() {
-  ImGui::Begin("Manual");
+void Ide::manualPane(const char* name) {
+  ImGui::Begin(name);
   if (ImGui::BeginTabBar("manualtabs")) {
     static const struct { const char* label; Guide guide; } GUIDE_TABS[] = {
         {"BASIC", Guide::Basic}, {"C", Guide::C}, {"Assembly", Guide::Assembly}, {"Microcode", Guide::Microcode}};

@@ -24,6 +24,7 @@
 #include "asm/asm.h"
 #include "ide/filedialog.h"
 #include "ide/guide.h"
+#include "ide/settings.h"
 #include "project/project.h"
 #include "vm/audio.h"
 #include "vm/computer.h"
@@ -92,6 +93,11 @@ class Ide {
   // Called once per host frame between rlImGuiBegin and rlImGuiEnd.
   void frame();
 
+  // Settings: the projects folder and the UI scale, from the platform's
+  // settings folder. applyScale sizes every font and spacing.
+  Settings& settings() { return settings_; }
+  void applyScale();
+
   // The window's close gesture. With unsaved documents the IDE asks
   // first; done() turns true once the person answered or nothing needed
   // saving.
@@ -129,6 +135,10 @@ class Ide {
   void stepMicro();
   void runOneFrame();
   void powerOn();
+  void reset();
+  void powerOff();
+  bool poweredOff_ = false;  // the machine is off: black screen, nothing runs
+  void statusMenu();
   void selectMicrocode(const std::string& name);
   void applyLock();
   void toggleBreakpoint(int instr);
@@ -151,17 +161,27 @@ class Ide {
   void menuBar();
   void shortcuts();
   void quitDialog();
+  void settingsDialog();
 
   // The panes. A pane shared by two levels takes the level's window name.
   void filesPane();
   void editorPane();
   void assemblyPane();
   void messagesPane();
-  void manualPane();
-  void screenPane();
+  void manualPane(const char* name);
+  void screenPane(const char* name);
   void registersPane(const char* name);
+  void registersBody();
+  void memoryBody();
+  void stackBody();
+  void datapathBody();
+  void flowBody();
+  // The CPU level's one view: the datapath, the flow, the registers, the
+  // memory and the stack as sections that open and close.
+  void cpuPane();
   void runControls();
-  void memoryPane();
+  void memoryPane(const char* name);
+  void stackPane(const char* name);
   void breakpointsPane();
   void listingPane(const char* name);
   void datapathPane();
@@ -173,6 +193,9 @@ class Ide {
   Audio audio_;
   Keyboard keyboard_;
   FileDialog dialog_;
+  Settings settings_;
+  bool askSettings_ = false;
+  Settings editing_;  // the dialog's copy until Save
 
   // The project. projectDir_ is empty for a ROM project and for the
   // scratch project. romBase_ holds an opened ROM, whose program the
@@ -194,6 +217,7 @@ class Ide {
 
   Level level_ = Level::Project;
   bool layoutBuilt_[3] = {false, false, false};
+  std::string focusAfterLayout_;  // a window to bring to the front once
   bool done_ = false;
   bool askQuit_ = false;
 
@@ -207,8 +231,13 @@ class Ide {
   bool followPc_ = true;
   uint16_t shownPc_ = 0xffff;  // the PC the listing last scrolled to
 
-  // The memory pane.
+  // The memory and stack panes. A jump is a row to scroll to next frame.
   int memAddr_ = 0;
+  int memJump_ = -1;
+  bool memFollow_ = true;
+  int stackJump_ = STACK_SIZE - 256;
+  int stackShown_ = -1;
+  bool stackFollow_ = true;
   std::vector<std::string> watched_;
 
   // The microcode pane. lockedMicrocode_ holds a set the machine keeps

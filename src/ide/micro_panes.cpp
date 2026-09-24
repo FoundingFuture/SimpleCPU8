@@ -72,6 +72,11 @@ void signalChips(const Row& row) {
 
 void Ide::datapathPane() {
   ImGui::Begin("Datapath");
+  datapathBody();
+  ImGui::End();
+}
+
+void Ide::datapathBody() {
   const Machine& m = computer_.machine();
   const bool inspectable = computer_.microcodeInspectable();
 
@@ -181,7 +186,6 @@ void Ide::datapathPane() {
   } else {
     signalChips(m.lastMicro->signals);
   }
-  ImGui::End();
 }
 
 // ---- flow
@@ -192,15 +196,18 @@ void Ide::datapathPane() {
 // vanish. The executed row is highlighted.
 void Ide::flowPane() {
   ImGui::Begin("Flow");
+  flowBody();
+  ImGui::End();
+}
+
+void Ide::flowBody() {
   const Machine& m = computer_.machine();
   if (!computer_.microcodeInspectable()) {
     ImGui::TextWrapped("%s", SEALED);
-    ImGui::End();
     return;
   }
   if (!m.lastMicro) {
     ImGui::TextDisabled("no microcycle yet");
-    ImGui::End();
     return;
   }
   const Microcode& set = m.microcode();
@@ -218,7 +225,6 @@ void Ide::flowPane() {
       const auto r = static_cast<int>(i);
       line("00", (*rows)[i], r == m.lastMicro->row, r < m.lastMicro->row);
     }
-    ImGui::End();
     return;
   }
   const std::string& op = m.lastMicro->op;
@@ -230,7 +236,6 @@ void Ide::flowPane() {
     const std::string num = (i + 1 < 10 ? "0" : "") + std::to_string(i + 1);
     line(num.c_str(), (*rows)[i], r == m.lastMicro->row, r < m.lastMicro->row);
   }
-  ImGui::End();
 }
 
 // ---- rows
@@ -439,6 +444,44 @@ void Ide::microcodePane() {
     }
   }
   ImGui::EndGroup();
+  ImGui::End();
+}
+
+}  // namespace sc8
+
+namespace sc8 {
+
+// One view of the inside of the machine. Each section opens and closes
+// on its own, and the whole view scrolls, so a person keeps the datapath
+// and the stack in sight together or folds what is not needed now.
+void Ide::cpuPane() {
+  ImGui::Begin("CPU");
+  const float line = ImGui::GetTextLineHeightWithSpacing();
+  if (ImGui::CollapsingHeader("Datapath", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::BeginChild("cpu-datapath", ImVec2(0, line * 20.0f), ImGuiChildFlags_None);
+    datapathBody();
+    ImGui::EndChild();
+  }
+  if (ImGui::CollapsingHeader("Flow", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::BeginChild("cpu-flow", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY);
+    flowBody();
+    ImGui::EndChild();
+  }
+  if (ImGui::CollapsingHeader("Registers", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::BeginChild("cpu-registers", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY);
+    registersBody();
+    ImGui::EndChild();
+  }
+  if (ImGui::CollapsingHeader("Memory", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::BeginChild("cpu-memory", ImVec2(0, line * 14.0f), ImGuiChildFlags_None);
+    memoryBody();
+    ImGui::EndChild();
+  }
+  if (ImGui::CollapsingHeader("Stack", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::BeginChild("cpu-stack", ImVec2(0, line * 12.0f), ImGuiChildFlags_None);
+    stackBody();
+    ImGui::EndChild();
+  }
   ImGui::End();
 }
 

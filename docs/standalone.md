@@ -259,6 +259,31 @@ machine whatever a later build or ROM brings. A `microcode.txt` document
 has Apply and lock beside Apply. The menu bar says "microcode locked"
 while it holds.
 
+Settings live where the platform keeps them, in a SimpleCPU-8 folder.
+That is Library/Application Support on macOS and %APPDATA% on Windows.
+Elsewhere it is the ~/.config folder. The file `settings.txt` holds the
+projects folder, where New project and Open project start, and the UI
+size. The size scales every font and
+spacing through Dear ImGui's font scaling, so text stays sharp. Preferences in
+the Settings menu edits both. The pane layout is written only by Save
+layout in that menu, to `layout.ini` beside the settings. It is read at
+the next start. Reset layout puts the built in one back. A change a person
+makes on the way is never saved behind their back.
+
+The CPU level is one view with sections: Datapath, Flow, Registers,
+Memory and Stack. Each opens or folds on its own, so the whole inside of
+the machine scrolls as one. The Run level has Memory and Stack as panes
+beside the manual. Memory is the whole 64K behind a clipper. It jumps to
+the zero page, D1, D2 and the text screen, and follows the last bus
+access while stepping. The stack shows its 4096 bytes with SP
+marked and follows SP.
+
+The CPU's state sits at the right of the menu bar: running, paused,
+halted, crashed with the message, or off. Clicking it gives the power
+controls. Reset restarts the CPU with RAM as it is. Reboot powers on
+again with the RAM image reloaded. Power off blanks the screen until
+Power on.
+
 Quitting with unsaved documents asks: save all and quit, quit without
 saving, or stay. Opening and saving go through a file dialog of the IDE's
 own. It walks folders and can make a new folder on the way.

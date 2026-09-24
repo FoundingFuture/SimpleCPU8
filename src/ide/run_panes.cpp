@@ -42,8 +42,8 @@ int wordAt(const Machine& m, int addr) {
 
 // ---- screen
 
-void Ide::screenPane() {
-  ImGui::Begin("Screen");
+void Ide::screenPane(const char* name) {
+  ImGui::Begin(name);
   const ImVec2 avail = ImGui::GetContentRegionAvail();
   // One line under the picture stays for the status.
   const float side = std::max(64.0f, std::min(avail.x, avail.y - ImGui::GetTextLineHeightWithSpacing()));
@@ -119,6 +119,11 @@ void Ide::runControls() {
 
 void Ide::registersPane(const char* name) {
   ImGui::Begin(name);
+  registersBody();
+  ImGui::End();
+}
+
+void Ide::registersBody() {
   runControls();
   ImGui::Separator();
   const Machine& m = computer_.machine();
@@ -144,69 +149,128 @@ void Ide::registersPane(const char* name) {
     ImGui::Text("bus  %s  %s <- %s", KINDS[static_cast<int>(m.lastBus->kind)], hex(m.lastBus->addr, 4).c_str(),
                 hex(m.lastBus->data, 2).c_str());
   }
-  ImGui::End();
 }
 
 // ---- memory
 
-void Ide::memoryPane() {
-  ImGui::Begin("Memory");
+// A dump of a byte array: sixteen bytes a row with their characters, the
+// whole array behind a clipper, so 64K scrolls as fast as 256. hot marks
+// the one address the last bus event touched, sp the stack pointer.
+static void hexDump(const char* id, const uint8_t* bytes, int size, int& jumpTo, std::optional<int> hot,
+                    std::optional<int> sp) {
+  ImGui::BeginChild(id, ImVec2(0, 0), ImGuiChildFlags_Borders);
+  const int rows = size / 16;
+  if (jumpTo >= 0) {
+    ImGui::SetScrollY(static_cast<float>(jumpTo / 16) * ImGui::GetTextLineHeightWithSpacing());
+    jumpTo = -1;
+  }
+  ImGuiListClipper clipper;
+  clipper.Begin(rows, ImGui::GetTextLineHeightWithSpacing());
+  while (clipper.Step()) {
+    for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+      const int base = row * 16;
+      ImGui::Text("%s:", hex(static_cast<unsigned>(base), 4).c_str());
+      std::string chars;
+      for (int col = 0; col < 16; col++) {
+        const int addr = base + col;
+        const uint8_t v = bytes[addr];
+        ImGui::SameLine(0.0f, col == 8 ? 9.0f : 4.0f);
+        const std::string s = hex(v, 2);
+        if (hot && *hot == addr) ImGui::TextColored(ACCENT, "%s", s.c_str());
+        else if (sp && *sp == addr) ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "%s", s.c_str());
+        else ImGui::TextUnformatted(s.c_str());
+        chars += (v >= 32 && v < 127) ? static_cast<char>(v) : '.';
+      }
+      ImGui::SameLine(0.0f, 12.0f);
+      ImGui::TextDisabled("%s", chars.c_str());
+    }
+  }
+  ImGui::EndChild();
+}
+
+// The whole 64K of data RAM, with the watch list above it. The address
+// field jumps, the buttons jump to the places a reader wants most, and
+// following the bus keeps the last access in view while stepping.
+void Ide::memoryPane(const char* name) {
+  ImGui::Begin(name);
+  memoryBody();
+  ImGui::End();
+}
+
+void Ide::memoryBody() {
   const Machine& m = computer_.machine();
   static char addrBuf[8] = "0000";
   ImGui::SetNextItemWidth(70);
-  if (ImGui::InputText("address", addrBuf, sizeof addrBuf,
+  if (ImGui::InputText("go to", addrBuf, sizeof addrBuf,
                        ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue)) {
-    memAddr_ = static_cast<int>(std::strtol(addrBuf, nullptr, 16)) & 0xff00;
+    memAddr_ = static_cast<int>(std::strtol(addrBuf, nullptr, 16)) & 0xfff0;
+    memJump_ = memAddr_;
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("<")) memAddr_ = std::max(0, memAddr_ - 256);
-  ImGui::SameLine();
-  if (ImGui::SmallButton(">")) memAddr_ = std::min(RAM_SIZE - 256, memAddr_ + 256);
-  ImGui::SameLine();
-  if (ImGui::SmallButton("zero page")) memAddr_ = 0;
+  if (ImGui::SmallButton("zero page")) memJump_ = memAddr_ = 0;
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("the first 256 bytes, the ones a one byte address reaches");
-  std::snprintf(addrBuf, sizeof addrBuf, "%04X", static_cast<unsigned>(memAddr_));
+  ImGui::SameLine();
+  if (ImGui::SmallButton("D1")) memJump_ = memAddr_ = m.d1 & 0xfff0;
+  ImGui::SameLine();
+  if (ImGui::SmallButton("D2")) memJump_ = memAddr_ = m.d2 & 0xfff0;
+  ImGui::SameLine();
+  if (ImGui::SmallButton("text screen")) memJump_ = memAddr_ = 0xFAC0;
+  ImGui::SameLine();
+  ImGui::Checkbox("follow the bus", &memFollow_);
+  std::optional<int> hot;
+  if (m.lastBus && (m.lastBus->kind == BusEvent::Kind::RamRead || m.lastBus->kind == BusEvent::Kind::RamWrite)) {
+    hot = static_cast<int>(m.lastBus->addr);
+    if (memFollow_ && !running_ && (*hot < memAddr_ || *hot >= memAddr_ + 256)) memJump_ = memAddr_ = *hot & 0xfff0;
+  }
 
   if (!watched_.empty()) {
     ImGui::Separator();
     ImGui::TextDisabled("watch");
     std::string remove;
-    for (const std::string& name : watched_) {
-      auto it = assembled_.labels.find(name);
+    for (const std::string& w : watched_) {
+      auto it = assembled_.labels.find(w);
       if (it == assembled_.labels.end()) continue;
       const int addr = it->second.value;
       const int byte = m.ram[static_cast<size_t>(addr & 0xffff)];
       const int word = wordAt(m, addr);
-      ImGui::PushID(name.c_str());
-      if (ImGui::SmallButton("x")) remove = name;
+      ImGui::PushID(w.c_str());
+      if (ImGui::SmallButton("x")) remove = w;
       ImGui::SameLine();
-      ImGui::Text("%-12s $%s  byte %s (%3d)  word %s", name.c_str(), hex(static_cast<unsigned>(addr), 4).c_str(),
+      ImGui::Text("%-12s $%s  byte %s (%3d)  word %s", w.c_str(), hex(static_cast<unsigned>(addr), 4).c_str(),
                   hex(static_cast<unsigned>(byte), 2).c_str(), byte, word < 0 ? "----" : hex(static_cast<unsigned>(word), 4).c_str());
       ImGui::PopID();
     }
     if (!remove.empty()) watched_.erase(std::find(watched_.begin(), watched_.end(), remove));
   }
   ImGui::Separator();
-  ImGui::BeginChild("hex");
-  // Bytes the last bus event touched light up, so a store is seen landing.
-  for (int row = 0; row < 16; row++) {
-    const int base = memAddr_ + row * 16;
-    ImGui::Text("%s:", hex(static_cast<unsigned>(base), 4).c_str());
-    for (int col = 0; col < 16; col++) {
-      const int addr = base + col;
-      ImGui::SameLine(0.0f, col == 8 ? 9.0f : 4.0f);
-      const bool hot = m.lastBus && (m.lastBus->kind == BusEvent::Kind::RamRead || m.lastBus->kind == BusEvent::Kind::RamWrite) &&
-                       static_cast<int>(m.lastBus->addr) == addr;
-      const std::string s = hex(m.ram[static_cast<size_t>(addr)], 2);
-      if (hot) ImGui::TextColored(ACCENT, "%s", s.c_str());
-      else ImGui::TextUnformatted(s.c_str());
-    }
-  }
-  ImGui::EndChild();
+  hexDump("hex", m.ram.data(), RAM_SIZE, memJump_, hot, std::nullopt);
+}
+
+// The stack: 4096 bytes, SP pointing at the next free cell and growing
+// down, so the live part is at the bottom. Following SP keeps it in view.
+void Ide::stackPane(const char* name) {
+  ImGui::Begin(name);
+  stackBody();
   ImGui::End();
 }
 
-// ---- breakpoints
+void Ide::stackBody() {
+  const Machine& m = computer_.machine();
+  ImGui::Text("SP %s   %d bytes in use of %d", hex(m.sp, 4).c_str(), STACK_TOP - m.sp, STACK_SIZE);
+  ImGui::SameLine();
+  ImGui::Checkbox("follow SP", &stackFollow_);
+  ImGui::SameLine();
+  if (ImGui::SmallButton("top")) stackJump_ = STACK_SIZE - 256;
+  std::optional<int> hot;
+  if (m.lastBus && (m.lastBus->kind == BusEvent::Kind::StackRead || m.lastBus->kind == BusEvent::Kind::StackWrite)) {
+    hot = static_cast<int>(m.lastBus->addr);
+  }
+  if (stackFollow_ && !running_) {
+    const int want = std::max(0, (static_cast<int>(m.sp) & 0xfff0) - 64);
+    if (want != stackShown_) stackJump_ = stackShown_ = want;
+  }
+  hexDump("stack", m.stack.data(), STACK_SIZE, stackJump_, hot, static_cast<int>(m.sp));
+}
 
 void Ide::breakpointsPane() {
   ImGui::Begin("Breakpoints");
