@@ -161,8 +161,51 @@ int intBytes(const std::string& length) {
 class Gen {
  public:
   Gen(const Unit& unit, bool softMul, const Profile* profile, int zpReserve, const Assets* assets)
-      : unit_(unit), softMul_(softMul), profile_(profile), zpReserve_(zpReserve) {
+      : unit_(hoistStatics(unit)), softMul_(softMul), profile_(profile), zpReserve_(zpReserve) {
     for (const RomEntry& e : layoutRom(unit.vars, assets)) romPlan_[e.name] = e;
+  }
+
+  // The label a function's static local lives under. It is a global with
+  // the function's name folded in, so two functions may each have a
+  // `static int n` and neither sees the other's. The `__st_` in the middle
+  // keeps it clear of the function's own `f__end` label.
+  static std::string staticLabel(const std::string& func, const std::string& name) {
+    return func + "__st_" + name;
+  }
+
+  // A static inside a function is a hidden global: it is laid down in .ram
+  // with its initializer, once, and it competes for the zero page like any
+  // other global. The unit is copied with those declarations appended, so
+  // the allocator sees them without knowing where they came from.
+  static Unit hoistStatics(const Unit& unit) {
+    Unit out = unit;
+    for (const FuncDecl& f : unit.funcs) {
+      if (!f.body) continue;
+      std::function<void(const StmtPtr&)> walk = [&](const StmtPtr& s) {
+        if (!s) return;
+        switch (s->k) {
+          case StmtKind::Var:
+            if (s->decl.storage == Storage::Static) {
+              VarDecl v = s->decl;
+              v.name = staticLabel(f.name, s->decl.name);
+              for (const VarDecl& seen : out.vars) {
+                if (seen.name == v.name) fail(v.pos, "static " + s->decl.name + " is declared twice in " + f.name);
+              }
+              v.storage = Storage::Auto;
+              out.vars.push_back(v);
+            }
+            break;
+          case StmtKind::Block: for (const StmtPtr& x : s->body) walk(x); break;
+          case StmtKind::If: walk(s->t); walk(s->f); break;
+          case StmtKind::While: case StmtKind::Do: walk(s->loopBody); break;
+          case StmtKind::For: walk(s->init); walk(s->loopBody); break;
+          case StmtKind::Switch: for (const SwitchCase& c : s->cases) for (const StmtPtr& x : c.body) walk(x); break;
+          default: break;
+        }
+      };
+      walk(f.body);
+    }
+    return out;
   }
 
   // DESIGN: two passes over the body, and the reason is a chicken and egg.
@@ -184,7 +227,7 @@ class Gen {
   }
 
  private:
-  const Unit& unit_;
+  const Unit unit_;
   bool softMul_;
   const Profile* profile_;
   // Bytes at the start of the zero page the program keeps for itself.
@@ -542,7 +585,11 @@ class Gen {
     std::function<void(const StmtPtr&)> walk = [&](const StmtPtr& s) {
       if (!s) return;
       switch (s->k) {
-        case StmtKind::Var: locals += sizeOf(s->decl.type); break;
+        case StmtKind::Var:
+          // A static local is a global under another label and takes no
+          // frame room.
+          if (s->decl.storage != Storage::Static) locals += sizeOf(s->decl.type);
+          break;
         case StmtKind::Block: for (const StmtPtr& x : s->body) walk(x); break;
         case StmtKind::If: walk(s->t); walk(s->f); break;
         case StmtKind::While: case StmtKind::Do: walk(s->loopBody); break;
@@ -643,6 +690,17 @@ class Gen {
                           "that a static local in a function that recurses is a bug rather than a speed-up.");
         }
         if (isWide(d.type) && !isFloat(d.type)) noWide(d.type, d.pos, "local");
+        if (d.storage == Storage::Static) {
+          // Declared as a hidden global by hoistStatics, initialised from
+          // the RAM image once, so nothing runs here. The scope maps the
+          // local name onto that global's label.
+          auto g = globals_.find(staticLabel(fn_->name, d.name));
+          if (g == globals_.end()) fail(d.pos, d.name + " is not declared");
+          Sym sym = g->second;
+          sym.name = d.name;
+          scopes_.back()[d.name] = sym;
+          return;
+        }
         const int size = sizeOf(d.type);
         Sym sym{d.name, d.name, d.type, Sym::Where::Frame, frameCursor_, 0};
         frameCursor_ += size;
@@ -1694,13 +1752,22 @@ class Gen {
     if (e.args.empty()) fail(e.pos, "gpu_printf needs a format: gpu_printf(\"score %u\", n)");
     const ExprPtr& fmt = e.args[0];
     std::optional<std::vector<int>> widths;
+    // Which conversions read a real number. An int under one of those is
+    // widened to a double, the way C's promotion of a vararg would.
+    std::vector<bool> real;
     std::string label;
 
     if (fmt->k == ExprKind::Str) {
       // A string literal handed to gpu_printf goes to the cartridge on its
-      // own, which is what makes the common call read like C.
-      label = romLiteral(fmt->bytes);
-      widths = templateArgWidths(fmt->bytes);
+      // own, which is what makes the common call read like C. Every float
+      // conversion in it is widened to the l length first: a double is the
+      // only real number this C has, so %f and %lf both take one, and the
+      // device reads four bytes for %f. Widening the template keeps the
+      // device's reading and C's meaning in step.
+      const std::vector<uint8_t> tmpl = widenFloatSpecs(fmt->bytes);
+      label = romLiteral(tmpl);
+      widths = templateArgWidths(tmpl);
+      real = templateFloatConvs(tmpl);
       const int given = static_cast<int>(e.args.size()) - 1;
       const int n = static_cast<int>(widths->size());
       if (n != given) {
@@ -1717,13 +1784,27 @@ class Gen {
     }
 
     // Widths from the format when it is known, and from the argument types
-    // otherwise. The two agree in every program that is right.
+    // otherwise. The two agree in every program that is right. A double is
+    // eight bytes either way, so a __ROM template prints one with %lf.
     std::vector<int> sizes;
     if (widths) sizes = *widths;
-    else for (size_t i = 1; i < e.args.size(); i++) sizes.push_back(std::min(sizeOf(typeOf(e.args[i])), 2));
+    else for (size_t i = 1; i < e.args.size(); i++) {
+      const CType t = typeOf(e.args[i]);
+      sizes.push_back(isFloat(t) ? DSIZE : std::min(sizeOf(t), 2));
+      real.push_back(isFloat(t));
+    }
     int at = 0;
     for (size_t i = 1; i < e.args.size(); i++) {
       const int w = i - 1 < sizes.size() ? sizes[i - 1] : 2;
+      const bool isReal = i - 1 < real.size() && real[i - 1];
+      if (w == DSIZE && (isReal || isFloat(typeOf(e.args[i])))) {
+        // The eight IEEE bytes, big-endian, straight from the double slot
+        // the expression left them in. An int under %lf is widened first.
+        genDouble(e.args[i], 0, slot);
+        moveConst(emitter(), S(PRINTF_ARGS) + " + " + S(at), slotAt(0));
+        at += w;
+        continue;
+      }
       const CType t = genExpr(e.args[i], slot);
       // A value wider than the machine's int is zero filled to what the
       // format reads, high bytes first, which is how the device reads it.
@@ -2034,18 +2115,40 @@ namespace {
 // other keeps its own palette, which .image in assembly loads on request.
 // C has no such step, so each pixel goes to the nearest machine colour and
 // index 0, the transparent one, stays 0.
-ImageAsset onMachinePalette(ImageAsset img) {
+//
+// A black pixel is a drawn pixel, so it must not land on index 0. It goes
+// to the palette's other black entry when it has one, and to index 1 when
+// it does not. The default 3-3-2 palette has black at 0 only, so a black
+// pixel comes out as index 1, dark blue. `blackDrawn` says whether any did.
+ImageAsset onMachinePalette(ImageAsset img, bool* blackDrawn = nullptr) {
   const std::vector<uint8_t> machine = machinePalette();
   if (img.palette.size() != 768 || img.palette == machine) return img;
+  uint8_t black = 1;
+  for (size_t i = 1; i < 256; i++) {
+    if (machine[i * 3] == 0 && machine[i * 3 + 1] == 0 && machine[i * 3 + 2] == 0) {
+      black = static_cast<uint8_t>(i);
+      break;
+    }
+  }
   std::array<uint8_t, 256> map{};
+  std::array<bool, 256> wasBlack{};
   for (size_t i = 1; i < 256; i++) {
     map[i] = nearestIndex(machine, img.palette[i * 3], img.palette[i * 3 + 1], img.palette[i * 3 + 2]);
-    if (map[i] == 0) map[i] = 1;  // a black pixel is drawn, not skipped
+    if (map[i] == 0) { map[i] = black; wasBlack[i] = true; }
   }
-  for (uint8_t& p : img.pixels) p = map[p];
+  for (uint8_t& p : img.pixels) {
+    if (wasBlack[p] && blackDrawn) *blackDrawn = true;
+    p = map[p];
+  }
   img.palette = machine;
   return img;
 }
+
+// The remark a sprite with black pixels earns, so the dark blue background
+// on the screen has an explanation in the build's notes.
+constexpr const char* SPRITE_BLACK_NOTE =
+    "black pixels in a sprite are drawn as index 1 and look dark blue; use a transparent background for the "
+    "parts that should not draw";
 
 std::vector<uint8_t> assetBytes(const VarDecl& v, const AssetInit& a, const Assets* assets) {
   const std::string& name = a.name;
@@ -2090,7 +2193,9 @@ std::vector<uint8_t> assetBytes(const VarDecl& v, const AssetInit& a, const Asse
       if (a.frames > gpu::SPRITE_FRAMES_MAX) {
         fail(v.pos, name + ": __sprite takes at most " + std::to_string(gpu::SPRITE_FRAMES_MAX) + " frames");
       }
-      const ImageAsset img = onMachinePalette(find(assets->images, assets->loadImage));
+      bool blackDrawn = false;
+      const ImageAsset img = onMachinePalette(find(assets->images, assets->loadImage), &blackDrawn);
+      if (blackDrawn && assets->note) assets->note(name, SPRITE_BLACK_NOTE);
       if (img.width < 1 || img.height < 1 || img.width % a.frames != 0) {
         fail(v.pos, name + ": " + std::to_string(img.width) + " pixels wide does not divide into " +
                         std::to_string(a.frames) + " frames for __sprite");
@@ -2181,6 +2286,39 @@ std::vector<uint8_t> romBytesOf(const VarDecl& v, const Assets* assets) {
     return b;
   }
   push(out, constNow(v.init->one, v.pos));
+  return out;
+}
+
+std::vector<bool> templateFloatConvs(const std::vector<uint8_t>& tmpl) {
+  std::vector<bool> out;
+  size_t p = 0;
+  while (p < tmpl.size()) {
+    if (tmpl[p] != '%') { p++; continue; }
+    const auto spec = parseSpec(tmpl, p + 1);
+    if (!spec) { p++; continue; }
+    p = spec->next;
+    if (spec->conv == '%') continue;
+    out.push_back(std::string_view("fFeEgG").find(spec->conv) != std::string_view::npos);
+  }
+  return out;
+}
+
+std::vector<uint8_t> widenFloatSpecs(const std::vector<uint8_t>& tmpl) {
+  std::vector<uint8_t> out;
+  size_t p = 0;
+  while (p < tmpl.size()) {
+    if (tmpl[p] != '%') { out.push_back(tmpl[p++]); continue; }
+    const auto spec = parseSpec(tmpl, p + 1);
+    if (!spec) { out.push_back(tmpl[p++]); continue; }
+    const bool isFloatConv = std::string_view("fFeEgG").find(spec->conv) != std::string_view::npos;
+    // spec->next is one past the conversion letter, so the letter is the
+    // byte before it. An l goes in front of it when the spec has no length.
+    const size_t convAt = spec->next - 1;
+    out.insert(out.end(), tmpl.begin() + static_cast<long>(p), tmpl.begin() + static_cast<long>(convAt));
+    if (isFloatConv && spec->length.empty()) out.push_back('l');
+    out.push_back(tmpl[convAt]);
+    p = spec->next;
+  }
   return out;
 }
 

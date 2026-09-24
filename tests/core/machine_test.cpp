@@ -86,6 +86,42 @@ TEST_SUITE("row semantics") {
     CHECK_EQ(m.crash->kind, CrashKind::SignalConflict);
     CHECK(m.crash->message.find("rule 7") != std::string::npos);
   }
+
+  TEST_CASE("a row that passes every rule and writes nine registers runs") {
+    // This row used to overflow the fixed write list, which held eight, and
+    // the machine crashed for real. It passes the rules: one writer per
+    // atom, one access per memory, one ALU select and one step.
+    const Row r = rowOf({"PC_INC", "FETCH", "ACC_TO_A", "IMM_TO_B", "RAM_TO_D1H", "ADDR_OP8", "STK_TO_D1L",
+                         "IO_READ_D2H", "ALU_PASS_B", "ACC_LOAD_ALU", "FLAGS_LOAD"});
+    REQUIRE(!checkRow(r));
+    Machine m = bare();
+    m.pc = 0;
+    m.acc = 0x21;
+    m.irOperand = 0x0407;
+    m.ram[7] = 0x5a;
+    m.stack[m.sp] = 0xa5;
+    CHECK(m.executeRow(r));
+    CHECK_EQ(m.status, Status::Running);
+    CHECK_EQ(m.pc, 1);
+    CHECK_EQ(m.aLatch, 0x21);
+    CHECK_EQ(m.bLatch, 0x07);
+    CHECK_EQ(m.d1, 0x5aa5);
+  }
+
+  TEST_CASE("a row that writes ten atoms, the most the rules let through, runs") {
+    // Every atom but D2L has a writer here that steps nothing and shares
+    // no memory with another, and no signal writes D2L on its own without
+    // one of those. So this is as wide as a legal row gets.
+    const Row wide = rowOf({"PC_LOAD", "FETCH", "ACC_TO_A", "IMM_TO_B", "ALU_PASS_B", "ACC_LOAD_ALU", "FLAGS_LOAD",
+                            "RAM_TO_D1H", "ADDR_OP8", "STK_TO_D1L", "IO_READ_D2H", "SP_DEC"});
+    REQUIRE(!checkRow(wide));
+    Machine m = bare();
+    m.irOperand = 0x0102;
+    CHECK(m.executeRow(wide));
+    CHECK_EQ(m.status, Status::Running);
+    CHECK_EQ(m.pc, 0x0102);
+    CHECK_EQ(m.sp, STACK_TOP - 1);
+  }
 }
 
 TEST_SUITE("ALU flags") {

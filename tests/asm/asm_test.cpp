@@ -552,6 +552,87 @@ TEST_SUITE("constant expressions in source") {
   }
 }
 
+TEST_SUITE("every registry name resolves wherever a number does") {
+  // The old tool let a port name stand only as a port and a command name
+  // only as an OUT value, so a command that had to travel through A was
+  // written as its number. The three kinds now resolve alike.
+  TEST_CASE("a command name is an immediate") {
+    CHECK_EQ(ok("        LD A <- CMD_CLEAR").program[0].operand, *commandNamed("CMD_CLEAR"));
+  }
+
+  TEST_CASE("a command name joins an expression after the comma") {
+    CHECK_EQ(ok("        OUT GPU_DATA0, CMD_CLEAR + 1").program[0].operand & 0xff, *commandNamed("CMD_CLEAR") + 1);
+  }
+
+  TEST_CASE("a port name is a number too, in an immediate and in data") {
+    CHECK_EQ(ok("        LD A <- GPU_CMD").program[0].operand, *portNamed("GPU_CMD"));
+    Assembled r = ok(".ram\np:      db GPU_CMD, CMD_CLEAR\nw:      dw ACP_ADDR_LO + BTN_FIRE");
+    const size_t at = static_cast<size_t>(r.labels.at("p").value);
+    CHECK_EQ(r.ram[at], *portNamed("GPU_CMD"));
+    CHECK_EQ(r.ram[at + 1], *commandNamed("CMD_CLEAR"));
+    const size_t w = static_cast<size_t>(r.labels.at("w").value);
+    CHECK_EQ((r.ram[w] << 8) | r.ram[w + 1], *portNamed("ACP_ADDR_LO") + *systemConstant("BTN_FIRE"));
+  }
+
+  TEST_CASE("a command name folds in a count and a label expression") {
+    Assembled r = ok("        LD D1 <- block + CMD_CLEAR\n        HLT\n.ram\nblock:  ds CMD_CLEAR + 2");
+    CHECK_EQ(r.program[0].operand, r.labels.at("block").value + *commandNamed("CMD_CLEAR"));
+    CHECK_EQ(r.ramLength, static_cast<size_t>(*commandNamed("CMD_CLEAR") + 2));
+  }
+}
+
+TEST_SUITE(".equ names a number") {
+  TEST_CASE("resolves as an immediate, in a port, in an OUT value, in data and in a count") {
+    Assembled r = ok(
+        ".equ SHIP, 3\n"
+        ".equ PORT, GPU_DATA0 + 1\n"
+        ".equ ROOM, SHIP * 4\n"
+        "        LD A <- SHIP\n"
+        "        OUT PORT, SHIP + 1\n"
+        "        OUT GPU_DATA0, SHIP\n"
+        "        LD D1 <- buf + SHIP\n"
+        "        HLT\n"
+        ".ram\n"
+        "buf:    ds ROOM\n"
+        "n:      db SHIP, ROOM\n"
+        "fixed:  .addr(ROOM)\n");
+    CHECK_EQ(r.program[0].operand, 3);
+    CHECK_EQ(r.program[1].operand >> 8, *portNamed("GPU_DATA1"));
+    CHECK_EQ(r.program[1].operand & 0xff, 4);
+    CHECK_EQ(r.program[2].operand & 0xff, 3);
+    CHECK_EQ(r.program[3].operand, r.labels.at("buf").value + 3);
+    const size_t n = static_cast<size_t>(r.labels.at("n").value);
+    CHECK_EQ(n, 12u);
+    CHECK_EQ(r.ram[n], 3);
+    CHECK_EQ(r.ram[n + 1], 12);
+    CHECK_EQ(r.labels.at("fixed").value, 12);
+  }
+
+  TEST_CASE("is good in a get_ macro and in a dereference") {
+    Assembled r = ok(".equ OFF, 2\n        LD A <- [zp + OFF]\n        OUT GPU_DATA2, get_lowbyte(blob + OFF)\n        HLT\n"
+                     ".ram\nzp:     ds 4\n.data\nblob:   db 1,2,3,4");
+    CHECK_EQ(r.program[0].operand, r.labels.at("zp").value + 2);
+    CHECK_EQ(r.program[1].operand & 0xff, (r.labels.at("blob").value + 2) & 0xff);
+  }
+
+  TEST_CASE("a second definition is an error, either way round") {
+    CHECK_EQ(firstError(".equ N, 1\n.equ N, 2"), "duplicate label: N");
+    CHECK_EQ(firstError(".equ N, 1\nN:      HLT"), "duplicate label: N");
+    CHECK_EQ(firstError("N:      HLT\n.equ N, 1"), "duplicate label: N");
+  }
+
+  TEST_CASE("refuses a machine constant's name, a label in the value and a missing value") {
+    CHECK(has(firstError(".equ CMD_CLEAR, 1"), "machine's own constants"));
+    CHECK(has(firstError(".equ N, buf + 1\n.ram\nbuf: db 0"), "not a label"));
+    CHECK(has(firstError(".equ N"), ".equ needs"));
+    CHECK(has(firstError(".equ 9, 1"), ".equ needs a name"));
+  }
+
+  TEST_CASE("an undefined name still says so") {
+    CHECK_EQ(firstError("        LD A <- NOPE"), "undefined label: NOPE");
+  }
+}
+
 TEST_SUITE("the ROM") {
   TEST_CASE("an assembly burns to a ROM that decodes back to the same thing") {
     Assets assets;

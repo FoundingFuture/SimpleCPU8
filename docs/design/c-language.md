@@ -171,6 +171,14 @@ gpu_printf("SCORE %u LIVES %hhu", score, lives);
 An int is 16 bits, so `%d` reads two bytes, `%hhu` one, `%lu` four and
 `%llu` eight. The compiler counts the conversions against the arguments.
 
+A double goes as its eight IEEE bytes, big-endian, under `%f`, `%e` or
+`%g`. The device reads a four byte float for a bare `%f` and eight
+bytes with the `l` length, and C has no four byte real, so the compiler
+writes the `l` into the template's cartridge copy. `printf("%f", d)`
+and `printf("%lf", d)` are the same call. An int under one of those
+conversions is widened to a double first. A `__ROM` template is sent as
+written, so spell it `%lf` there.
+
 `sys.h` also has `memcpy`, `memmove`, `memset`, `peek`, `poke`, `rom_copy`,
 `rand`, `srand`, `wait_frame` and `halt`. The block moves are one GPU
 command each rather than a loop.

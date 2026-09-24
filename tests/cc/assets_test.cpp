@@ -1,5 +1,6 @@
 #include <doctest.h>
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -350,5 +351,61 @@ TEST_SUITE("C images land on the machine palette") {
     CHECK_EQ(b[2], 0);
     CHECK_EQ(b[3], nearestIndex(machine, 250, 0, 0));
     CHECK_NE(b[4], 0);
+  }
+
+  // A picture with an off-palette colour keeps its own palette through the
+  // loader, and black in it is then a drawn pixel, index 1 on the default
+  // palette, which has no other black. The note says so, once per sprite.
+  ImageAsset blackBacked() {
+    ImageAsset img;
+    img.width = 2;
+    img.height = 1;
+    img.pixels = {1, 2};
+    img.palette.assign(768, 0);
+    // Entry 1 is black, entry 2 an off-palette pink.
+    img.palette[6] = 250;
+    img.palette[7] = 120;
+    img.palette[8] = 130;
+    return img;
+  }
+
+  TEST_CASE("a black pixel in a sprite is drawn as index 1 and the build is told") {
+    Assets a;
+    a.images["ship.png"] = blackBacked();
+    std::vector<std::string> notes;
+    // The layout is worked out more than once in a build, so the remark
+    // arrives more than once and the receiver keeps one, as a project does.
+    a.note = [&](std::string_view name, const std::string& note) {
+      const std::string line = std::string(name) + ": " + note;
+      if (std::find(notes.begin(), notes.end(), line) == notes.end()) notes.push_back(line);
+    };
+    const cc::Program p = prog("__ROM const unsigned char ship[] = __sprite(\"ship.png\");\nint main(void) { return 0; }", a);
+    const std::vector<uint8_t> b = bytesOf(p, "ship");
+    REQUIRE_EQ(b.size(), 5u);
+    CHECK_EQ(b[3], 1);
+    REQUIRE_EQ(notes.size(), 1u);
+    CHECK(notes[0].starts_with("ship.png: black pixels in a sprite are drawn as index 1 and look dark blue"));
+    CHECK(has(notes[0], "transparent background"));
+  }
+
+  TEST_CASE("an image with black says nothing: nothing is skipped in a blit") {
+    Assets a;
+    a.images["pic.png"] = blackBacked();
+    std::vector<std::string> notes;
+    a.note = [&](std::string_view, const std::string& note) { notes.push_back(note); };
+    const cc::Program p = prog("__ROM const unsigned char pic[] = __image(\"pic.png\");\nint main(void) { return 0; }", a);
+    CHECK_EQ(bytesOf(p, "pic")[2], 1);
+    CHECK(notes.empty());
+  }
+
+  TEST_CASE("a sprite with no black pixel earns no note") {
+    Assets a;
+    ImageAsset img = blackBacked();
+    img.pixels = {2, 2};
+    a.images["ship.png"] = img;
+    std::vector<std::string> notes;
+    a.note = [&](std::string_view, const std::string& note) { notes.push_back(note); };
+    prog("__ROM const unsigned char ship[] = __sprite(\"ship.png\");\nint main(void) { return 0; }", a);
+    CHECK(notes.empty());
   }
 }

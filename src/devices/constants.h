@@ -11,9 +11,9 @@
 
 namespace sc8 {
 
-// A port name resolves in a port operand and in a port expression. A
-// command name resolves in an OUT value. A system constant resolves
-// anywhere a number does.
+// The kind says which table a name came from, for the manual's grouping.
+// The assembler and the C compiler resolve every kind anywhere a number
+// does.
 enum class ConstantKind { Port, Command, System };
 
 struct NamedConstant {

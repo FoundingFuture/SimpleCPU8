@@ -302,10 +302,12 @@ the body once before testing. `break` leaves a loop and `continue`
 skips to the next turn. `switch` picks one of many `case` labels.
 
 `tally` remembers between calls through a global. A `static` variable
-inside a function does not keep its value on this compiler. It behaves
-like an ordinary local, so use a global for a count that must survive.
-`static` on a global or a function is different and works: it hides the
-name from other files in the project.
+inside a function does the same and keeps the name private to the
+function: `static int calls = 0;` inside `tally` starts at zero once
+and survives every return. The compiler lays it out in RAM as a
+global with a private name, so a static in a function that calls itself
+is one variable shared by every level. `static` on a global or a function
+hides the name from other files in the project.
 
 A function's locals must fit in 255 bytes together. A local array bigger
 than that is refused with a message that says to make it a global.
@@ -426,13 +428,6 @@ double area(double r)
     return PI * r * r;
 }
 
-/* Prints a double with two decimals. printf has no %f on this machine. */
-void putd(double v)
-{
-    int hundredths = (int)(v * 100);
-    printf("%d.%02d", hundredths / 100, hundredths % 100);
-}
-
 int main(void)
 {
     double d = 10.0 / 4.0;
@@ -440,15 +435,11 @@ int main(void)
     int x;
     int y;
     at(1, 1);
-    printf("10.0 / 4.0 IS ");
-    putd(d);
-    printf(", CUT TO %d", (int)d);
+    printf("10.0 / 4.0 IS %.2f, CUT TO %d", d, (int)d);
     at(1, 2);
-    printf("SQRT(2) IS ");
-    putd(sqrt(2.0));
+    printf("SQRT(2) IS %.2f", sqrt(2.0));
     at(1, 3);
-    printf("AREA OF RADIUS 3 IS ");
-    putd(area(3.0));
+    printf("AREA OF RADIUS 3 IS %.2f", area(3.0));
     setcolor(CYAN);
     for (deg = 0; deg < 360; deg = deg + 10) {
         x = 128 + (int)(cos(radians(deg)) * 80);
@@ -468,10 +459,9 @@ AREA OF RADIUS 3 IS 28.27
 Below the text, 36 dots stand in a circle. `cos` and `sin` come from
 `math.h` and run on the coprocessor too.
 
-`printf` cannot print a double. `%f` prints `0.000000` whatever you
-pass, because the compiler hands the device an int where the format
-wants a float. `putd` above is the way round: scale to hundredths, cut
-to an int, and print the two halves.
+`printf` prints a double with `%f`, `%e` or `%g`, and `%.2f` sets the
+decimals as in C. `%lf` is the same thing. An int given to `%f` is
+turned into a double first.
 
 The remainder `%` and the bit operators do not work on a double. The
 error names the four operations that do. A double literal needs a
@@ -493,14 +483,11 @@ error that names the alternative. The ones a C programmer meets first:
 | `char buf[300];` inside a function | the same array as a global |
 | `#include <stdio.h>` | `graphics.h` for `printf`, nothing for the rest |
 | `ship[0]` on a `__ROM` object | `rom_copy(buf, ROM_ship, ROM_ship_SIZE)` |
-| `static int n;` inside a function | a global |
-| a double in `printf("%f")` | `(int)(v * 100)` and two `%d` |
-| a comma inside a string given to `print` | `printf` |
+| `void show(int n)` with `graphics.h` included | another name, since `show` is one of its macros |
 
-The last one is a preprocessor limit. `print("A, B")` is a macro whose
-argument is split at the comma, so the message says two arguments were
-given. `printf` is not a macro with arguments and takes the string as it
-is.
+The last one names the header in its message. `show`, `image`, `sample`
+and `loop` are macros there, and a function cannot share a macro's
+name while the header is in.
 
 `typedef` works at file scope, so `typedef unsigned char byte;` is
 fine. `#define`, `#if` and `#ifdef` work. `//` comments work beside
@@ -782,9 +769,10 @@ its size. Those names are what the library calls take.
 
 Draw a ship of two frames, 16 by 16 each, as one PNG 32 wide with a
 transparent background. Transparent pixels become colour 0, which the
-chip skips. A black background is drawn, not skipped, so use
-transparency. Draw a small picture called `hill.png` and record or
-generate `ping.wav`. Then:
+chip skips. A black background is drawn, not skipped. Black becomes
+colour 1 on the machine palette, a dark blue, and the build notes say
+so. Use transparency for the parts that should not draw. Draw a small picture
+called `hill.png` and record or generate `ping.wav`. Then:
 
 ```c
 #include <graphics.h>
@@ -949,7 +937,7 @@ come up most:
 | `main needs a frame of 300 bytes and a frame reaches 255` | a local array too big, so make it global |
 | `pic is __ROM and cannot be read from C` | use `rom_copy` |
 | `cannot find <stdio.h>` | the message lists the headers that exist |
-| `print takes 1 argument and 2 were given` | a comma inside the string, so use `printf` |
+| `show is a macro from graphics.h` | a function named like a macro, so rename it or leave the header out |
 
 A program that compiles and shows nothing has usually returned from
 `main` before drawing, or is waiting in `waitkey()`. A program that

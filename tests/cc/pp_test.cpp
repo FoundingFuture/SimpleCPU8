@@ -210,3 +210,49 @@ TEST_SUITE("defines handed in from the build line") {
     CHECK(has(text("#ifdef SOFT_MUL\nint yes;\n#endif", o), "yes"));
   }
 }
+
+TEST_SUITE("a macro's arguments are split the way C splits them") {
+  TEST_CASE("keeps a comma inside a string literal in one argument") {
+    CHECK(has(text("#define print(s) puts(s)\nprint(\"A, B\");"), "puts((\"A, B\"));"));
+  }
+
+  TEST_CASE("keeps a comma inside a character literal") {
+    CHECK(has(text("#define put(c) out(c)\nput(',');"), "out((','));"));
+  }
+
+  TEST_CASE("keeps a parenthesis inside a string from counting") {
+    CHECK(has(text("#define print(s) puts(s)\nprint(\"a)\");"), "puts((\"a)\"));"));
+    CHECK(has(text("#define two(a, b) f(a, b)\ntwo(\"(\", 1);"), "f((\"(\"), (1));"));
+  }
+
+  TEST_CASE("still splits a comma outside the string, and inside parentheses not at all") {
+    CHECK(has(text("#define two(a, b) f(a, b)\ntwo(\"x\", g(1, 2));"), "f((\"x\"), (g(1, 2)));"));
+  }
+
+  TEST_CASE("honours an escaped quote inside the string") {
+    CHECK(has(text("#define print(s) puts(s)\nprint(\"say \\\"hi, there\\\"\");"),
+              "puts((\"say \\\"hi, there\\\"\"));"));
+  }
+}
+
+TEST_SUITE("a function cannot be named like a function-like macro") {
+  const auto g = headers({{"graphics.h", "#define show(n) gpu_sprite_show(n)\n#define BLACK 0"}});
+
+  TEST_CASE("names the macro and its header at the definition") {
+    CHECK(boom("#include <graphics.h>\nvoid show(int n) { }", g) ==
+          "show is a macro from graphics.h; a function of that name needs the header left out or another name");
+  }
+
+  TEST_CASE("catches a prototype and a pointer return too") {
+    CHECK(has(boom("#include <graphics.h>\nstatic unsigned char *show(int n);", g), "show is a macro"));
+  }
+
+  TEST_CASE("leaves a call alone, and an object-like macro alone") {
+    CHECK(has(text("#include <graphics.h>\nint main(void) { show(1); return 0; }", g), "gpu_sprite_show((1))"));
+    CHECK(has(text("#include <graphics.h>\nint BLACK(void);", g), "int 0(void);"));
+  }
+
+  TEST_CASE("says nothing without the header") {
+    CHECK(has(text("void show(int n) { }"), "void show(int n) { }"));
+  }
+}

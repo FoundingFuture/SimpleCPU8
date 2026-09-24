@@ -705,6 +705,7 @@ The data directives:
 | `ds 64` | 64 zero bytes |
 | `name: .addr($10)` | a `.ram` label at a chosen address, placing nothing |
 | `.org 4096` | in `.code`, the next instruction goes in slot 4096 |
+| `.equ SHIP, 3` | names a number, placing nothing |
 
 `db` and `dw` switch the width for the rest of the line, so `db 5, dw
 &next` places a byte and a word. A `.org` leaves a gap of unloaded
@@ -722,9 +723,12 @@ addresses, in `ds`, `.org`, `.addr` and a port operand, must fold in
 the first pass, so it cannot hold a label.
 
 A value that does not fit is an error, with the number in the message:
-`value 300 does not fit in a byte`. The assembler has no directive that
-names a constant. A number used in ten places is written ten times, or
-placed once in `.ram` with a label and loaded.
+`value 300 does not fit in a byte`. `.equ NAME, expr` names a number
+used in many places. The expression folds where it is written, so it
+can hold numbers and registry names but not a label. The name then
+goes anywhere a number goes, a port and a count included. A `.equ`
+name defined twice, or defined as a label as well, gives `duplicate
+label`.
 
 Five macros split a value into the bytes a port wants. `get_lowbyte(x)`
 is the low byte, `get_highbyte(x)` the next and `get_bankbyte(x)` bits
@@ -749,14 +753,11 @@ before, as the sprite chapter shows.
 
 Every port name, command name, button bit and mode number lives in one
 registry. The devices publish it and the assembler reads it. The same
-names are C constants in the machine headers. A port name resolves in a
-port operand and in a port expression, so `ACP_ADDR_HI + 1` is
-`ACP_ADDR_LO`. A command name resolves as an `OUT` value, and nowhere
-else. `LD A <- CMD_CLEAR` is refused with `undefined label`, and so is
-`CMD_CLEAR + 1` after the comma. A command that has to travel through
-`A` is written as its number. The button bits, the modes and the
-coprocessor's types resolve anywhere a number does. The IDE's manual
-pane lists them all by device.
+names are C constants in the machine headers. Every name resolves
+anywhere a number does, in a port operand, an immediate, a data byte or
+an expression. `ACP_ADDR_HI + 1` is `ACP_ADDR_LO`, `LD A <- CMD_CLEAR`
+loads the command's number, and `CMD_CLEAR + 1` works after the comma.
+The IDE's manual pane lists them all by device.
 
 ## Ports
 

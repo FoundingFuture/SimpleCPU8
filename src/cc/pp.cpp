@@ -1,5 +1,6 @@
 #include "cc/pp.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -21,27 +22,53 @@ std::string trim(std::string_view s) {
   return std::string(s.substr(a, b - a));
 }
 
-// Split a macro's argument list on commas at depth zero.
+// The index one past the string or character literal that opens at s[i],
+// or i + 1 when s[i] opens nothing. A backslash escapes the next byte.
+size_t skipLiteral(const std::string& s, size_t i) {
+  const char q = s[i];
+  if (q != '"' && q != '\'') return i + 1;
+  size_t j = i + 1;
+  while (j < s.size() && s[j] != q) j += s[j] == '\\' ? 2u : 1u;
+  return std::min(j + 1, s.size());
+}
+
+// Split a macro's argument list on commas at depth zero. A comma inside a
+// string or character literal is text, and so is a parenthesis there:
+// print("A, B") is one argument.
 std::vector<std::string> splitArgs(const std::string& s) {
   std::vector<std::string> out;
   int depth = 0;
   std::string cur;
-  for (char c : s) {
+  size_t i = 0;
+  while (i < s.size()) {
+    const char c = s[i];
+    if (c == '"' || c == '\'') {
+      const size_t end = skipLiteral(s, i);
+      cur += s.substr(i, end - i);
+      i = end;
+      continue;
+    }
     if (c == '(') depth++;
     if (c == ')') depth--;
-    if (c == ',' && depth == 0) { out.push_back(trim(cur)); cur.clear(); continue; }
+    if (c == ',' && depth == 0) { out.push_back(trim(cur)); cur.clear(); i++; continue; }
     cur += c;
+    i++;
   }
   if (!trim(cur).empty() || !out.empty()) out.push_back(trim(cur));
   return out;
 }
 
-// Find the matching ")" for the "(" at `from`. Returns npos when there is none.
+// Find the matching ")" for the "(" at `from`, skipping literals. Returns
+// npos when there is none.
 size_t matchParen(const std::string& s, size_t from) {
   int depth = 0;
-  for (size_t i = from; i < s.size(); i++) {
-    if (s[i] == '(') depth++;
-    else if (s[i] == ')') { depth--; if (depth == 0) return i; }
+  size_t i = from;
+  while (i < s.size()) {
+    const char c = s[i];
+    if (c == '"' || c == '\'') { i = skipLiteral(s, i); continue; }
+    if (c == '(') depth++;
+    else if (c == ')') { depth--; if (depth == 0) return i; }
+    i++;
   }
   return std::string::npos;
 }
@@ -282,6 +309,7 @@ void Preprocessor::file(const std::string& src, const std::string& fileName) {
     const std::string trimmed = trim(text);
 
     if (!trimmed.starts_with("#")) {
+      if (live()) refuseMacroDefinition(trimmed, fileName, lineNo);
       if (live()) out_.push_back({expand(trimmed, fileName, lineNo), fileName, lineNo});
       else out_.push_back({"", fileName, lineNo});
       continue;
@@ -375,11 +403,44 @@ void Preprocessor::define(const std::string& rest, const std::string& fileName, 
           start = comma + 1;
         }
       }
-      macros_[name] = Macro{params, trim(rest.substr(close + 1))};
+      macros_[name] = Macro{params, trim(rest.substr(close + 1)), fileName};
       return;
     }
   }
-  macros_[name] = Macro{std::nullopt, trim(rest.substr(name.size()))};
+  macros_[name] = Macro{std::nullopt, trim(rest.substr(name.size())), fileName};
+}
+
+// `int show(int n)` with show a function-like macro from a header would
+// expand into nonsense and the parser would then say "expected a name",
+// which points nowhere. The line is looked at before it expands: a type,
+// then a name that is a function-like macro, then "(", is a definition or
+// a prototype of a function that cannot have that name while the header
+// is in.
+void Preprocessor::refuseMacroDefinition(const std::string& text, const std::string& fileName, int line) {
+  static const std::set<std::string> TYPE_WORDS = {
+      "static", "extern", "inline", "const", "unsigned", "signed", "short", "long",
+      "int", "char", "void", "double", "float"};
+  size_t i = 0;
+  int words = 0;
+  std::string last;
+  for (;;) {
+    while (i < text.size() && isSpace(text[i])) i++;
+    while (i < text.size() && text[i] == '*') { i++; while (i < text.size() && isSpace(text[i])) i++; }
+    const std::string id = identAt(text, i);
+    if (id.empty()) return;
+    i += id.size();
+    if (TYPE_WORDS.count(id)) { words++; continue; }
+    last = id;
+    break;
+  }
+  if (words == 0) return;
+  while (i < text.size() && isSpace(text[i])) i++;
+  if (i >= text.size() || text[i] != '(') return;
+  auto it = macros_.find(last);
+  if (it == macros_.end() || !it->second.params) return;
+  throw CcError(fileName, line,
+                last + " is a macro from " + it->second.from +
+                    "; a function of that name needs the header left out or another name");
 }
 
 // #if takes defined(X) and constant arithmetic, which is enough for a

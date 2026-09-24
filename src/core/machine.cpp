@@ -1,5 +1,6 @@
 #include "core/machine.h"
 
+#include <cassert>
 #include <cstdio>
 
 namespace sc8 {
@@ -59,13 +60,25 @@ struct Write {
   Flags flags;
 };
 
+// The most writes a row that passed the rules can make: rule 1 allows one
+// writer per register atom, and there are twelve atoms (a PC or D load
+// counts once here but takes two of them), rules 2 and 4 allow one RAM
+// and one stack access. A row of eleven signals that writes nine
+// registers passed every rule and overflowed the eight this held before.
+constexpr size_t REGISTER_ATOMS = 12;
+constexpr size_t MAX_WRITES = REGISTER_ATOMS + 2;
+
 struct WriteList {
-  std::array<Write, 8> items{};
+  std::array<Write, MAX_WRITES> items{};
   size_t count = 0;
   void push(Write::Target t, uint16_t value, uint16_t addr = 0) {
+    assert(count < items.size());
     items[count++] = Write{t, value, addr, {}};
   }
-  void pushFlags(Flags f) { items[count++] = Write{Write::Target::FLAGS, 0, 0, f}; }
+  void pushFlags(Flags f) {
+    assert(count < items.size());
+    items[count++] = Write{Write::Target::FLAGS, 0, 0, f};
+  }
 };
 
 }  // namespace

@@ -50,6 +50,11 @@ struct Assets {
   std::function<std::optional<std::vector<uint8_t>>(std::string_view name)> loadFile;
   std::function<std::optional<ImageAsset>(std::string_view name)> loadImage;
   std::function<std::optional<std::vector<uint8_t>>(std::string_view name)> loadSample;
+  // Where a conversion's remark goes, when the tool wants one: "ship.png",
+  // then what happened to it. Absent, the remark is dropped. A build reads
+  // an asset more than once, so the same remark can arrive more than once
+  // and the receiver keeps one.
+  std::function<void(std::string_view name, const std::string& note)> note;
 };
 
 struct Assembled {

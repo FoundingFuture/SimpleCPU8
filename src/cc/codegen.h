@@ -71,6 +71,13 @@ std::vector<uint8_t> romBytesOf(const VarDecl& v, const Assets* assets = nullptr
 // yet, so the same rules live here until it lands.
 std::vector<int> templateArgWidths(const std::vector<uint8_t>& tmpl);
 
+// The template with every float conversion given the l length, so %f reads
+// the eight bytes of the double the compiler sends. A %lf stays as it is.
+std::vector<uint8_t> widenFloatSpecs(const std::vector<uint8_t>& tmpl);
+
+// One flag per conversion: true where it reads a real number.
+std::vector<bool> templateFloatConvs(const std::vector<uint8_t>& tmpl);
+
 Compiled compileUnit(const std::string& src, const std::string& file = "main.c");
 
 // The driver merges every file into one tree and hands it here.

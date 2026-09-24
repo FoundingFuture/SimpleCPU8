@@ -149,9 +149,14 @@ std::string gpuHeader() {
       out.push_back(" * The template goes to the cartridge on its own, and the");
       out.push_back(" * arguments are marshalled for you. An int is 16 bits, so %d");
       out.push_back(" * reads two bytes, %hhu one, %lu four and %llu eight, and the");
-      out.push_back(" * compiler counts them against the format for you.");
+      out.push_back(" * compiler counts them against the format for you. A double");
+      out.push_back(" * goes as its eight bytes under %f, %e or %g: the compiler");
+      out.push_back(" * writes the l length into the template for you, since the");
+      out.push_back(" * device reads a four byte float without it. A __ROM template");
+      out.push_back(" * is sent as written, so spell it %lf there.");
       out.push_back(" *");
       out.push_back(" *   gpu_printf(\"score %u lives %hhu\", score, lives);");
+      out.push_back(" *   gpu_printf(\"speed %.2f\", v);");
       out.push_back(" */");
       out.push_back("");
       continue;

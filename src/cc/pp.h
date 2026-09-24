@@ -19,6 +19,8 @@ using PpLine = PpLineIn;
 struct Macro {
   std::optional<std::vector<std::string>> params;
   std::string body;
+  // The file whose #define made it, for a message that names the header.
+  std::string from;
 };
 
 struct PpResult {
@@ -47,6 +49,7 @@ class Preprocessor {
  private:
   void file(const std::string& src, const std::string& file);
   void define(const std::string& rest, const std::string& file, int line);
+  void refuseMacroDefinition(const std::string& text, const std::string& file, int line);
   bool evalCond(const std::string& rest, const std::string& file, int line);
   std::string expand(const std::string& text, const std::string& file, int line,
                      const std::set<std::string>& blocked = {});

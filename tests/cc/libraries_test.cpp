@@ -349,3 +349,19 @@ TEST_SUITE("the runtime's own globals are dropped when nothing uses them") {
     )"), "target:"));
   }
 }
+
+TEST_SUITE("a function named like a graphics.h macro") {
+  TEST_CASE("is refused at its definition with the header named") {
+    for (const char* name : {"show", "image", "sample", "loop"}) {
+      const std::string msg = refuses("#include <graphics.h>\n#include <sound.h>\nvoid " + std::string(name) +
+                                      "(int a) { }\nint main(void) { return 0; }");
+      CHECK_MESSAGE(has(msg, std::string(name) + " is a macro from"), msg);
+      CHECK_MESSAGE(has(msg, "another name"), msg);
+    }
+  }
+
+  TEST_CASE("is fine once the header is left out") {
+    CHECK(ran("unsigned char r;\nunsigned char show(unsigned char n) { return n + 1; }\n"
+              "int main(void) { r = show(4); return 0; }").u8("r") == 5);
+  }
+}

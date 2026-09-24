@@ -264,3 +264,63 @@ TEST_SUITE("what the compiler refuses") {
     )"), "argument"));
   }
 }
+
+TEST_SUITE("a static inside a function") {
+  TEST_CASE("keeps its value between calls and starts from its initializer") {
+    // A static local is a hidden global, laid down once from the RAM image.
+    // An ordinary local would start from garbage or from zero each call.
+    const Ran r = ran(R"(
+      unsigned char r;
+      unsigned char tally(void) { static unsigned char count = 5; count++; return count; }
+      int main(void) { tally(); tally(); r = tally(); return 0; }
+    )");
+    CHECK(r.u8("r") == 8);
+  }
+
+  TEST_CASE("is zero when it has no initializer, like any global") {
+    CHECK(ran(R"(
+      unsigned int r;
+      unsigned int next(void) { static unsigned int n; n = n + 100; return n; }
+      int main(void) { next(); r = next(); return 0; }
+    )").u16("r") == 200);
+  }
+
+  TEST_CASE("is private to its function, so two functions may each have one") {
+    const Ran r = ran(R"(
+      unsigned char a, b;
+      unsigned char one(void) { static unsigned char n = 1; n++; return n; }
+      unsigned char two(void) { static unsigned char n = 10; n++; return n; }
+      int main(void) { one(); two(); two(); a = one(); b = two(); return 0; }
+    )");
+    CHECK(r.u8("a") == 3);
+    CHECK(r.u8("b") == 13);
+  }
+
+  TEST_CASE("lives under the function's name in .ram and takes no frame room") {
+    const std::string a = compile(R"(
+      unsigned char f(void) { static unsigned char n = 7; return n; }
+      int main(void) { return f(); }
+    )");
+    CHECK(has(a, "f__st_n:"));
+    CHECK(has(a, "db 7"));
+  }
+
+  TEST_CASE("survives a recursion, since it is not on the stack") {
+    CHECK(ran(R"(
+      unsigned char r;
+      unsigned char depth(unsigned char n) {
+        static unsigned char calls = 0;
+        calls++;
+        if (n > 0) depth(n - 1);
+        return calls;
+      }
+      int main(void) { r = depth(4); return 0; }
+    )").u8("r") == 5);
+  }
+
+  TEST_CASE("refuses the same static twice in one function") {
+    CHECK(has(refuses(R"(
+      int main(void) { static int n; { static int n; } return 0; }
+    )"), "static n is declared twice in main"));
+  }
+}

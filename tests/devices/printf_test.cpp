@@ -116,6 +116,18 @@ TEST_SUITE("printf, C grammar") {
 
   TEST_CASE("formats a double with the l length") { CHECK_EQ(fmt("%.1lf", {0x3f, 0xf8, 0, 0, 0, 0, 0, 0}), "1.5"); }
 
+  TEST_CASE("renders a C double from the eight bytes the compiler sends") {
+    // The C compiler writes a double's IEEE bytes big-endian and turns %f
+    // into %lf on the cartridge, so this is what a C program's printf("%f",
+    // 2.5) reaches the device as.
+    CHECK_EQ(fmt("%lf", floatBytes64(2.5)), "2.500000");
+    CHECK_EQ(fmt("%.2lf", floatBytes64(-0.25)), "-0.25");
+    CHECK_EQ(fmt("%lf", floatBytes64(28.274333882308138)), "28.274334");
+    // The four byte %f reads a float32, so the same eight bytes are two
+    // values to it. That is why the compiler widens the template.
+    CHECK_NE(fmt("%f", floatBytes64(2.5)), "2.500000");
+  }
+
   TEST_CASE("formats scientific and general floats") {
     CHECK_EQ(fmt("%e", {0x3f, 0xc0, 0x00, 0x00}), "1.500000e+00");
     CHECK_EQ(fmt("%g", {0x3f, 0xc0, 0x00, 0x00}), "1.5");

@@ -1,5 +1,6 @@
 #include <doctest.h>
 
+#include <cstring>
 #include <regex>
 #include <string>
 
@@ -132,5 +133,76 @@ TEST_SUITE("it really prints") {
       }
     )");
     CHECK(r.halted());
+  }
+}
+
+TEST_SUITE("a double goes through as its eight IEEE bytes") {
+  // The device reads four bytes for %f and eight for %lf. C has one real
+  // type here, so the compiler sends eight for both and writes the l into
+  // the template's cartridge copy.
+  TEST_CASE("widens %f to %lf on the cartridge and reserves eight bytes") {
+    const std::string a = compile(R"(
+      #include <gpu.h>
+      double d;
+      int main(void) { gpu_printf("%f", d); return 0; }
+    )");
+    CHECK(has(a, "__pfargs: ds 8"));
+    // "%lf" is 37, 108, 102.
+    CHECK(has(a.substr(a.find(".data")), "db 37, 108, 102, 0"));
+    CHECK(has(a, "OUT GPU_CMD, CMD_RAM_MOVE"));
+  }
+
+  TEST_CASE("leaves %lf, a width and a precision as they were") {
+    const std::string a = compile(R"(
+      #include <gpu.h>
+      double d;
+      int main(void) { gpu_printf("%8.2lf %-6.1e", d, d); return 0; }
+    )");
+    CHECK(has(a, "__pfargs: ds 16"));
+    // "%8.2lf %-6.1le"
+    CHECK(has(a.substr(a.find(".data")), "db 37, 56, 46, 50, 108, 102, 32, 37, 45, 54, 46, 49, 108, 101, 0"));
+  }
+
+  TEST_CASE("marshals the value itself, big-endian, where the device reads it") {
+    const Ran r = ran(R"(
+      #include <gpu.h>
+      double d;
+      int main(void) { d = 1.5; gpu_printf("%f", d); return 0; }
+    )");
+    CHECK(r.f64("__pfargs") == 1.5);
+    const size_t at = static_cast<size_t>(r.addr("__pfargs"));
+    CHECK(r.m->ram[at] == 0x3f);
+    CHECK(r.m->ram[at + 1] == 0xf8);
+  }
+
+  TEST_CASE("takes an expression, and an int argument under %f is widened") {
+    const Ran r = ran(R"(
+      #include <gpu.h>
+      double d; int n;
+      int main(void) { d = 10.0; n = 3; gpu_printf("%f %lf", d / 4.0, n); return 0; }
+    )");
+    CHECK(r.f64("__pfargs") == 2.5);
+    const size_t at = static_cast<size_t>(r.addr("__pfargs")) + 8;
+    uint64_t bits = 0;
+    for (size_t i = 0; i < 8; i++) bits = (bits << 8) | r.m->ram[at + i];
+    double v;
+    std::memcpy(&v, &bits, 8);
+    CHECK(v == 3.0);
+  }
+
+  TEST_CASE("puts a double after an int in the block, at the right offset") {
+    const Ran r = ran(R"(
+      #include <gpu.h>
+      double d; unsigned int n;
+      int main(void) { d = -0.25; n = 0x1234; gpu_printf("%u %f", n, d); return 0; }
+    )");
+    const size_t at = static_cast<size_t>(r.addr("__pfargs"));
+    CHECK(r.m->ram[at] == 0x12);
+    CHECK(r.m->ram[at + 1] == 0x34);
+    uint64_t bits = 0;
+    for (size_t i = 0; i < 8; i++) bits = (bits << 8) | r.m->ram[at + 2 + i];
+    double v;
+    std::memcpy(&v, &bits, 8);
+    CHECK(v == -0.25);
   }
 }

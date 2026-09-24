@@ -2,6 +2,8 @@
 
 #include <cctype>
 #include <cmath>
+#include <functional>
+#include <map>
 #include <numbers>
 #include <set>
 #include <unordered_map>
@@ -54,44 +56,41 @@ bool isIdent(std::string_view s) {
 
 bool startsWith(std::string_view s, std::string_view p) { return s.substr(0, p.size()) == p; }
 
-// A system constant or a literal: what parseNumber took in the old tool.
-std::optional<int64_t> parseNumber(std::string_view s) {
-  if (auto v = systemConstant(s)) return *v;
+using Extra = std::function<std::optional<int64_t>(std::string_view)>;
+
+// A built-in name or a literal. The old tool let a port name resolve only
+// as a port and a command name only as an OUT value. Every registry name
+// now resolves wherever a number does, so LD A <- CMD_CLEAR works. `extra`
+// is the program's own .equ names, which come first.
+std::optional<int64_t> parseNumber(std::string_view s, const Extra& extra = nullptr) {
+  if (extra) {
+    if (auto v = extra(s)) return v;
+  }
+  if (auto v = builtinConstant(s)) return *v;
   return parseLiteral(s);
 }
 
-// A number or an expression over built-in constants, for the two places
-// that run in pass one: a port and a .addr. A label cannot be folded here.
-std::optional<int64_t> constantValue(std::string_view s,
-                                     const std::function<std::optional<int64_t>(std::string_view)>& extra = nullptr) {
-  if (auto n = parseNumber(s)) return n;
+// A number or an expression over built-in constants, for the places that
+// run in pass one: a port, a count and a .addr. A label cannot be folded
+// here.
+std::optional<int64_t> constantValue(std::string_view s, const Extra& extra = nullptr) {
+  if (auto n = parseNumber(s, extra)) return n;
   if (!looksLikeExpression(s)) return std::nullopt;
-  ExprResult r = evalExpr(s, [&](std::string_view name) -> std::optional<int64_t> {
-    if (extra) {
-      if (auto v = extra(name)) return v;
-    }
-    return parseNumber(name);
-  });
+  ExprResult r = evalExpr(s, [&](std::string_view name) { return parseNumber(name, extra); });
   if (r.ok) return r.value;
   return std::nullopt;
 }
 
-std::optional<int64_t> portValue(std::string_view name) {
-  if (auto v = portNamed(name)) return *v;
-  return std::nullopt;
+// Port operands take any name and any expression a number does, so
+// ACP_ADDR_HI + 1 works the way BLOCK + 8 does.
+std::optional<int64_t> parsePort(std::string_view s, const Extra& extra = nullptr) {
+  return constantValue(s, extra);
 }
 
-// Port operands accept the built-in port names, and a port expression
-// resolves port names too, so ACP_ADDR_HI + 1 works the way BLOCK + 8 does.
-std::optional<int64_t> parsePort(std::string_view s) {
-  if (auto v = portValue(s)) return v;
-  return constantValue(s, portValue);
-}
-
-// OUT values accept the built-in command names: OUT GPU_CMD, CMD_LINE_TO.
-std::optional<int64_t> parseOutValue(std::string_view s) {
-  if (auto v = commandNamed(s)) return *v;
-  return parseNumber(s);
+// OUT values take a name or a literal here. An expression waits for pass
+// two, where a label can join in.
+std::optional<int64_t> parseOutValue(std::string_view s, const Extra& extra = nullptr) {
+  return parseNumber(s, extra);
 }
 
 std::optional<double> parseFloatLit(std::string_view s) {
@@ -358,8 +357,39 @@ class Assembler {
 
   void err(int line, std::string message) { out_.errors.push_back({line, std::move(message)}); }
 
+  // The program's own names from .equ. They resolve wherever a number does,
+  // in both passes, and a .equ folds in pass one so a port or a count can
+  // use one.
+  std::map<std::string, int64_t> equs_;
+  Extra equ() {
+    return [this](std::string_view name) -> std::optional<int64_t> {
+      auto it = equs_.find(std::string(name));
+      if (it == equs_.end()) return std::nullopt;
+      return it->second;
+    };
+  }
+  std::optional<int64_t> parseNumber(std::string_view s) { return sc8::parseNumber(s, equ()); }
+  std::optional<int64_t> constantValue(std::string_view s) { return sc8::constantValue(s, equ()); }
+  std::optional<int64_t> parsePort(std::string_view s) { return sc8::parsePort(s, equ()); }
+  std::optional<int64_t> parseOutValue(std::string_view s) { return sc8::parseOutValue(s, equ()); }
+
+  // .equ NAME, expr names a number. The expression folds here, like a
+  // count does, so the name is good from the next line on in either pass.
+  void defineEqu(int line, std::string_view rest) {
+    const size_t comma = rest.find(',');
+    if (comma == std::string_view::npos) return err(line, ".equ needs: .equ NAME, value");
+    const std::string name(trim(rest.substr(0, comma)));
+    const std::string_view text = trim(rest.substr(comma + 1));
+    if (!isIdent(name)) return err(line, ".equ needs a name: .equ NAME, value");
+    if (equs_.count(name) || out_.labels.count(name)) return err(line, "duplicate label: " + name);
+    if (builtinConstant(name)) return err(line, name + " is one of the machine's own constants");
+    auto v = constantValue(text);
+    if (!v) return err(line, ".equ needs a value the assembler can work out here, and not a label");
+    equs_[name] = *v;
+  }
+
   void defineLabel(int line, const std::string& name, Label::Kind kind, int64_t value) {
-    if (out_.labels.count(name)) err(line, "duplicate label: " + name);
+    if (out_.labels.count(name) || equs_.count(name)) err(line, "duplicate label: " + name);
     else out_.labels[name] = Label{kind, static_cast<int>(value)};
   }
 
@@ -594,6 +624,11 @@ class Assembler {
       // .org places what follows at an instruction slot, so a driver can
       // sit at a known address a program reaches by JSR through a vector.
       // The count folds in pass one, like a port and a .addr do.
+      if (startsWith(line, ".equ ") || startsWith(line, ".equ\t")) {
+        defineEqu(lineNo, trim(std::string_view(line).substr(5)));
+        continue;
+      }
+
       if (startsWith(line, ".org ") || startsWith(line, ".org\t")) {
         auto n = foldNow(lineNo, trim(std::string_view(line).substr(5)), ".org");
         if (n) {

@@ -34,6 +34,12 @@ void write(const fs::path& p, const std::string& text) {
 }  // namespace
 
 TEST_SUITE("project layouts") {
+  TEST_CASE("an empty path is the working directory, as a bare file name's parent is") {
+    const project::Layout l = project::layoutOf(fs::path("pong.asm").parent_path());
+    CHECK(l.name == fs::current_path().filename().string());
+    CHECK(l.sources == (l.nested ? fs::path("src") : fs::path()));
+  }
+
   TEST_CASE("a flat folder is its own sources, assets and build") {
     TempDir t;
     write(t.path / "main.c", "int main(void) { return 0; }\n");

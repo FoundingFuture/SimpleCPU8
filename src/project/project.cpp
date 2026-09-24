@@ -156,7 +156,9 @@ std::string resolveLabels(const std::string& text, const std::map<std::string, L
 Assets loaders(const Layout& layout, std::vector<std::string>* notes) {
   Assets assets;
   auto report = [notes](std::string_view name, const std::string& note) {
-    if (notes && !note.empty()) notes->push_back(std::string(name) + ": " + note);
+    if (!notes || note.empty()) return;
+    const std::string line = std::string(name) + ": " + note;
+    if (std::find(notes->begin(), notes->end(), line) == notes->end()) notes->push_back(line);
   };
   assets.loadFile = [layout](std::string_view name) { return readBytes(assetPath(layout, name)); };
   assets.loadImage = [layout, report](std::string_view name) {
@@ -171,14 +173,19 @@ Assets loaders(const Layout& layout, std::vector<std::string>* notes) {
     report(name, note);
     return pcm;
   };
+  assets.note = report;
   return assets;
 }
 
 Layout layoutOf(const fs::path& dir) {
   Layout l;
   l.root = dir;
-  l.name = fs::absolute(dir).filename().string();
-  if (l.name.empty() || l.name == ".") l.name = fs::absolute(dir).parent_path().filename().string();
+  // A source named with no directory, `pong.asm`, has an empty parent and
+  // an empty path cannot be made absolute: the IDE aborted on it. Empty
+  // means the working directory.
+  const fs::path here = dir.empty() ? fs::path(".") : dir;
+  l.name = fs::absolute(here).filename().string();
+  if (l.name.empty() || l.name == ".") l.name = fs::absolute(here).parent_path().filename().string();
   l.nested = fs::is_directory(dir / "src");
   if (l.nested) {
     l.sources = dir / "src";
