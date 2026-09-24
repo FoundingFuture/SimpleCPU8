@@ -310,4 +310,36 @@ TEST_SUITE("bus events") {
     CHECK_EQ(m.ramWriteAt[0x10], 0u);
     CHECK_EQ(m.ramWrites[0x10], 1u);
   }
+  TEST_CASE("the sequencer position walks the fetch, then the instruction's rows") {
+    // ADD A <- imm8 under the naive set: one fetch row, then five rows.
+    Machine m({{0x48, 7}}, naive());
+    const Rows* rows = naive().get("ADD A <- imm8");
+    REQUIRE(rows);
+    REQUIRE_EQ(naive().get("fetch")->size(), 1u);
+    Machine::SequencerPos p = m.sequencer();
+    CHECK(p.inFetch);
+    CHECK_EQ(p.section, -1);
+    CHECK_EQ(p.rowIndex, 0u);
+    // After the fetch row the sequencer stands on the instruction's first row.
+    m.microStep();
+    p = m.sequencer();
+    CHECK(!p.inFetch);
+    CHECK_GE(p.section, 0);
+    CHECK_EQ(p.rowIndex, 0u);
+    CHECK_EQ(m.lastMicro->op, "fetch");
+    for (size_t i = 0; i + 1 < rows->size(); i++) {
+      m.microStep();
+      p = m.sequencer();
+      CHECK(!p.inFetch);
+      CHECK_EQ(p.rowIndex, i + 1);
+      CHECK_EQ(m.lastMicro->row, static_cast<int>(i));
+    }
+    // The last row finishes the instruction: back between instructions.
+    m.microStep();
+    p = m.sequencer();
+    CHECK(p.inFetch);
+    CHECK_EQ(p.section, -1);
+    CHECK_EQ(m.instructions, 1u);
+    CHECK_EQ(m.acc, 7);
+  }
 }

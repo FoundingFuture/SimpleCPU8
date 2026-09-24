@@ -3,6 +3,7 @@
 // stay hidden and the lanes light from the bus events alone.
 #include <algorithm>
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <string>
 
@@ -52,6 +53,17 @@ std::string boxValue(std::string_view id, const Machine& m) {
   if (id == "B") return hex(m.bLatch, 2);
   if (id == "ACC") return hex(m.acc, 2);
   return "";
+}
+
+// A row's signals as chips in the datapath's colours, by row position.
+void signalChips(const Row& row) {
+  for (size_t i = 0; i < row.size(); i++) {
+    if (i) ImGui::SameLine();
+    const unsigned c = dp::SIG_COLORS[i % 8];
+    ImGui::TextColored(ImVec4(static_cast<float>((c >> 16) & 255) / 255.0f, static_cast<float>((c >> 8) & 255) / 255.0f,
+                              static_cast<float>(c & 255) / 255.0f, 1.0f),
+                       "%s", std::string(signalName(row[i])).c_str());
+  }
 }
 
 }  // namespace
@@ -167,14 +179,7 @@ void Ide::datapathPane() {
   } else if (!inspectable) {
     ImGui::TextDisabled("%s: the set is sealed, the lanes light from the bus alone", m.lastMicro->op.c_str());
   } else {
-    const Row& row = m.lastMicro->signals;
-    for (size_t i = 0; i < row.size(); i++) {
-      if (i) ImGui::SameLine();
-      const unsigned c = dp::SIG_COLORS[i % 8];
-      ImGui::TextColored(ImVec4(static_cast<float>((c >> 16) & 255) / 255.0f, static_cast<float>((c >> 8) & 255) / 255.0f,
-                                static_cast<float>(c & 255) / 255.0f, 1.0f),
-                         "%s", std::string(signalName(row[i])).c_str());
-    }
+    signalChips(m.lastMicro->signals);
   }
   ImGui::End();
 }
@@ -230,9 +235,110 @@ void Ide::flowPane() {
 
 // ---- rows
 
-// The sets to pick from, then the sections of the loaded set with the
-// live row marked. The editor for a set of your own holds the whole text
-// in the file format. Apply runs the parser and shows its errors.
+namespace {
+
+// The microcycles one instruction costs: the fetch program's rows, then
+// the rows of the instruction's own program. Counts only, so it can be
+// asked under the sealed set as well.
+struct Budget {
+  size_t fetchRows = 0;
+  size_t opRows = 0;
+  size_t total() const { return fetchRows + opRows; }
+};
+
+Budget budgetOf(const Microcode& set, const Instr& in) {
+  Budget b;
+  if (const Rows* f = set.get("fetch")) b.fetchRows = f->size();
+  if (const OpDef* def = opByCode(in.op)) {
+    if (const Rows* r = set.get(def->name)) b.opRows = r->size();
+  }
+  return b;
+}
+
+// How many microcycles of the current instruction ran, from the
+// sequencer's position. Between instructions the whole budget ran.
+size_t microcyclesDone(const Machine& m, const Budget& b) {
+  const Machine::SequencerPos pos = m.sequencer();
+  if (pos.section < 0) return b.total();
+  if (pos.inFetch) return pos.rowIndex;
+  return b.fetchRows + pos.rowIndex;
+}
+
+// The execution view: the instruction's rows in the order they run,
+// fetch first. Rows that ran are dim with a v, the one that ran last is
+// in the accent colour with a >, the rest are plain. The row numbers are
+// microcycle numbers, so "microcycle 3 of 7" names row 03. The
+// highlighted row is the one the Datapath pane lights from, lastMicro,
+// so the two panes agree by construction.
+void executionView(const Machine& m, const std::function<std::string(uint16_t)>& instrText) {
+  if (!m.lastMicro) {
+    if (m.trace()) ImGui::TextDisabled("no microcycle yet: press Microstep or Step");
+    else ImGui::TextDisabled("rows are not recorded at this speed: pause, then Microstep or Step");
+    return;
+  }
+  const Microcode& set = m.microcode();
+  const uint16_t pc = m.lastInstrPc;
+  if (pc >= m.program.size()) {
+    ImGui::TextDisabled("no instruction at PC %s", hex(pc, 4).c_str());
+    return;
+  }
+  const Instr& in = m.program[pc];
+  const OpDef* def = opByCode(in.op);
+  const Budget b = budgetOf(set, in);
+  const size_t done = microcyclesDone(m, b);
+  const bool between = m.sequencer().section < 0;
+  // The last executed row as a position in the fetch plus instruction list.
+  size_t live = b.total();  // past the end: nothing highlighted
+  if (m.lastMicro->op == "fetch") live = static_cast<size_t>(m.lastMicro->row);
+  else if (def && m.lastMicro->op == def->name) live = b.fetchRows + static_cast<size_t>(m.lastMicro->row);
+
+  ImGui::TextColored(ImVec4(0.55f, 0.75f, 1.0f, 1.0f), "%s", instrText(pc).c_str());
+  ImGui::SameLine();
+  ImGui::TextDisabled("PC %s", hex(pc, 4).c_str());
+  if (between && m.status == Status::Running) {
+    ImGui::Text("microcycle %zu of %zu, instruction complete", done, b.total());
+    if (m.pc < m.program.size()) ImGui::TextDisabled("next: %s", instrText(m.pc).c_str());
+  } else {
+    ImGui::Text("microcycle %zu of %zu", done, b.total());
+  }
+  ImGui::Separator();
+
+  size_t number = 0;
+  auto line = [&](const Row& row) {
+    const size_t i = number++;
+    const bool active = i == live;
+    const bool ran = i < live || (i > live && i < done);
+    const std::string num = (i + 1 < 10 ? "0" : "") + std::to_string(i + 1);
+    const std::string text = num + (active ? " > " : ran ? " v " : "   ") + rowText(row);
+    if (active) ImGui::TextColored(ACCENT, "%s", text.c_str());
+    else if (ran) ImGui::TextColored(DIM, "%s", text.c_str());
+    else ImGui::TextUnformatted(text.c_str());
+  };
+  ImGui::TextDisabled("fetch, shared by every instruction");
+  if (const Rows* rows = set.get("fetch")) {
+    for (const Row& r : *rows) line(r);
+  }
+  ImGui::TextDisabled("%s", def ? std::string(def->name).c_str() : "no microprogram");
+  const Rows* rows = def ? set.get(def->name) : nullptr;
+  if (rows) {
+    for (const Row& r : *rows) line(r);
+  } else {
+    ImGui::TextColored(DIM, "no microprogram for opcode %s", hex(in.op, 2).c_str());
+  }
+
+  // The signals of the row that ran last, in the datapath's colours.
+  ImGui::Separator();
+  ImGui::TextDisabled("signals of row %02zu", live + 1);
+  signalChips(m.lastMicro->signals);
+}
+
+}  // namespace
+
+// The sets to pick from, then the current instruction as the rows it
+// runs, fetch first, so the shared fetch never seems to vanish. The
+// section browser is a toggle away. The editor for a set of your own
+// holds the whole text in the file format. Apply runs the parser and
+// shows its errors.
 void Ide::microcodePane() {
   ImGui::Begin("Microcode");
   const std::string& name = computer_.microcodeName();
@@ -246,8 +352,35 @@ void Ide::microcodePane() {
     if (customText_.empty()) customText_ = serializeMicrocode(buildNaive());
     selectMicrocode(customText_);
   }
+  const Machine& m = computer_.machine();
+  // The instruction the sequencer is on, or the one it finished last. The
+  // listing's line for it names it the way the source did.
+  auto instrText = [&](uint16_t pc) -> std::string {
+    for (const ListLine& l : listing_) {
+      if (l.instr && *l.instr == static_cast<int>(pc)) {
+        const size_t a = l.text.find_first_not_of(" \t");
+        return a == std::string::npos ? l.text : l.text.substr(a);
+      }
+    }
+    if (pc < m.program.size()) {
+      const OpDef* def = opByCode(m.program[pc].op);
+      return std::string(def ? def->name : "??") + "  $" + hex(m.program[pc].operand, 4);
+    }
+    return "?";
+  };
+  auto statusLine = [&]() {
+    if (m.status == Status::Halted) ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "halted");
+    else if (m.status == Status::Crashed) ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.35f, 1.0f), "crashed: %s", m.crash ? m.crash->message.c_str() : "");
+  };
   if (!computer_.microcodeInspectable()) {
     ImGui::TextWrapped("%s", SEALED);
+    ImGui::Separator();
+    statusLine();
+    if (m.lastMicro && m.lastInstrPc < m.program.size()) {
+      const Budget b = budgetOf(m.microcode(), m.program[m.lastInstrPc]);
+      ImGui::Text("%s", instrText(m.lastInstrPc).c_str());
+      ImGui::TextDisabled("microcycle %zu of %zu", microcyclesDone(m, b), b.total());
+    }
     ImGui::End();
     return;
   }
@@ -275,7 +408,14 @@ void Ide::microcodePane() {
     return;
   }
 
-  const Machine& m = computer_.machine();
+  if (ImGui::SmallButton(mcBrowse_ ? "back to the instruction" : "browse all sections")) mcBrowse_ = !mcBrowse_;
+  statusLine();
+  if (!mcBrowse_) {
+    executionView(m, instrText);
+    ImGui::End();
+    return;
+  }
+
   const auto& sections = m.microcode().sections();
   const std::string current = m.lastMicro ? m.lastMicro->op : "";
   if (ImGui::BeginListBox("##sections", ImVec2(170, -1))) {

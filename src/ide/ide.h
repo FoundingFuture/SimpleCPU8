@@ -209,6 +209,11 @@ class Ide {
   void syncBasic();
   std::vector<std::pair<std::string, std::string>> basicSlots_;
   bool basicDirty_ = false;  // slots changed and no ROM file to rewrite
+
+  // The Microcode pane's execution view (micro_panes.cpp). Off, the pane
+  // walks the current instruction's rows, fetch first. On, it browses
+  // every section of the set.
+  bool mcBrowse_ = false;
 };
 
 }  // namespace sc8

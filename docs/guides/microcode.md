@@ -582,20 +582,40 @@ last is green with a `>`, the rows before it are dimmed. Step with F11
 and the mark walks down.
 
 The Microcode pane has three radio buttons: `@naive`, `@optimal` and
-`my own`. Below them is the list of sections, with a `<` on the one
-running, and the rows of the selected section with the live row in
-green. `Edit rows...` opens the whole set as text in this pane. `Apply`
-parses it and either lists the errors in red or loads the set and
-restarts the machine. `Reset to naive` puts the naive text back.
-Choosing `my own` for the first time starts from a copy of the naive
-set. Swapping a set always restarts the machine, because a machine is
-built from its set.
+`my own`. Below them it shows the instruction being executed as the
+rows it runs, in the order they run. The header names the instruction
+as the listing spells it, with its slot, then a counter such as
+`microcycle 3 of 7`. The fetch rows come first, under the heading
+`fetch, shared by every instruction`. Every instruction pays for the
+fetch, so the pane keeps it in the instruction's history rather than
+letting it vanish. The instruction's own rows follow under its
+canonical name. The rows are numbered as microcycles, `01` to `N`. A
+row that ran is dimmed with a `v`. The row that ran last is green with a
+`>`, and it is the row the Datapath pane lights from. The rows still to
+come are plain. Under the rows the signals of the last row are listed
+in the datapath's colours. F11 walks the mark down one row. F10 runs
+the whole instruction, and the pane then reads `instruction complete`
+and names the next instruction. The next F11 starts that one's fetch.
+A halted or crashed machine says so above the rows. At the fast speeds
+the machine records no rows, and the pane says so until you pause.
+
+`browse all sections` swaps the instruction for the list of every
+section in the set, with a `<` on the one running, and the rows of the
+selected section with the live row in green. `back to the instruction`
+returns. Under `@optimal` the pane keeps the seal and shows only the
+instruction and its microcycle count. `Edit rows...` opens the whole set
+as text in this pane. `Apply` parses it and either lists the errors in
+red or loads the set and restarts the machine. `Reset to naive` puts
+the naive text back. Choosing `my own` for the first time starts from a
+copy of the naive set. Swapping a set always restarts the machine,
+because a machine is built from its set.
 
 Breakpoints work here as on the Run level. Click the margin left of a
 line in the Listing and run. The machine stops when `PC` reaches that
 slot, before its fetch, and the Messages pane says `stopped at
-breakpoint, PC 0005`. The Flow pane still shows the rows of the
-instruction before, all marked done. The next F11 runs the fetch.
+breakpoint, PC 0005`. The Flow and Microcode panes still show the rows
+of the instruction before, all marked done. The next F11 runs the
+fetch.
 
 One thing to know about projects. The IDE's Project tab lists the
 `.c`, `.h`, `.asm` and `.bas` files of a folder and its Build button

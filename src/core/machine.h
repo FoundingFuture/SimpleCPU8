@@ -155,6 +155,17 @@ class Machine {
 
   void run(uint64_t maxInstructions);
 
+  // Where the sequencer stands: the row it runs next. Between two
+  // instructions section is -1 and inFetch is true. Inside a fetch
+  // rowIndex counts the fetch rows done. Inside an instruction it counts
+  // the instruction's rows done, with the whole fetch behind it.
+  struct SequencerPos {
+    bool inFetch;
+    int section;
+    size_t rowIndex;
+  };
+  SequencerPos sequencer() const { return {inFetch_, section_, rowIndex_}; }
+
  private:
   struct RowInfo {
     std::optional<Conflict> conflict;
