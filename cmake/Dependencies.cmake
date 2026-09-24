@@ -57,6 +57,22 @@ if(SC8_BUILD_IDE)
   # Nothing here records or replays input events. The module's reader
   # ignores what fgets returns, and glibc marks that result as required.
   set(SUPPORT_AUTOMATION_EVENTS OFF CACHE BOOL "" FORCE)
+  # raylib 6.0 turns config.h into CMake options with a regular expression
+  # that reads any #define it finds, outside a comment, as ON. Its
+  # config.h spells a feature that is off as "#define SUPPORT_X 0", so on
+  # a fresh configure every one of them comes out on. The worst is
+  # SUPPORT_CUSTOM_FRAME_CONTROL: EndDrawing then neither swaps the
+  # buffers nor polls events, and on macOS the window never shows. These
+  # are the options config.h at the pinned tag defines as 0. Revisit the
+  # list when the tag moves.
+  foreach(option IN ITEMS
+      SUPPORT_BUSY_WAIT_LOOP SUPPORT_CUSTOM_FRAME_CONTROL SUPPORT_GPU_SKINNING
+      SUPPORT_FILEFORMAT_ASTC SUPPORT_FILEFORMAT_BDF SUPPORT_FILEFORMAT_FLAC
+      SUPPORT_FILEFORMAT_HDR SUPPORT_FILEFORMAT_JPG SUPPORT_FILEFORMAT_KTX
+      SUPPORT_FILEFORMAT_PIC SUPPORT_FILEFORMAT_PKM SUPPORT_FILEFORMAT_PNM
+      SUPPORT_FILEFORMAT_PSD SUPPORT_FILEFORMAT_PVR SUPPORT_FILEFORMAT_TGA)
+    set(${option} OFF CACHE BOOL "" FORCE)
+  endforeach()
   FetchContent_Declare(raylib
     GIT_REPOSITORY https://github.com/raysan5/raylib.git
     GIT_TAG 6.0
