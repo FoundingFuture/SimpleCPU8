@@ -284,8 +284,9 @@ controls. Reset restarts the CPU with RAM as it is. Reboot powers on
 again with the RAM image reloaded. Power off blanks the screen until
 Power on.
 
-Quitting with unsaved documents asks: save all and quit, quit without
-saving, or stay. Opening and saving go through a file dialog of the IDE's
+Save is the whole project: every changed document into its folder. A
+project with no folder yet is asked for one. Quitting with unsaved
+documents asks: save and quit, quit without saving, or stay. Opening and saving go through a file dialog of the IDE's
 own. It walks folders and can make a new folder on the way.
 
 The levels are built. Each level owns a Dear ImGui dockspace with a fixed

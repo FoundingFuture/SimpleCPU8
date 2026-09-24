@@ -236,6 +236,22 @@ void Ide::saveAll() {
   }
 }
 
+// Save is the whole project: every changed document into the folder. A
+// project with no folder yet asks for one first, and every document
+// goes there.
+void Ide::saveProject() {
+  if (projectDir_.empty()) {
+    const fs::path startIn = !settings_.projectsDir.empty() && fs::is_directory(settings_.projectsDir)
+                                 ? fs::path(settings_.projectsDir)
+                                 : fs::current_path();
+    dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", startIn, {},
+                 [this](const fs::path& p) { saveProjectAs(p.string()); });
+    return;
+  }
+  saveAll();
+  if (!anyDirty()) note("project saved");
+}
+
 bool Ide::anyDirty() const {
   for (const Doc& d : docs_) {
     if (d.dirty) return true;
@@ -454,7 +470,7 @@ void Ide::filesPane() {
   if (ImGui::SmallButton("Build")) buildProject(false);
   ImGui::SameLine();
   if (ImGui::SmallButton("Build and run")) buildProject(true);
-  if (ImGui::SmallButton("Save all")) saveAll();
+  if (ImGui::SmallButton("Save")) saveProject();
   ImGui::SameLine();
   if (ImGui::SmallButton("Boot BASIC")) bootBasic();
   ImGui::Separator();
@@ -507,7 +523,7 @@ void Ide::editorPane() {
   const DocKind kind = docKindOf(d->name);
   ImGui::Text("%s%s", d->name.c_str(), d->dirty ? " (unsaved)" : "");
   ImGui::SameLine();
-  if (ImGui::SmallButton("Save")) saveDoc(*d);
+  if (ImGui::SmallButton("Save")) saveProject();
   ImGui::SameLine();
   if (ImGui::SmallButton("Build")) buildProject(false);
   if (kind == DocKind::Basic) {

@@ -115,6 +115,7 @@ class Ide {
   void saveProjectAs(const std::string& dir);
   void saveDoc(Doc& doc);
   void saveAll();
+  void saveProject();
   bool anyDirty() const;
   void activate(size_t index);
   Doc* activeDoc();

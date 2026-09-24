@@ -570,22 +570,7 @@ void Ide::menuBar() {
                    {".c", ".h", ".asm", ".bas", ".txt"}, [this](const fs::path& p) { open(p.string()); });
     }
     ImGui::Separator();
-    if (ImGui::MenuItem("Save", "Ctrl+S", false, activeDoc() != nullptr)) {
-      if (projectDir_.empty()) {
-        dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", startIn, {},
-                     [this](const fs::path& p) { saveProjectAs(p.string()); });
-      } else if (Doc* d = activeDoc()) {
-        saveDoc(*d);
-      }
-    }
-    if (ImGui::MenuItem("Save all", "Ctrl+Shift+S")) {
-      if (projectDir_.empty()) {
-        dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", startIn, {},
-                     [this](const fs::path& p) { saveProjectAs(p.string()); });
-      } else {
-        saveAll();
-      }
-    }
+    if (ImGui::MenuItem("Save project", "Ctrl+S")) saveProject();
     if (ImGui::MenuItem("Save project as...")) {
       dialog_.open(FileDialog::Mode::OpenFolder, "Save the project as: pick or make its folder", startIn, {},
                    [this](const fs::path& p) { saveProjectAs(p.string()); });
@@ -708,16 +693,7 @@ void Ide::shortcuts() {
   if (ImGui::IsKeyPressed(ImGuiKey_F10)) stepInstruction();
   if (ImGui::IsKeyPressed(ImGuiKey_F11)) stepMicro();
   const bool cmd = io.KeyCtrl || io.KeySuper;
-  if (cmd && ImGui::IsKeyPressed(ImGuiKey_S)) {
-    if (projectDir_.empty()) {
-      dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", fs::current_path(), {},
-                   [this](const fs::path& p) { saveProjectAs(p.string()); });
-    } else if (io.KeyShift) {
-      saveAll();
-    } else if (Doc* d = activeDoc()) {
-      saveDoc(*d);
-    }
-  }
+  if (cmd && ImGui::IsKeyPressed(ImGuiKey_S)) saveProject();
   if (cmd && ImGui::IsKeyPressed(ImGuiKey_O)) {
     dialog_.open(FileDialog::Mode::OpenFolder, "Open a project folder", fs::current_path(), {},
                  [this](const fs::path& p) { openProject(p.string()); });
@@ -736,7 +712,7 @@ void Ide::quitDialog() {
       if (d.dirty) ImGui::BulletText("%s", d.name.c_str());
     }
     ImGui::Spacing();
-    if (ImGui::Button("Save all and quit")) {
+    if (ImGui::Button("Save and quit")) {
       if (projectDir_.empty()) {
         askQuit_ = false;
         ImGui::CloseCurrentPopup();
