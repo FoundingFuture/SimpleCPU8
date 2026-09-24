@@ -11,16 +11,22 @@
 //   simplecpu --rom game.rom --microcode naive
 //   simplecpu --rom game.rom --crt 0.6     CRT look at 60 percent
 //   simplecpu --rom game.rom --no-crt      the plain scaled picture
-//   simplecpu --rom game.rom --scale 3     window at 3 x 256
+//   simplecpu --rom game.rom --scale 3     a window at 3 x 256 instead of the
+//                                          whole screen
 //   simplecpu --rom game.rom --screenshot shot.png
 //                                          save the window after one second and quit
 //
+// A ROM fills the screen, the way a game console does. BASIC opens in a
+// window, since a listing sits beside an editor. --scale N or --window asks
+// for a window either way, and --fullscreen the reverse.
+//
 // Keys while running: F1 toggles the CRT look, F2 and F3 turn it down and
-// up. F5 powers on again, F11 goes fullscreen. Quitting is the operating
+// up. F5 powers on again, F11 switches between the window and the screen. Quitting is the operating
 // system's own gesture: Command-Q on macOS, Alt-F4 or the close button
 // elsewhere. No key is taken from the machine, so Escape and Ctrl-C reach
 // BASIC, which uses both to break a running program.
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
@@ -47,7 +53,7 @@ namespace {
 int usage() {
   std::fprintf(stderr,
                "usage: simplecpu --rom FILE.rom [--fps N | --max] [--microcode naive|optimal]\n"
-               "                 [--crt S | --no-crt] [--scale N] [--title T]\n"
+               "                 [--crt S | --no-crt] [--scale N] [--window | --fullscreen] [--title T]\n"
                "       simplecpu --basic [FILE.bas [--run]]\n"
                "       ... [--type TEXT] [--screenshot FILE.png]\n");
   return 2;
@@ -90,6 +96,7 @@ int main(int argc, char** argv) {
   std::string romPath, basicPath, microcode, title, screenshot, typedExtra;
   bool basic = false, maxSpeed = false, runBasic = false;
   int fps = 60, scale = 3;
+  int fullscreen = -1;  // -1 decides by what runs: a ROM fills the screen
   DisplaySettings display;
 
   for (int i = 1; i < argc; i++) {
@@ -124,7 +131,11 @@ int main(int argc, char** argv) {
     else if (a == "--microcode") microcode = next();
     else if (a == "--crt") display.setStrength(std::stof(next()));
     else if (a == "--no-crt") display.enabled = false;
-    else if (a == "--scale") scale = std::stoi(next());
+    else if (a == "--scale") {
+      scale = std::stoi(next());
+      fullscreen = 0;
+    } else if (a == "--window") fullscreen = 0;
+    else if (a == "--fullscreen") fullscreen = 1;
     else if (a == "--title") title = next();
     else if (a == "--screenshot") screenshot = next();
     else return usage();
@@ -180,8 +191,12 @@ int main(int argc, char** argv) {
   if (!typed.empty()) computer.typeText(typed);
   if (title.empty()) title = basic ? "BASIC" : romTitle(computer.cartridge(), romPath);
 
+  if (fullscreen < 0) fullscreen = (!romPath.empty() && screenshot.empty()) ? 1 : 0;
   SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT);
   InitWindow(SCREEN_W * scale, SCREEN_H * scale, ("SimpleCPU-8: " + title).c_str());
+  // Borderless rather than a mode switch: the desktop keeps its resolution
+  // and the quit gesture keeps working.
+  if (fullscreen == 1) ToggleBorderlessWindowed();
   // Every key reaches the machine. Quitting belongs to the window.
   SetExitKey(KEY_NULL);
   SetTargetFPS(fps > 0 ? fps : 60);
@@ -210,7 +225,7 @@ int main(int argc, char** argv) {
       if (IsKeyPressed(KEY_F2)) display.setStrength(strength = std::max(0.0f, strength - 0.1f));
       if (IsKeyPressed(KEY_F3)) display.setStrength(strength = std::min(1.0f, strength + 0.1f));
       if (IsKeyPressed(KEY_F5)) computer.powerOn();
-      if (IsKeyPressed(KEY_F11)) ToggleFullscreen();
+      if (IsKeyPressed(KEY_F11)) ToggleBorderlessWindowed();
       pollKeyboard(computer.input());
       computer.pumpTyping();
 
@@ -239,7 +254,10 @@ int main(int argc, char** argv) {
       screen.upload(computer.frame());
       BeginDrawing();
       ClearBackground(BLACK);
-      screen.draw(0, 0, GetScreenWidth(), GetScreenHeight(), display);
+      // The picture is square. It takes the largest square the window
+      // holds, centred, and the rest stays black.
+      const int side = std::min(GetScreenWidth(), GetScreenHeight());
+      screen.draw((GetScreenWidth() - side) / 2, (GetScreenHeight() - side) / 2, side, side, display);
       const Machine& m = computer.machine();
       if (m.status != Status::Running) {
         const std::string text = std::string(statusName(m.status)) + (m.crash ? ": " + m.crash->message : "");
