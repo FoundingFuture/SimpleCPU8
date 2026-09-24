@@ -145,3 +145,28 @@ TEST_CASE("a slot named AUTORUN runs at power on") {
   CHECK_MESSAGE(screenText(c.machine()).find("BOOTED INTO ME") != std::string::npos, screenText(c.machine()));
 }
 #endif
+
+#if SC8_HAVE_BASIC && defined(SC8_ROM_DIR)
+// examples/basic-c: BASIC, C and assembly in one ROM. AUTORUN sets A to
+// 21, JSR DOUBLE doubles it in C, and JSR ANSWER leaves 42 in A for
+// PEEK(4). Both numbers land on the screen.
+TEST_CASE("the mixed example boots into BASIC and calls its C and assembly by name") {
+  std::ifstream in(std::string(SC8_ROM_DIR) + "/basic-c.rom", std::ios::binary);
+  REQUIRE_MESSAGE(in, "basic-c.rom is not built");
+  std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
+  CartridgeResult r = decodeCartridge(bytes);
+  REQUIRE_MESSAGE(r.cartridge, r.error);
+  REQUIRE_EQ(r.cartridge->basic.size(), 1u);
+  CHECK_EQ(r.cartridge->basic[0].first, "AUTORUN");
+  // The builder wrote the slots in, so the program in the ROM holds numbers.
+  CHECK(r.cartridge->basic[0].second.find("JSR DOUBLE") == std::string::npos);
+  CHECK(r.cartridge->basic[0].second.find("JSR ANSWER") == std::string::npos);
+
+  Computer c;
+  c.setSeed(1);
+  c.insert(std::move(*r.cartridge));
+  runFrames(c, 120);
+  const std::string screen = screenText(c.machine());
+  CHECK_MESSAGE(screen.find("42\n42\n") != std::string::npos, screen);
+}
+#endif

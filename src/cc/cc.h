@@ -13,6 +13,7 @@
 #pragma once
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -43,6 +44,11 @@ struct CcOptions {
   // bytes: the preloaded maps first, then the loaders, as the assembler's
   // directives resolve a name. Without it every asset form is an error.
   const Assets* assets = nullptr;
+  // Files whose public functions are roots of the reachability pass, so
+  // they survive when nothing in the program calls them. A host such as
+  // BASIC reaches them by instruction slot, with JSR. main belongs to the
+  // host, so a main in one of these files is refused.
+  std::set<std::string> keepAllFrom;
 };
 
 struct Program : Compiled {

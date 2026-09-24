@@ -339,7 +339,7 @@ void Preprocessor::file(const std::string& src, const std::string& fileName) {
       if (!text2) {
         throw CcError(fileName, lineNo,
                       "cannot find " + (angled ? "<" + name + ">" : "\"" + name + "\"") +
-                          ". The libraries are graphics.h, sound.h, keys.h, math.h, disk.h, and below them gpu.h, apu.h, io.h, acp.h, storage.h, sys.h and rom.h.");
+                          ". The libraries are graphics.h, sound.h, keys.h, math.h, disk.h, basicvars.h, and below them gpu.h, apu.h, io.h, acp.h, storage.h, sys.h and rom.h.");
       }
       bool seen = false;
       for (const std::string& n : included_) if (n == name) seen = true;

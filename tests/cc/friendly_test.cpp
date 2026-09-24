@@ -109,6 +109,60 @@ int main(void) { save("A", "B"); load("A", buf, 40); erase("A"); catalog(buf, 40
     CHECK(has(text, "IN STO_COUNT"));
   }
 
+  // basicvars.h reaches BASIC's variables through the pointer at $0C of
+  // the system page. A plain program has no BASIC, so the test plays the
+  // interpreter: it points $0C at an array of its own and reads it back.
+  TEST_CASE("basicvars.h reads and writes a variable through the pointer at 12") {
+    // BASIC's system page is reserved the way the interpreter builds it,
+    // or the pointer would sit in the compiler's own temporaries.
+    CcOptions opts;
+    opts.zpReserve = 32;
+    const std::string text = compile(R"(
+#include <basicvars.h>
+int table[286];
+int seen;
+int seen_b;
+int main(void) {
+    *(unsigned char *)12 = ((unsigned int)table) >> 8;
+    *(unsigned char *)13 = ((unsigned int)table) & 255;
+    table[0] = 0x0304;
+    seen = basic_get('A');
+    basic_set('b', -2);
+    seen_b = table[11];
+    return 0;
+})",
+                               opts);
+    const Ran r = runAsm(text, 400000, false);
+    CHECK(r.halted());
+    // BASIC keeps a word high byte first, so the C int reads swapped.
+    CHECK_EQ(r.u16("seen"), 0x0304);
+    CHECK_EQ(r.i16("seen_b"), -2);
+  }
+
+  TEST_CASE("a guest file's public functions survive the reachability pass") {
+    CcOptions opts;
+    opts.keepAllFrom = {"guest.c"};
+    const std::string text = compileFiles(
+        {{"host.c", "int main(void) { return 0; }"},
+         {"guest.c", "int called_by_nobody(void) { return 1; }\nstatic int mine(void) { return 2; }"}},
+        opts);
+    CHECK(has(text, "called_by_nobody:"));
+    CHECK_FALSE(has(text, "mine:"));
+    CHECK_FALSE(has(text, "guest_c__mine:"));
+  }
+
+  TEST_CASE("a main in a guest file is refused") {
+    CcOptions opts;
+    opts.keepAllFrom = {"guest.c"};
+    std::string msg;
+    try {
+      compileFiles({{"host.c", "int main(void) { return 0; }"}, {"guest.c", "int main(void) { return 1; }"}}, opts);
+    } catch (const CcError& e) {
+      msg = e.file + ":" + std::to_string(e.line) + ": " + e.message();
+    }
+    CHECK(has(msg, "guest.c:1: main belongs to the interpreter"));
+  }
+
   TEST_CASE("the ROM_ names are in scope without ROM.h") {
     const std::string text = compile(
         "__ROM const unsigned char pic[] = { 1, 2, 3 };\nint main(void) { return ROM_pic_LO + ROM_pic_SIZE; }");

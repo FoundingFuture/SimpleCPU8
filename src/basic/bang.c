@@ -40,7 +40,7 @@ static unsigned char bang_call(char *text)
     asm("LD D1 <- $0004");
     asm("LD [D1] <- A");
     asm("LD D1 <- [__sp]");
-    return peek(BANG_RESULT);
+    return peek(SYS_RESULT);
 }
 
 void bang_run(char *text)

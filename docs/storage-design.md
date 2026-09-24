@@ -171,7 +171,7 @@ Three items there belong to the chain.
 |---|---|---|
 | $0000 | BANG_VEC | the handler's instruction slot, high byte first |
 | $0002 | BANG_TEXT | the address of the statement's text while a handler runs |
-| $0004 | BANG_RESULT | the byte the handler left in A, parked by the dispatcher |
+| $0004 | SYS_RESULT | the byte the handler left in A, parked by the dispatcher. A JSR from BASIC parks its routine's A here too |
 
 A word here is big-endian, like every word on this machine. DOKE and DEEK
 read and write it that way. The vector holds an instruction slot, not a

@@ -7,6 +7,7 @@
 #include <fstream>
 #include <string>
 
+#include "asm/asm.h"
 #include "core/isa.h"
 #include "project/project.h"
 
@@ -149,3 +150,97 @@ TEST_SUITE("simplecpu-make new") {
     CHECK_FALSE(fs::exists(t.path / "src"));
   }
 }
+
+#if SC8_HAVE_BASIC
+TEST_SUITE("a project with BASIC and C") {
+  const char* const DOUBLE_C = R"(#include <basicvars.h>
+int calls;
+void DOUBLE(void) { calls = calls + 1; basic_set('A', basic_get('A') * 2); }
+void unused_but_kept(void) { calls = 0; }
+)";
+
+  TEST_CASE("is one program: the interpreter's main, the user's functions kept, the labels resolved") {
+    TempDir t;
+    write(t.path / "src" / "double.c", DOUBLE_C);
+    write(t.path / "src" / "answer.asm", "ANSWER: LD A <- 42\n        RET\n");
+    write(t.path / "src" / "autorun.bas",
+          "10 A = 21\n20 JSR DOUBLE\n30 PRINT A\n40 JSR ANSWER : PRINT PEEK(4)\n50 IF A > 1 THEN JMP DOUBLE\n"
+          "60 PRINT \"JSR DOUBLE\"\n70 REM JSR DOUBLE\n80 JSR unused_but_kept\n90 JSR A\n100 JSR PEEK(4)\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    CHECK(b.cartridge->microcode == "@optimal");
+    // The interpreter's own main is the entry, and the user's C is there.
+    CHECK(b.assembly.find("\nmain:") != std::string::npos);
+    CHECK(b.assembly.find("\nDOUBLE:") != std::string::npos);
+    CHECK(b.assembly.find("\nunused_but_kept:") != std::string::npos);
+    CHECK(b.assembly.find("\nbasic_set:") != std::string::npos);
+    CHECK(b.assembly.find("term_puts:") != std::string::npos);
+    // The system page is kept: the compiler's own zero page starts at $20.
+    CHECK(b.assembly.find("__sys:") != std::string::npos);
+    REQUIRE_EQ(b.cartridge->basic.size(), 1u);
+    const std::string bas = b.cartridge->basic[0].second;
+    // The slot DOUBLE landed on, read back off the assembly, is what the
+    // program now says, and ANSWER is the assembly label after the C.
+    const Assembled a = assemble(b.assembly);
+    REQUIRE(a.errors.empty());
+    const std::string slot = std::to_string(a.labels.at("DOUBLE").value);
+    const std::string answer = std::to_string(a.labels.at("ANSWER").value);
+    CHECK(a.labels.at("DOUBLE").value > 0);
+    CHECK_MESSAGE(bas.find("20 JSR " + slot + "\n") != std::string::npos, bas);
+    CHECK(bas.find("40 JSR " + answer + " : PRINT PEEK(4)") != std::string::npos);
+    CHECK(bas.find("50 IF A > 1 THEN JMP " + slot + "\n") != std::string::npos);
+    // A string, a REM, a variable and a function call are left alone.
+    CHECK(bas.find("60 PRINT \"JSR DOUBLE\"") != std::string::npos);
+    CHECK(bas.find("70 REM JSR DOUBLE") != std::string::npos);
+    CHECK(bas.find("80 JSR unused_but_kept") == std::string::npos);
+    CHECK(bas.find("90 JSR A\n") != std::string::npos);
+    CHECK(bas.find("100 JSR PEEK(4)") != std::string::npos);
+    bool interpreter = false;
+    for (const std::string& s : b.sources) interpreter = interpreter || s == "the BASIC interpreter";
+    CHECK(interpreter);
+  }
+
+  TEST_CASE("a main in the user's C is refused") {
+    TempDir t;
+    write(t.path / "src" / "main.c", "int main(void) { return 0; }\n");
+    write(t.path / "src" / "autorun.bas", "10 PRINT 1\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_FALSE(b.errors.empty());
+    CHECK_MESSAGE(b.errors[0].find("main.c:1: main belongs to the interpreter") != std::string::npos, b.errors[0]);
+  }
+
+  TEST_CASE("an unknown label names the file, the line and the name") {
+    TempDir t;
+    write(t.path / "src" / "double.c", DOUBLE_C);
+    write(t.path / "src" / "autorun.bas", "10 PRINT 1\n20 JSR TRIPLE\n30 JMP QUAD\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_EQ(b.errors.size(), 2u);
+    CHECK_MESSAGE(b.errors[0].find("autorun.bas:2: TRIPLE is not a label") != std::string::npos, b.errors[0]);
+    CHECK_MESSAGE(b.errors[1].find("autorun.bas:3: QUAD is not a label") != std::string::npos, b.errors[1]);
+  }
+
+  TEST_CASE("a user basic.h is refused, because the interpreter's is included by that name") {
+    TempDir t;
+    write(t.path / "src" / "double.c", DOUBLE_C);
+    write(t.path / "src" / "basic.h", "#define X 1\n");
+    write(t.path / "src" / "autorun.bas", "10 PRINT 1\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_FALSE(b.errors.empty());
+    CHECK(b.errors[0].find("basic.h is the interpreter's header") != std::string::npos);
+  }
+
+  TEST_CASE("a .bas with .asm and no .c is still the interpreter's assembly plus the driver") {
+    TempDir t;
+    write(t.path / "src" / "answer.asm", "ANSWER: LD A <- 42\n        RET\n");
+    write(t.path / "src" / "autorun.bas", "10 JSR ANSWER\n20 PRINT PEEK(4)\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    CHECK(b.assembly.find("; Generated by the SimpleCPU-8 C compiler") != std::string::npos);
+    CHECK(b.cartridge->basic[0].second.find("10 JSR ANSWER") == std::string::npos);
+    CHECK(b.cartridge->basic[0].second.find("10 JSR ") != std::string::npos);
+  }
+}
+#endif

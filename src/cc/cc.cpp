@@ -231,6 +231,11 @@ Merged merge(const std::vector<SourceFile>& sources, const Resolve& resolve, con
   for (size_t ui = 0; ui < units.size(); ui++) {
     const Unit& u = units[ui];
     for (const FuncDecl& f : u.funcs) {
+      if (f.body && f.name == "main" && opts.keepAllFrom.count(u.file)) {
+        throw CcError(f.pos.file, f.pos.line,
+                      "main belongs to the interpreter in a project with BASIC. Give this function another "
+                      "name and call it from BASIC with JSR.");
+      }
       const std::string name = rename(ui, f.name);
       const FuncDecl* prev = m.funcs.get(name);
       if (prev && prev->body && f.body) {
@@ -385,6 +390,12 @@ Program compileProgram(const std::vector<SourceFile>& files, const CcOptions& op
   // so a program that never divides must not carry the divide.
   std::set<std::string> reach;
   std::vector<std::string> queue = {"main"};
+  // A guest file's public functions are roots too: the host calls them by
+  // slot, which the compiler cannot see. Its main would shadow the host's.
+  for (const std::string& n : m.funcs.order) {
+    const FuncDecl* f = m.funcs.get(n);
+    if (f->body && !f->isStatic && opts.keepAllFrom.count(f->pos.file)) queue.push_back(n);
+  }
   while (!queue.empty()) {
     const std::string n = queue.back();
     queue.pop_back();

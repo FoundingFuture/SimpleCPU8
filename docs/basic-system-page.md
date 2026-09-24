@@ -21,7 +21,7 @@ reads them.
 |---|---|---|---|
 | $00 | SYS_BANG_VEC | word | the instruction slot of the bang handler |
 | $02 | SYS_BANG_TEXT | word | the address of the statement's text while a handler runs |
-| $04 | SYS_BANG_RESULT | byte | what the handler left in A |
+| $04 | SYS_RESULT | byte | the A register a bang handler or a JSR routine came back with |
 | $05 | SYS_COL | byte | cursor column, 0 to 41 |
 | $06 | SYS_ROW | byte | cursor row, 0 to 31 |
 | $07 | SYS_KEY | byte | the last key pressed, 0 before any |
@@ -34,7 +34,8 @@ reads them.
 | $13 | SYS_ERR_LINE | word | the line it happened on, 0 in direct mode |
 | $15 | SYS_RUNNING | byte | 1 while a program runs |
 | $16 | SYS_PC | word | the offset in the program of the line being run |
-| $18 | reserved | 8 | free for what comes next |
+| $18 | SYS_CALL | word | the instruction slot the last JSR or JMP went to |
+| $1A | reserved | 6 | free for what comes next |
 
 The integer variables sit in 11 word slots per letter: the bare name first,
 then the digit forms 0 to 9. So `B` is slot 11 and `B7` is slot 19, and
@@ -67,6 +68,33 @@ driver's next:
 
 From assembly, the same in four loads, as docs/storage-design.md shows.
 examples/basic-driver is the worked example.
+
+## Calling a routine
+
+`JSR n` calls the routine at instruction slot n, where n is any integer
+expression. The routine comes back with `RET`. BASIC parks the A register
+it came back with at SYS_RESULT, so `PEEK(4)` reads it, and puts its own
+frame pointer back. The slot is parked at SYS_CALL first. `JMP n` goes to
+slot n and never comes back: the routine owns the machine from then on,
+and the interpreter is gone with the program and its variables.
+
+```basic
+10 JSR 61440
+20 PRINT PEEK(4)
+```
+
+A routine called this way has the contract a bang handler has. It may use
+the hardware stack in balance. It may not touch the zero page past the
+system page, which is BASIC's register file.
+
+In a project built by simplecpu-make, the number may be a name. `JSR
+DOUBLE` names a C function or an assembly label. The build writes the
+label's slot into the program before the ROM is written. The interpreter
+itself knows only numbers. A name typed at the prompt is a syntax error.
+A C function called this way runs on the interpreter's own runtime. It may
+keep globals and call other functions. It reads and writes the
+variables A to Z through `<basicvars.h>`. examples/basic-c is the worked
+example. docs/standalone.md, under Making a program, has the project side.
 
 ## The error codes
 

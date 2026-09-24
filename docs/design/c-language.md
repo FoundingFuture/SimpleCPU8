@@ -107,7 +107,8 @@ what lets the assembler see `GPU_CMD` rather than a number.
 
 Two layers. The friendly one is where a program starts:
 
-`#include <graphics.h>`, `<sound.h>`, `<keys.h>`, `<math.h>`, `<disk.h>`.
+`#include <graphics.h>`, `<sound.h>`, `<keys.h>`, `<math.h>`, `<disk.h>`,
+`<basicvars.h>`.
 
 Plain int coordinates, the usual names, and no port in sight. `graphics.h`
 draws: `setcolor`, `cls`, `plot`, `line`, `rect`, `circle`, `ellipse`, each
@@ -118,7 +119,10 @@ beeps with a built in square wave and plays samples and MIDI tunes:
 the arrows and the keyboard: `left`, `fire`, `key`, `waitkey`. `math.h` is
 `sqrt`, `sin`, `cos`, `atan2`, `pow` and the rest on `double`, run by the
 coprocessor. `disk.h` is `save`, `load`, `erase` and `catalog` on the named
-files BASIC uses.
+files BASIC uses. `basicvars.h` is `basic_get` and `basic_set` on BASIC's
+integer variables A to Z, for a C function that BASIC calls with `JSR` in
+a project that holds both. The interpreter's own header is `"basic.h"`,
+included with quotes, and in such a project a C file may include it too.
 
 ```c
 #include <graphics.h>

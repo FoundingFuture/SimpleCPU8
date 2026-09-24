@@ -72,6 +72,85 @@ fs::path assetPath(const Layout& l, std::string_view name) {
   return l.sources / fs::path(name);
 }
 
+// JSR name and JMP name in a BASIC line, name being an identifier rather
+// than a number, resolved to the instruction slot of that code label. The
+// interpreter knows only numbers, so the text that reaches the ROM holds
+// the slot. A one letter name, or a letter and a digit, is a BASIC
+// variable and stays. So does a name followed by a parenthesis, which is
+// a function call. Any other name that is not a label is an error, with
+// the line it was on.
+struct LabelError {
+  int line;
+  std::string name;
+};
+
+bool isVarName(const std::string& n) {
+  if (n.size() == 1) return std::isalpha(static_cast<unsigned char>(n[0])) != 0;
+  return n.size() == 2 && std::isalpha(static_cast<unsigned char>(n[0])) && std::isdigit(static_cast<unsigned char>(n[1]));
+}
+
+std::string resolveLabels(const std::string& text, const std::map<std::string, Label>& labels,
+                          std::vector<LabelError>& errors) {
+  std::string out;
+  int lineNo = 0;
+  size_t at = 0;
+  while (at <= text.size()) {
+    size_t nl = text.find('\n', at);
+    if (nl == std::string::npos) nl = text.size();
+    std::string line = text.substr(at, nl - at);
+    lineNo++;
+    at = nl + 1;
+    // Walk the line: skip strings, stop at REM, rewrite after JSR and JMP.
+    std::string rewritten;
+    size_t i = 0;
+    bool quoted = false;
+    auto word = [&](size_t from) {
+      size_t n = 0;
+      while (from + n < line.size() && (line[from + n] == '_' || std::isalnum(static_cast<unsigned char>(line[from + n])))) n++;
+      return line.substr(from, n);
+    };
+    while (i < line.size()) {
+      const char c = line[i];
+      if (c == '"') quoted = !quoted;
+      if (quoted || !(c == '_' || std::isalpha(static_cast<unsigned char>(c))) ||
+          (i > 0 && (line[i - 1] == '_' || std::isalnum(static_cast<unsigned char>(line[i - 1]))))) {
+        rewritten += c;
+        i++;
+        continue;
+      }
+      const std::string w = word(i);
+      std::string upper = w;
+      for (char& ch : upper) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+      rewritten += w;
+      i += w.size();
+      if (upper == "REM") {
+        rewritten += line.substr(i);
+        break;
+      }
+      if (upper != "JSR" && upper != "JMP") continue;
+      size_t j = i;
+      while (j < line.size() && line[j] == ' ') j++;
+      if (j >= line.size() || !(line[j] == '_' || std::isalpha(static_cast<unsigned char>(line[j])))) continue;
+      const std::string name = word(j);
+      size_t k = j + name.size();
+      while (k < line.size() && line[k] == ' ') k++;
+      auto hit = labels.find(name);
+      if (hit != labels.end() && hit->second.kind == Label::Kind::Code) {
+        rewritten += line.substr(i, j - i) + std::to_string(hit->second.value);
+        i = j + name.size();
+        continue;
+      }
+      if (isVarName(name) || (k < line.size() && line[k] == '(')) continue;
+      errors.push_back({lineNo, name});
+      rewritten += line.substr(i, j + name.size() - i);
+      i = j + name.size();
+    }
+    out += rewritten;
+    if (nl < text.size()) out += '\n';
+  }
+  return out;
+}
+
 }  // namespace
 
 Assets loaders(const Layout& layout, std::vector<std::string>* notes) {
@@ -186,6 +265,10 @@ Built build(const Layout& layout, const Options& opts) {
   const std::vector<fs::path> asmFiles = filesWith(layout.sources, ".asm");
   const std::vector<fs::path> basFiles = filesWith(layout.sources, ".bas");
   const bool basicProject = cFiles.empty() && !basFiles.empty();
+  // BASIC and C together: one program, the interpreter's sources and the
+  // user's compiled as one. The .bas files are slots as in a BASIC
+  // project, and BASIC calls the C by name with JSR.
+  const bool mixedProject = !cFiles.empty() && !basFiles.empty();
   if (cFiles.empty() && asmFiles.empty() && basFiles.empty()) {
     b.errors.push_back(layout.sources.string() + " holds no .c, .asm or .bas file");
     return b;
@@ -203,7 +286,7 @@ Built build(const Layout& layout, const Options& opts) {
       if (!parsed.errors.empty()) return b;
       microcode = *text;
     } else {
-      microcode = basicProject ? "@optimal" : "@naive";
+      microcode = (basicProject || mixedProject) ? "@optimal" : "@naive";
     }
   }
 
@@ -230,6 +313,37 @@ Built build(const Layout& layout, const Options& opts) {
     ccOpts.defines = opts.defines;
     ccOpts.assets = &assets;
     std::vector<CcInput> inputs;
+    if (mixedProject) {
+#if SC8_HAVE_BASIC
+      // The interpreter's files go in first, so main is the interpreter's
+      // and the program boots into BASIC. They keep their system page.
+      // Every public function in the user's files is a root: BASIC calls
+      // them by slot, which the compiler cannot see. The interpreter's
+      // build line names its own nine files, which would leave the user's
+      // out, so it is turned into a plain comment of the same length.
+      ccOpts.zpReserve = 32;
+      for (const auto& [name, text] : basicSources()) {
+        if (name == "basic.h") {
+          ccOpts.extra[name] = text;
+          continue;
+        }
+        std::string t = text;
+        const size_t at = t.find("// build:");
+        if (at != std::string::npos) t.replace(at, 9, "// built:");
+        inputs.push_back({"basic/" + name, t});
+      }
+      b.sources.push_back("the BASIC interpreter");
+      for (const fs::path& p : hFiles) {
+        if (p.filename() == "basic.h") {
+          b.errors.push_back(p.string() + ": basic.h is the interpreter's header in a project with BASIC. Rename this one.");
+          return b;
+        }
+      }
+#else
+      b.errors.push_back("this build has no BASIC interpreter to put a .bas project on");
+      return b;
+#endif
+    }
     for (const fs::path& p : cFiles) {
       auto t = readText(p);
       if (!t) {
@@ -238,6 +352,7 @@ Built build(const Layout& layout, const Options& opts) {
       }
       inputs.push_back({p.filename().string(), *t});
       b.sources.push_back(p.filename().string());
+      if (mixedProject) ccOpts.keepAllFrom.insert(p.filename().string());
     }
     for (const fs::path& p : hFiles) {
       if (auto t = readText(p)) ccOpts.extra[p.filename().string()] = *t;
@@ -291,10 +406,18 @@ Built build(const Layout& layout, const Options& opts) {
   c.meta = meta;
   for (const fs::path& p : basFiles) {
     if (auto t = readText(p)) {
-      c.basic.emplace_back(slotNameFor(p), *t);
+      std::vector<LabelError> unknown;
+      const std::string resolved = resolveLabels(*t, a.labels, unknown);
+      for (const LabelError& e : unknown) {
+        b.errors.push_back(p.string() + ":" + std::to_string(e.line) + ": " + e.name +
+                           " is not a label in this project. JSR and JMP take a slot number or the name of a C "
+                           "function or an assembly label.");
+      }
+      c.basic.emplace_back(slotNameFor(p), resolved);
       b.sources.push_back(p.filename().string());
     }
   }
+  if (!b.errors.empty()) return b;
   b.instructions = a.program.size();
   b.ramBytes = a.ramLength;
   b.dataBytes = a.cart.size();

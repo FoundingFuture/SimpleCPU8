@@ -601,6 +601,60 @@ unsigned char catalog(char *buf, unsigned int room) {
 }
 )";
 
+// ---- basicvars.h -------------------------------------------------------
+
+const char* const BASICVARS_H = R"(/* basicvars.h. BASIC's variables, for a C routine that BASIC calls.
+ *
+ * A project that holds .bas and .c files is one program: the interpreter
+ * and the C together. BASIC calls a C function by name, JSR DOUBLE, and
+ * the function reads and writes the integer variables A to Z here. The
+ * letter may be in either case. The digit forms, A0 to A9, stay BASIC's.
+ *
+ *   #include <basicvars.h>
+ *   void DOUBLE(void) { basic_set('A', basic_get('A') * 2); }
+ *
+ * A byte handed back through PEEK(4) is the A register the routine came
+ * back with. A C function's epilogue leaves its own bookkeeping in A, so
+ * from C the variables are the way back. In a project with BASIC,
+ * #include "basic.h" reaches the interpreter's own header as well:
+ * term_puts, term_putn and term_nl print where BASIC prints.
+ */
+#ifndef __BASICVARS_H__
+#define __BASICVARS_H__
+
+int basic_get(char letter);
+void basic_set(char letter, int value);
+
+#endif
+)";
+
+const char* const BASICVARS_C = R"(#include <basicvars.h>
+
+/* SYS_VARS, the word at $0C of the system page, points at the integer
+ * variables: 26 letters, 11 words each, the bare letter first, every word
+ * high byte first. docs/basic-system-page.md has the page.
+ */
+static unsigned char *__basic_var(char letter) {
+    unsigned int base;
+    if (letter >= 'a' && letter <= 'z') letter = letter - 32;
+    base = (*(unsigned char *)12 << 8) | *(unsigned char *)13;
+    return (unsigned char *)(base + (letter - 'A') * 22);
+}
+
+int basic_get(char letter) {
+    unsigned char *p;
+    p = __basic_var(letter);
+    return (p[0] << 8) | p[1];
+}
+
+void basic_set(char letter, int value) {
+    unsigned char *p;
+    p = __basic_var(letter);
+    p[0] = value >> 8;
+    p[1] = value;
+}
+)";
+
 }  // namespace
 
 const std::vector<Library>& libraries() {
@@ -610,6 +664,7 @@ const std::vector<Library>& libraries() {
       {"keys.h", "<keys.c>", KEYS_H, KEYS_C},
       {"math.h", "<math.c>", MATH_H, MATH_C},
       {"disk.h", "<disk.c>", DISK_H, DISK_C},
+      {"basicvars.h", "<basicvars.c>", BASICVARS_H, BASICVARS_C},
   };
   return L;
 }

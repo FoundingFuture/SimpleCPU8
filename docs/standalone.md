@@ -60,6 +60,18 @@ project is a driver appended to the interpreter. Only `.asm` files make
 an assembly project. A `microcode.txt` among the sources is the ROM's
 microcode set.
 
+A `.bas` beside a `.c` makes a mixed project. The ROM is one C program:
+the interpreter's own sources compiled together with the `.c` files, so
+`main` is the interpreter's and the user's files may not define one. BASIC
+boots and runs `AUTORUN` as before. Every public function in the user's
+files is kept whether or not anything calls it, because BASIC calls it by
+instruction slot: `JSR DOUBLE` in a `.bas` names a C function or an
+assembly label, and the build writes the label's slot into the program
+before it goes into the ROM. An unknown name is a build error naming the
+file and line. `<basicvars.h>` gives the C side `basic_get` and
+`basic_set` on the variables A to Z. examples/basic-c is the worked
+example, and docs/basic-system-page.md has the JSR and JMP statements.
+
 `simplecpu-make new mygame --c` lays a project out, and so do `--basic`,
 `--assembly` and `--microcode`: the folders, a README, a `.gitignore`
 for `build/` and a first program that builds and runs. The IDE's Project

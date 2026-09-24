@@ -152,7 +152,7 @@ int var_slot(void);
  */
 #define SYS_BANG_VEC    0x00  /* word: the bang handler's instruction slot */
 #define SYS_BANG_TEXT   0x02  /* word: the statement's text while a handler runs */
-#define SYS_BANG_RESULT 0x04  /* byte: what the handler left in A */
+#define SYS_RESULT      0x04  /* byte: the A a bang handler or a JSR routine came back with */
 #define SYS_COL         0x05  /* byte: cursor column, 0 to 41 */
 #define SYS_ROW         0x06  /* byte: cursor row, 0 to 31 */
 #define SYS_KEY         0x07  /* byte: the last key pressed, 0 when none yet */
@@ -165,7 +165,7 @@ int var_slot(void);
 #define SYS_ERR_LINE    0x13  /* word: the line it happened on, -1 in direct mode */
 #define SYS_RUNNING     0x15  /* byte: 1 while a program runs */
 #define SYS_PC          0x16  /* word: offset of the line being run */
-#define SYS_FRAME       0x18  /* reserved for a frame counter copy */
+#define SYS_CALL        0x18  /* word: the instruction slot the last JSR or JMP went to */
 #define SYS_END         0x20  /* the first byte the compiler may use */
 
 /* A word into the page, high byte first, the way DOKE stores one. */
@@ -173,7 +173,6 @@ int var_slot(void);
 
 #define BANG_VEC    SYS_BANG_VEC
 #define BANG_TEXT   SYS_BANG_TEXT
-#define BANG_RESULT SYS_BANG_RESULT
 
 #define cx        (*(unsigned char *)SYS_COL)
 #define cy        (*(unsigned char *)SYS_ROW)

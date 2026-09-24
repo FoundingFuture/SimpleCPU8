@@ -18,10 +18,10 @@ in this tree.
 | expr.c | Expression evaluation, numbers and strings. |
 | strings.c | The string heap and the string functions. |
 | edit.c | The program store: insert, replace, delete and list lines. |
-| run.c | The statements: RUN, GOTO, GOSUB, FOR, IF, PRINT, POKE, DOKE, the break check. |
+| run.c | The statements: RUN, GOTO, GOSUB, FOR, IF, PRINT, POKE, DOKE, JSR, JMP, the break check. |
 | bang.c | The bang statement and its vector at $8000. See docs/storage-design.md. |
 | store.c | The storage driver: LOAD, SAVE, DELETE and CATALOG through the storage device. |
-| basic_rom.h, basic_rom.cpp | sc8::basicRom(), the embedded ROM bytes. |
+| basic_rom.h, basic_rom.cpp | sc8::basicRom(), the embedded ROM bytes, basicAsm() the assembly and basicSources() the C, for a project that holds BASIC and C. |
 | extract.mjs | The extraction script. Needs Node 22 with --experimental-strip-types. |
 
 ## Build

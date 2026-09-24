@@ -13,6 +13,8 @@
 #include <doctest.h>
 
 #include <cctype>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -28,6 +30,7 @@
 #include "devices/gpu.h"
 #include "devices/input.h"
 #include "devices/storage.h"
+#include "project/project.h"
 
 using namespace sc8;
 
@@ -66,6 +69,10 @@ struct Session {
     if (!r.cartridge) throw std::runtime_error("basic.rom does not decode: " + r.error);
     cart = *r.cartridge;
   }
+
+  // On a cartridge of the caller's, one a project build made. Its BAS
+  // slots are what the storage device serves, so AUTORUN runs at boot.
+  explicit Session(Cartridge c) : cart(std::move(c)), slots(cart.basic), gpu([this] { return m ? m->cycles : 0; }, &acp) {}
 
   // Session.load: power the devices on, hand them the cartridge, build the
   // machine and apply the .ram image.
@@ -672,6 +679,99 @@ TEST_SUITE("the bang statement") {
     CHECK(vec != 0);
     type(*s, "PRINT DEEK(0)");
     CHECK(has(after(text(*s), "DEEK(0)"), std::to_string(vec > 32767 ? vec - 65536 : vec)));
+  }
+}
+
+// JSR n calls the routine at instruction slot n and parks the A it came
+// back with at $04. JMP n goes there for good. A name in place of the
+// number is the project build's to resolve, so a project is built here, in
+// a temporary folder, and its cartridge booted.
+namespace {
+
+struct TempProject {
+  std::filesystem::path path;
+  TempProject() {
+    path = std::filesystem::temp_directory_path() / std::filesystem::path("sc8-basic-" + std::to_string(std::rand()));
+    std::filesystem::remove_all(path);
+  }
+  ~TempProject() { std::filesystem::remove_all(path); }
+  void write(const std::string& name, const std::string& text) {
+    std::filesystem::create_directories(path / "src");
+    std::ofstream(path / "src" / name) << text;
+  }
+  Cartridge build() {
+    project::Built b = project::build(project::layoutOf(path), {});
+    if (!b.cartridge) throw std::runtime_error(b.errors.empty() ? "no cartridge" : b.errors[0]);
+    return *b.cartridge;
+  }
+};
+
+}  // namespace
+
+TEST_SUITE("JSR and JMP") {
+  TEST_CASE("a name at the prompt is a syntax error, because only a build knows labels") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "JSR DOUBLE");
+    CHECK(has(text(*s), "SYNTAX ERROR"));
+    CHECK(s->m->status == Status::Running);
+  }
+
+  TEST_CASE("calls an assembly routine by slot and parks its A at 4") {
+    TempProject p;
+    p.write("answer.asm", "ANSWER: LD A <- 42\n        RET\n");
+    p.write("demo.bas", "10 JSR ANSWER\n20 PRINT PEEK(4)\n");
+    Cartridge c = p.build();
+    // The build put the slot in. Type the same number at the prompt.
+    const std::string line = c.basic[0].second.substr(0, c.basic[0].second.find('\n'));
+    REQUIRE(line.rfind("10 JSR ", 0) == 0);
+    auto s = std::make_unique<Session>(std::move(c));
+    s->load();
+    settle(*s);
+    type(*s, line.substr(3));
+    type(*s, "PRINT PEEK(4)");
+    CHECK(has(after(text(*s), "PEEK(4)"), "42"));
+    CHECK_EQ(s->m->ram[4], 42);
+  }
+
+  TEST_CASE("calls a C function that keeps a global, calls another and reads the variables") {
+    TempProject p;
+    p.write("double.c",
+            "#include <basicvars.h>\n"
+            "int calls;\n"
+            "static int twice(int v) { return v + v; }\n"
+            "void DOUBLE(void) { calls = calls + 1; basic_set('a', twice(basic_get('A'))); basic_set('N', calls); }\n");
+    p.write("autorun.bas", "10 A = 21\n20 JSR DOUBLE\n30 JSR DOUBLE\n40 PRINT A, N\n50 END\n");
+    Cartridge c = p.build();
+    const std::string& bas = c.basic[0].second;
+    const size_t at = bas.find("20 JSR ") + 7;
+    const std::string slot = bas.substr(at, bas.find('\n', at) - at);
+    auto s = std::make_unique<Session>(std::move(c));
+    s->load();
+    settle(*s, 12000000);
+    CHECK_MESSAGE(has(text(*s), "84 2"), text(*s));
+    // And again from the prompt, by number: the C is still there, with
+    // its global.
+    type(*s, "A = 5");
+    type(*s, "JSR " + slot);
+    type(*s, "PRINT A, N");
+    CHECK(has(after(text(*s), "PRINT A, N"), "10 3"));
+  }
+
+  TEST_CASE("JMP never comes back") {
+    TempProject p;
+    p.write("spin.asm", "SPIN:   LD A <- 99\n        LD [$0004] <- A\nHERE:   JMP HERE\n");
+    p.write("demo.bas", "10 JMP SPIN\n20 PRINT \"NOT REACHED\"\n");
+    Cartridge c = p.build();
+    const std::string line = c.basic[0].second.substr(0, c.basic[0].second.find('\n'));
+    auto s = std::make_unique<Session>(std::move(c));
+    s->load();
+    settle(*s);
+    type(*s, line.substr(3));
+    type(*s, "PRINT 1");
+    // Nobody reads the keys any more, so the second line is never echoed.
+    CHECK_EQ(s->m->ram[4], 99);
+    CHECK_FALSE(has(text(*s), "PRINT"));
   }
 }
 

@@ -52,7 +52,23 @@ add_custom_command(
   DEPENDS "${SC8_BASIC_ASM}" "${CMAKE_SOURCE_DIR}/cmake/EmbedText.cmake"
   COMMENT "Embedding basic.asm")
 
-add_library(sc8_basic STATIC basic_rom.cpp program.cpp "${SC8_BASIC_DATA_H}" "${SC8_BASIC_ASM_H}")
+# And the C sources themselves, so a project that holds BASIC and C
+# compiles the interpreter and the user's files as one program.
+set(SC8_BASIC_SRC_H "${CMAKE_CURRENT_BINARY_DIR}/basic_src_data.h")
+set(SC8_BASIC_SRC_PATHS)
+foreach(f IN LISTS SC8_BASIC_SOURCES SC8_BASIC_HEADERS)
+  list(APPEND SC8_BASIC_SRC_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/${f}")
+endforeach()
+add_custom_command(
+  OUTPUT "${SC8_BASIC_SRC_H}"
+  COMMAND ${CMAKE_COMMAND} "-DINPUTS=${SC8_BASIC_SRC_PATHS}" "-DOUTPUT=${SC8_BASIC_SRC_H}"
+          -DNAME=BASIC_SRC -P "${CMAKE_SOURCE_DIR}/cmake/EmbedTexts.cmake"
+  DEPENDS ${SC8_BASIC_SRC_PATHS} "${CMAKE_SOURCE_DIR}/cmake/EmbedTexts.cmake"
+  COMMENT "Embedding the BASIC sources"
+  VERBATIM)
+
+add_library(sc8_basic STATIC basic_rom.cpp program.cpp "${SC8_BASIC_DATA_H}" "${SC8_BASIC_ASM_H}"
+            "${SC8_BASIC_SRC_H}")
 target_include_directories(sc8_basic
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/.."
   PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
