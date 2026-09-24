@@ -309,6 +309,33 @@ TEST_SUITE("stored programs") {
     CHECK(has(text(*s), "10 PRINT \"X\""));
   }
 
+  TEST_CASE("lists one line or a range") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 REM A1");
+    type(*s, "20 REM B2");
+    type(*s, "30 REM C3");
+    type(*s, "40 REM D4");
+    auto shown = [&](const std::string& command) {
+      type(*s, command);
+      const std::string t = after(text(*s), command);
+      std::string marks;
+      for (const char* m : {"A1", "B2", "C3", "D4"}) {
+        if (has(t, m)) marks += m;
+      }
+      type(*s, "CLS");
+      return marks;
+    };
+    CHECK_EQ(shown("LIST 20"), "B2");
+    CHECK_EQ(shown("LIST 20-30"), "B2C3");
+    CHECK_EQ(shown("LIST -20"), "A1B2");
+    CHECK_EQ(shown("LIST 30-"), "C3D4");
+    CHECK_EQ(shown("LIST 15-25"), "B2");
+    CHECK_EQ(shown("LIST"), "A1B2C3D4");
+    type(*s, "LIST 10 20");
+    CHECK(has(after(text(*s), "LIST 10 20"), "SYNTAX"));
+  }
+
   TEST_CASE("replaces a line with the same number") {
     auto s = boot();
     settle(*s);
@@ -1077,5 +1104,24 @@ TEST_SUITE("basic program codec") {
     const std::string back = basic::decodeProgram(p);
     CHECK(back.find("1 XXX") == 0);
     CHECK(back.back() == '\n');
+  }
+  TEST_CASE("a merge keeps what each side changed") {
+    const auto base = basic::encodeProgram("10 A\n20 B\n30 C\n");
+    const auto doc = basic::encodeProgram("10 A\n20 EDITED\n30 C\n");
+    const auto machine = basic::encodeProgram("10 A\n20 B\n25 TYPED\n");
+    CHECK_EQ(basic::decodeProgram(basic::mergePrograms(base, doc, machine)), "10 A\n20 EDITED\n25 TYPED\n");
+    // Both changed one line: the document's version stands.
+    const auto both = basic::encodeProgram("10 A\n20 OTHER\n30 C\n");
+    CHECK_EQ(basic::decodeProgram(basic::mergePrograms(base, doc, both)), "10 A\n20 EDITED\n30 C\n");
+  }
+  TEST_CASE("patching the text changes only what the program changed") {
+    const std::string text = "10 print \"hi\"\n\n20   goto 10\n40 END\n";
+    const auto program = basic::encodeProgram("10 print \"hi\"\n20 goto 10\n30 REM NEW\n");
+    CHECK_EQ(basic::patchText(text, program), "10 print \"hi\"\n\n20   goto 10\n30 REM NEW\n");
+    // A changed line takes the listing's spelling; a repeated number
+    // keeps only the row encodeProgram reads.
+    const auto changed = basic::encodeProgram("10 PRINT 1\n");
+    CHECK_EQ(basic::patchText("10 A\n10 B\n", changed), "10 PRINT 1\n");
+    CHECK_EQ(basic::encodeProgram(basic::patchText(text, program)), program);
   }
 }

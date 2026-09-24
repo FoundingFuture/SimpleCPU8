@@ -226,6 +226,11 @@ them. They also give you room to change your mind. People count in tens
 so a new line can go between two old ones. Type `15 PRINT "AND"` and it
 lands between 10 and 20.
 
+`LIST` can also show part of a program. `LIST 20` shows line 20.
+`LIST 20-40` shows lines 20 to 40. `LIST -40` shows everything up to
+line 40, and `LIST 20-` shows everything from line 20 on. A long program
+no longer scrolls away before you find the line you want.
+
 To replace a line, type it again with the same number. To delete a line,
 type its number and nothing else. `NEW` throws the whole program away.
 
@@ -670,23 +675,23 @@ lays out a new project with a first program in it.
 
 ## The IDE
 
-`./r --ide` opens the IDE, a bigger window with more panes. Its Edit
-level has three tabs across the top: Source, BASIC and Project. The
-BASIC tab is a text editor with the machine's screen beside it.
+`./r --ide` opens the IDE, a bigger window with more panes. File, New
+project, BASIC lays out a BASIC project with one file, `autorun.bas`.
+The editor shows that file, with the machine's screen beside it.
 
 Type a program in the editor. Press Run in BASIC. The IDE boots BASIC,
-puts the program in the machine's memory and types `RUN` for you. Load
-and Save read and write a `.bas` file on disk. Save into ROM writes a
-named slot the way `!SAVE` does.
+puts the program in the machine's memory and types `RUN` for you.
 
-The editor and the machine share one program. While the machine waits at
-`READY`, a line you type on the small screen appears in the editor. The
-pane says so under its buttons. When you have edited the text and the
-machine's copy has changed too, the pane offers Pull from machine.
+From then on the editor and the machine hold one program. Change a line
+in the editor and type `LIST` on the small screen: the change is there.
+Type `30 REM A NOTE` on the small screen and line 30 appears in the
+editor, in its place. There is nothing to send across and nothing to
+forget. While a program runs, the two wait. The changes go across when
+the program stops at `READY`.
 
-The Project tab opens a project folder, lists its files and builds them
-with one button. Press BASIC beside `new project in that folder` and the
-IDE lays out a BASIC project for you.
+`NEW` on the small screen empties the editor as well. The file on disk
+keeps the old program until you save, and the Messages pane says so.
+Save writes the editor's text to the file.
 
 ## Longer programs
 
@@ -834,7 +839,7 @@ Commands you type at the prompt:
 | Word | Does |
 |---|---|
 | `RUN` | runs the stored program from its lowest line |
-| `LIST` | prints the stored program |
+| `LIST` | prints the stored program, or part of it: `LIST 20`, `LIST 20-40`, `LIST -40`, `LIST 20-` |
 | `NEW` | throws the stored program away |
 
 Statements, in a program or at the prompt:

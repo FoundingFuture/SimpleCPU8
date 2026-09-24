@@ -10,6 +10,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <span>
 #include <string>
 #include <vector>
@@ -34,5 +35,21 @@ std::vector<uint8_t> encodeProgram(const std::string& text);
 
 // Stored bytes back to text, one line per row, as LIST prints them.
 std::string decodeProgram(std::span<const uint8_t> bytes);
+
+// The stored lines by number.
+std::map<int, std::string> programLines(std::span<const uint8_t> bytes);
+
+// A three way merge by line number. base is the program both sides last
+// agreed on, mine and theirs what each made of it since. A line only one
+// side changed takes that side's version. A line both changed takes mine.
+std::vector<uint8_t> mergePrograms(std::span<const uint8_t> base, std::span<const uint8_t> mine,
+                                   std::span<const uint8_t> theirs);
+
+// The document's text brought in line with a stored program, changing as
+// little as it can. A numbered line the program holds unchanged keeps its
+// own spelling and place. A changed line is rewritten as LIST prints it.
+// A line the program lacks goes. A new line goes before the first line
+// numbered above it. Blank lines and lines without a number stay.
+std::string patchText(const std::string& text, std::span<const uint8_t> program);
 
 }  // namespace sc8::basic

@@ -32,6 +32,35 @@ void rt_error(unsigned char code)
     running = 0;
 }
 
+/* LIST, LIST 100, LIST 100-200, LIST -200 and LIST 100-: the whole
+ * program, one line, or a range with either end left open.
+ */
+static void do_list(void)
+{
+    unsigned int first;
+    unsigned int last;
+    first = 1;
+    last = 65535;
+    lx_next();
+    if (lx_tok == T_NUM) {
+        first = lx_num;
+        last = lx_num;
+        lx_next();
+        if (lx_is("-")) {
+            last = 65535;
+            lx_next();
+            if (lx_tok == T_NUM) { last = lx_num; lx_next(); }
+        }
+    } else if (lx_is("-")) {
+        lx_next();
+        if (lx_tok != T_NUM) { err = E_SYNTAX; return; }
+        last = lx_num;
+        lx_next();
+    }
+    if (lx_tok != T_END) { err = E_SYNTAX; return; }
+    ed_list(first, last);
+}
+
 static void say_error(void)
 {
     term_puts("? ");
@@ -504,7 +533,7 @@ void rt_line(char *text)
 
     lx_start(&text[i]);
     if (lx_is("RUN")) { rt_run(); return; }
-    if (lx_is("LIST")) { ed_list(); return; }
+    if (lx_is("LIST")) { do_list(); if (err) say_error(); return; }
     if (lx_is("NEW")) { ed_new(); str_init(); term_puts("READY"); term_nl(); return; }
 
     /* A loop typed at the prompt lives on that one line, and a FOR a

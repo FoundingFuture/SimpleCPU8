@@ -167,16 +167,23 @@ class Ide {
   void pushBreakpoints();
   void typeIntoMachine();
 
-  // BASIC: the active .bas document and the interpreter's program memory
-  // are two views of one program. Push writes the text where the system
-  // page points. While BASIC waits at READY, the memory is read back each
-  // frame, so a line typed on the small screen shows up in the document.
+  // BASIC: a .bas document and the interpreter's program memory are two
+  // views of one program, kept in step both ways while BASIC waits at
+  // READY. An edit in the document is written into the memory, so LIST
+  // shows it. A line typed on the small screen appears in the document.
+  // When both sides changed since the last exchange, the lines merge by
+  // number and the document wins a line both changed. While a program
+  // runs, nothing moves; the changes go across at the next READY.
   void bootBasic();
   void runInBasic();
   bool basicAtReady() const;
   bool pushProgram();
-  void pullProgram();
+  void writeProgram(const std::vector<uint8_t>& bytes);
+  Doc* basicPartner();
   void syncBasic();
+  // Replace a document's text. The editor, when it holds the text,
+  // reloads it rather than writing its own copy back.
+  void setDocText(Doc& doc, std::string text);
 
   // The levels and their layouts.
   void buildLayout(Level level, unsigned dockspace);
@@ -309,13 +316,9 @@ class Ide {
   std::string manualPage_ = "LD";
 
   // BASIC sync state. syncDoc_ names the document in step with the
-  // machine, syncedText_ its text at the last exchange. When the document
-  // still matches it, a change in the machine replaces the text; when it
-  // has moved on, the pane says so and offers Pull.
+  // machine, syncBase_ the program both agreed on at the last exchange.
   std::string syncDoc_;
-  std::string syncedText_;
-  std::vector<uint8_t> machineProgram_;
-  bool machineChanged_ = false;
+  std::vector<uint8_t> syncBase_;
   bool basicBooted_ = false;  // the machine runs the interpreter
   // Commands still go through the keyboard: RUN after a push, for one.
   std::string typing_;

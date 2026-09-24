@@ -353,6 +353,9 @@ void Ide::powerOn() {
   computer_.powerOn();
   applyLock();
   pushBreakpoints();
+  // A restarted interpreter starts with an empty program; the document
+  // is the partner that brings it back, not the other way round.
+  syncDoc_.clear();
 }
 
 void Ide::reset() {
@@ -360,6 +363,7 @@ void Ide::reset() {
   poweredOff_ = false;
   computer_.reset();
   pushBreakpoints();
+  syncDoc_.clear();
 }
 
 void Ide::powerOff() {

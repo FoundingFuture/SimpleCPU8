@@ -97,13 +97,16 @@ its program stays as it is. The IDE starts with a scratch project until
 Save project as gives it a folder.
 
 The Project level also shows the machine's screen, so a program runs
-where it is written. A `.bas` document and the interpreter's program
-memory are two views of one program. Run in BASIC boots the interpreter,
-writes the program where the system page says it lives and types RUN.
-Push to machine writes it without running. While BASIC waits at READY,
-the IDE reads the memory back every frame. A line typed or changed on the
-small screen shows up in the document. When the document holds edits of
-its own, the pane says the machine changed and offers Pull instead.
+where it is written. A `.bas` document and the interpreter's memory
+hold two views of one program. Run in BASIC boots the interpreter
+and writes the program where the system page says. Then it types RUN.
+While BASIC waits at READY, the two are kept in step every frame, both
+ways. An edit in the document is written into the memory, so LIST shows
+it. A line typed on the small screen shows up in the document. When both
+sides changed since the last exchange, the lines merge by number. The
+document wins a line both changed. While a program runs, nothing
+moves until the next READY. The document in step is the `.bas` document
+in the editor, else the last one in step, else `autorun.bas`.
 
 Command lines that are settled:
 

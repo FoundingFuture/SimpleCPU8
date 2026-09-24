@@ -118,7 +118,7 @@ extern unsigned char prog[PROGMAX];
 void ed_new(void);
 void ed_store(int line, char *text);
 unsigned int ed_find(int line);
-void ed_list(void);
+void ed_list(unsigned int first, unsigned int last);
 
 /* run.c: statements. */
 extern int vars[NVARS];

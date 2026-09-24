@@ -417,8 +417,10 @@ void Ide::loadCartridge(Cartridge cart, const std::string& what) {
   setRunning(false);
   basicBooted_ = false;
   pushPending_ = false;
-  machineChanged_ = false;
-  machineProgram_.clear();
+  // A new ROM or a fresh interpreter: the document is the partner that
+  // brings its program in, not the empty memory that wipes it.
+  syncDoc_.clear();
+  syncBase_.clear();
   computer_.insert(std::move(cart));
   applyLock();
   pushBreakpoints();
@@ -448,9 +450,6 @@ void Ide::bootBasic() {
   haveSource_ = false;
   loadCartridge(std::move(*r.cartridge), "the BASIC ROM");
   basicBooted_ = true;
-  // A fresh interpreter holds the empty program. Starting from it keeps
-  // the boot from counting as a change to the document.
-  machineProgram_ = {0, 0, 3};
 }
 
 // Run the active .bas document: boot the interpreter unless the machine
@@ -473,6 +472,15 @@ bool Ide::basicAtReady() const {
   return prog != 0 && ram[basic::SYS_RUNNING] == 0 && typingPos_ >= typing_.size();
 }
 
+void Ide::writeProgram(const std::vector<uint8_t>& bytes) {
+  auto& ram = computer_.machine().ram;
+  const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
+  if (prog + bytes.size() > ram.size()) return;
+  std::copy(bytes.begin(), bytes.end(), ram.begin() + static_cast<std::ptrdiff_t>(prog));
+  ram[basic::SYS_PROG_LEN] = static_cast<uint8_t>(bytes.size() >> 8);
+  ram[basic::SYS_PROG_LEN + 1] = static_cast<uint8_t>(bytes.size() & 255);
+}
+
 bool Ide::pushProgram() {
   if (!basicAtReady()) return false;
   Doc* d = nullptr;
@@ -480,72 +488,82 @@ bool Ide::pushProgram() {
     if (doc.name == syncDoc_) d = &doc;
   }
   if (!d) return false;
-  auto& ram = computer_.machine().ram;
-  const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
   std::vector<uint8_t> bytes = basic::encodeProgram(d->text);
-  if (prog + bytes.size() > ram.size()) return false;
-  std::copy(bytes.begin(), bytes.end(), ram.begin() + static_cast<std::ptrdiff_t>(prog));
-  ram[basic::SYS_PROG_LEN] = static_cast<uint8_t>(bytes.size() >> 8);
-  ram[basic::SYS_PROG_LEN + 1] = static_cast<uint8_t>(bytes.size() & 255);
-  machineProgram_ = std::move(bytes);
-  syncedText_ = d->text;
-  machineChanged_ = false;
+  writeProgram(bytes);
+  syncBase_ = std::move(bytes);
   return true;
 }
 
-void Ide::pullProgram() {
-  for (Doc& doc : docs_) {
-    if (doc.name != syncDoc_) continue;
-    const std::string text = basic::decodeProgram(machineProgram_);
-    if (text != doc.text) {
-      doc.text = text;
-      doc.text.reserve(doc.text.size() + (1 << 16));
-      doc.dirty = true;
-    }
-    syncedText_ = text;
+void Ide::setDocText(Doc& doc, std::string text) {
+  doc.text = std::move(text);
+  if (ImGuiInputTextState* state = ImGui::GetInputTextState(ImGui::GetActiveID())) {
+    state->ReloadUserBufAndKeepSelection();
   }
-  machineChanged_ = false;
 }
 
-// Once per frame. A pending push goes through as soon as BASIC is at
-// READY. Otherwise the program memory is compared with the last exchange
-// and a difference flows to the document, or waits for Pull when the
-// document has edits of its own.
+// The document in step with the interpreter: the .bas document in the
+// editor, else the one last in step, else autorun.bas, which a built
+// BASIC project boots into.
+Doc* Ide::basicPartner() {
+  Doc* active = activeDoc();
+  if (active && docKindOf(active->name) == DocKind::Basic) return active;
+  for (Doc& d : docs_) {
+    if (d.name == syncDoc_) return &d;
+  }
+  for (Doc& d : docs_) {
+    if (d.name == "autorun.bas") return &d;
+  }
+  return nullptr;
+}
+
+// Once per frame while BASIC waits at READY. A pending push from Run in
+// BASIC goes first. Then the memory and the document are compared with
+// the program they last agreed on: a side that moved carries the other
+// along, and two sides that both moved are merged line by line.
 void Ide::syncBasic() {
   if (!basicAtReady()) return;
+  Doc* d = basicPartner();
   if (pushPending_) {
+    if (d && syncDoc_.empty()) syncDoc_ = d->name;
     if (!pushProgram()) return;
     pushPending_ = false;
     typing_ = afterPush_;
     typingPos_ = 0;
     return;
   }
+  if (!d) return;
   const auto& ram = computer_.machine().ram;
   const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
   const size_t len = static_cast<size_t>((ram[basic::SYS_PROG_LEN] << 8) | ram[basic::SYS_PROG_LEN + 1]);
   if (len < 3 || len > basic::PROGRAM_MAX || prog + len > ram.size()) return;
   const auto first = ram.begin() + static_cast<std::ptrdiff_t>(prog);
-  if (std::equal(first, first + static_cast<std::ptrdiff_t>(len), machineProgram_.begin(), machineProgram_.end())) return;
-  machineProgram_.assign(first, first + static_cast<std::ptrdiff_t>(len));
-  // With no document in step yet, the AUTORUN document is the natural
-  // partner: a built BASIC project boots into it.
-  if (syncDoc_.empty()) {
-    for (const Doc& d : docs_) {
-      if (d.name == "autorun.bas") syncDoc_ = d.name;
-    }
-    if (syncDoc_.empty()) return;
-    syncedText_.clear();
-    for (const Doc& d : docs_) {
-      if (d.name == syncDoc_) syncedText_ = d.text;
+  const std::vector<uint8_t> machine(first, first + static_cast<std::ptrdiff_t>(len));
+  // A document that just became the partner brings its program along.
+  if (d->name != syncDoc_) {
+    syncDoc_ = d->name;
+    syncBase_ = machine;
+  }
+  const std::vector<uint8_t> doc = basic::encodeProgram(d->text);
+  if (doc == machine) {
+    syncBase_ = machine;
+    return;
+  }
+  const bool docMoved = doc != syncBase_;
+  const bool machineMoved = machine != syncBase_;
+  const std::vector<uint8_t> result = !machineMoved ? doc
+                                      : !docMoved   ? machine
+                                                    : basic::mergePrograms(syncBase_, doc, machine);
+  if (result != machine) writeProgram(result);
+  if (result != doc) {
+    setDocText(*d, basic::patchText(d->text, result));
+    d->dirty = true;
+    // NEW typed on the computer empties the document too. The file keeps
+    // the old program until the next save, and the person should know.
+    if (result.size() <= 3 && doc.size() > 3) {
+      note("NEW on the computer emptied " + d->name + ". The file on disk keeps the old program until you save.");
     }
   }
-  const Doc* d = nullptr;
-  for (const Doc& doc : docs_) {
-    if (doc.name == syncDoc_) d = &doc;
-  }
-  if (!d) return;
-  if (d->text == syncedText_ || basic::encodeProgram(d->text) == machineProgram_) pullProgram();
-  else machineChanged_ = true;
+  syncBase_ = result;
 }
 
 // Commands for the interpreter go through the key queue, the way a person
@@ -643,24 +661,12 @@ void Ide::editorPane() {
     ImGui::SameLine();
     if (ImGui::SmallButton("Run in BASIC")) runInBasic();
     ImGui::SameLine();
-    if (ImGui::SmallButton("Push to machine")) {
-      syncDoc_ = d->name;
-      if (!basicAtReady()) note("push waits until BASIC is at READY: boot it and press Run");
-      pushPending_ = true;
-      afterPush_.clear();
-      if (!running_) setRunning(true);
-    }
-    ImGui::SameLine();
-    if (machineChanged_ && syncDoc_ == d->name) {
-      if (ImGui::SmallButton("Pull from machine")) pullProgram();
-      ImGui::SameLine();
-      ImGui::TextDisabled("the machine's program changed and this document has edits of its own");
-    } else if (pushPending_) {
-      ImGui::TextDisabled("waiting for READY");
-    } else if (basicAtReady() && syncDoc_ == d->name) {
-      ImGui::TextDisabled("in step with the machine: a line typed on the screen shows up here");
+    if (basicAtReady() && syncDoc_ == d->name) {
+      ImGui::TextDisabled("in step with the computer: LIST shows this text, and lines typed there show up here");
+    } else if (basicBooted_ && computer_.machine().status == Status::Running) {
+      ImGui::TextDisabled("a program is running: changes go across when it stops at READY");
     } else {
-      ImGui::TextDisabled("Run in BASIC boots the interpreter with this program. Build makes the whole ROM.");
+      ImGui::TextDisabled("Run in BASIC boots the interpreter; from then on this text and the computer stay in step");
     }
   } else if (kind == DocKind::Microcode) {
     ImGui::SameLine();

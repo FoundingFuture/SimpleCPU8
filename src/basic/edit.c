@@ -71,12 +71,16 @@ void ed_store(int line, char *text)
     prog_len = prog_len + rec;
 }
 
-void ed_list(void)
+/* LIST shows the lines numbered from first to last, both included. The
+ * walk starts at the first line not below first and stops at the first
+ * line past last, since lines are in order.
+ */
+void ed_list(unsigned int first, unsigned int last)
 {
     unsigned int p;
     unsigned int i;
-    p = 0;
-    while (lineno_at(p)) {
+    p = ed_find(first);
+    while (lineno_at(p) && lineno_at(p) <= last) {
         term_putn(lineno_at(p));
         term_putc(32);
         i = 0;

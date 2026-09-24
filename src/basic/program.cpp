@@ -64,4 +64,123 @@ std::string decodeProgram(std::span<const uint8_t> bytes) {
   return out;
 }
 
+std::map<int, std::string> programLines(std::span<const uint8_t> bytes) {
+  std::map<int, std::string> lines;
+  size_t p = 0;
+  while (p + 3 <= bytes.size()) {
+    const int n = (bytes[p] << 8) | bytes[p + 1];
+    if (n == 0) break;
+    const size_t rec = bytes[p + 2];
+    if (rec < 4 || p + rec > bytes.size()) break;
+    std::string body;
+    for (size_t i = p + 3; i < p + rec - 1 && bytes[i]; i++) body += static_cast<char>(bytes[i]);
+    lines[n] = std::move(body);
+    p += rec;
+  }
+  return lines;
+}
+
+namespace {
+
+std::string textOf(const std::map<int, std::string>& lines) {
+  std::string text;
+  for (const auto& [n, body] : lines) text += std::to_string(n) + " " + body + "\n";
+  return text;
+}
+
+// A line's number and body the way encodeProgram reads them. The number
+// is -1 for a line without one.
+std::pair<int, std::string> parseLine(const std::string& line) {
+  size_t i = 0;
+  while (i < line.size() && line[i] == ' ') i++;
+  if (i >= line.size() || line[i] < '0' || line[i] > '9') return {-1, ""};
+  int n = 0;
+  while (i < line.size() && line[i] >= '0' && line[i] <= '9' && n <= 65535) n = n * 10 + (line[i++] - '0');
+  while (i < line.size() && line[i] == ' ') i++;
+  std::string body = line.substr(i);
+  if (!body.empty() && body.back() == '\r') body.pop_back();
+  if (body.size() > 250) body.resize(250);
+  return {n, body};
+}
+
+}  // namespace
+
+std::vector<uint8_t> mergePrograms(std::span<const uint8_t> base, std::span<const uint8_t> mine,
+                                   std::span<const uint8_t> theirs) {
+  const auto b = programLines(base);
+  const auto m = programLines(mine);
+  const auto t = programLines(theirs);
+  std::map<int, std::string> out;
+  auto numbers = [&] {
+    std::map<int, bool> all;
+    for (const auto* side : {&b, &m, &t}) {
+      for (const auto& kv : *side) all[kv.first] = true;
+    }
+    return all;
+  }();
+  auto at = [](const std::map<int, std::string>& side, int n) -> const std::string* {
+    const auto it = side.find(n);
+    return it == side.end() ? nullptr : &it->second;
+  };
+  auto same = [](const std::string* x, const std::string* y) { return x == y || (x && y && *x == *y); };
+  for (const auto& kv : numbers) {
+    const int n = kv.first;
+    const std::string* bl = at(b, n);
+    const std::string* ml = at(m, n);
+    const std::string* tl = at(t, n);
+    const std::string* pick = same(ml, bl) ? tl : ml;
+    if (pick) out[n] = *pick;
+  }
+  return encodeProgram(textOf(out));
+}
+
+std::string patchText(const std::string& text, std::span<const uint8_t> program) {
+  const auto want = programLines(program);
+  std::vector<std::string> rows;
+  for (size_t at = 0; at <= text.size();) {
+    size_t end = text.find('\n', at);
+    if (end == std::string::npos) end = text.size();
+    rows.push_back(text.substr(at, end - at));
+    at = end + 1;
+  }
+  if (!rows.empty() && rows.back().empty()) rows.pop_back();
+
+  // The last row with a number is the one encodeProgram keeps.
+  std::map<int, size_t> lastRow;
+  for (size_t r = 0; r < rows.size(); r++) {
+    const int n = parseLine(rows[r]).first;
+    if (n >= 0) lastRow[n] = r;
+  }
+  std::vector<std::pair<int, std::string>> kept;  // number, or -1, and the row
+  for (size_t r = 0; r < rows.size(); r++) {
+    const auto [n, body] = parseLine(rows[r]);
+    if (n < 0) {
+      kept.push_back({-1, rows[r]});
+      continue;
+    }
+    if (lastRow[n] != r) continue;
+    const auto it = want.find(n);
+    if (it == want.end()) continue;
+    kept.push_back({n, body == it->second ? rows[r] : std::to_string(n) + " " + it->second});
+  }
+  // The program's lines the document lacks, each before the first
+  // numbered row above it.
+  for (const auto& [n, body] : want) {
+    bool present = false;
+    for (const auto& k : kept) present = present || k.first == n;
+    if (present) continue;
+    size_t pos = kept.size();
+    for (size_t k = 0; k < kept.size(); k++) {
+      if (kept[k].first > n) {
+        pos = k;
+        break;
+      }
+    }
+    kept.insert(kept.begin() + static_cast<std::ptrdiff_t>(pos), {n, std::to_string(n) + " " + body});
+  }
+  std::string out;
+  for (const auto& k : kept) out += k.second + "\n";
+  return out;
+}
+
 }  // namespace sc8::basic
