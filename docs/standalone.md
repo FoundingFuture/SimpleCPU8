@@ -51,9 +51,13 @@ sends the assembly to the Source pane, assembled and ready to run. The
 generated code can then be read next to the C.
 
 The Edit level also shows the machine's screen, so a program runs where it
-is written. The BASIC tab's Run in BASIC button boots the interpreter,
-types the program in and runs it. Push to RAM places the text
-in memory instead. `simplecpu-ide game.bas --run` does the same from the
+is written. The editor and the interpreter's program memory are two views
+of one program. Run in BASIC boots the interpreter, writes the program
+where the system page says it lives and types RUN. Push to machine writes
+it without running. While BASIC waits at READY, the IDE reads the memory
+back every frame. A line typed or changed on the small screen shows up in
+the editor. When the editor holds edits of its own, the pane says the
+machine changed and offers Pull instead. `simplecpu-ide game.bas --run` does the same from the
 command line. The Run level, reached from the Level menu or F2, puts
 registers, memory, breakpoints and the listing around that screen.
 

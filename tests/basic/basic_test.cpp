@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "basic/basic_rom.h"
+#include "basic/program.h"
 #include "core/cartridge.h"
 #include "core/machine.h"
 #include "core/microcode.h"
@@ -844,5 +845,22 @@ TEST_SUITE("the system page") {
     // The next command clears it.
     type(*s, "PRINT 1");
     CHECK_EQ(s->m->ram[0x12], 0);
+  }
+}
+
+TEST_SUITE("basic program codec") {
+  TEST_CASE("encode sorts, replaces, deletes and skips unnumbered lines") {
+    const std::vector<uint8_t> p = basic::encodeProgram("  20 B\r\nnot a line\n10 A\n20 C\n30 D\n30\n");
+    CHECK(basic::decodeProgram(p) == "10 A\n20 C\n");
+    CHECK(p == std::vector<uint8_t>{0, 10, 5, 'A', 0, 0, 20, 5, 'C', 0, 0, 0, 3});
+  }
+  TEST_CASE("a program that does not fit is cut at a whole line") {
+    std::string text;
+    for (int i = 1; i <= 100; i++) text += std::to_string(i) + " " + std::string(100, 'X') + "\n";
+    const std::vector<uint8_t> p = basic::encodeProgram(text);
+    CHECK(p.size() < basic::PROGRAM_MAX);
+    const std::string back = basic::decodeProgram(p);
+    CHECK(back.find("1 XXX") == 0);
+    CHECK(back.back() == '\n');
   }
 }

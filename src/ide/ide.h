@@ -159,25 +159,42 @@ class Ide {
   std::string manualFilter_;
   std::string manualPage_ = "LD";
 
-  // The BASIC pane. Typing state for Push to RAM. The text goes into the
-  // input device's key queue at the rate the machine drains it.
   // The C pane: one file, its headers read from beside it. The assembly
   // the compiler writes goes into the Source pane and is assembled there.
   std::string cText_;
   std::string cPath_;
+
+  // The BASIC pane. The editor and the interpreter's program memory are
+  // two views of one program. Push writes the editor's text into the
+  // memory the system page points at. While BASIC waits at READY, the
+  // memory is read back each frame, so a line typed on the small screen
+  // shows up in the editor. syncedText_ is the text of the last exchange:
+  // when the editor still matches it, a change in the machine replaces
+  // the editor's text without asking. When the editor has moved on, the
+  // pane says so and offers Pull.
   std::string basicText_;
   std::string basicPath_;
   std::string basicSlot_ = "PROGRAM";
+  std::string syncedText_;
+  std::vector<uint8_t> machineProgram_;
+  bool machineChanged_ = false;
+  // Commands still go through the keyboard: RUN after a push, for one.
   std::string typing_;
   size_t typingPos_ = 0;
-  // Typing waits for this GPU frame, since BASIC drains the keys as it boots.
-  uint64_t typingAfterFrame_ = 0;
+  // A push waits until the interpreter has booted and set SYS_PROG. This
+  // is the text to push then, and the command to type after it.
+  bool pushPending_ = false;
+  std::string afterPush_;
   // Whether the cartridge in the slot is the built-in BASIC ROM.
   bool basicBooted_ = false;
   // The last file opened from the command line was a .bas.
   bool openedBasic_ = false;
   void bootBasic();
   void runInBasic();
+  bool basicAtReady() const;
+  bool pushProgram();
+  void pullProgram();
+  void syncBasic();
   std::vector<std::pair<std::string, std::string>> basicSlots_;
   bool basicDirty_ = false;  // slots changed and no ROM file to rewrite
 };

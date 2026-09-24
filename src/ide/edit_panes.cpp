@@ -13,6 +13,7 @@
 #include "core/cartridge.h"
 #include "ide/ide.h"
 
+#include "basic/program.h"
 #include "cc/cc.h"
 #include "ide/manual.h"
 #include "ide/panes.h"
@@ -141,13 +142,11 @@ void Ide::cPane() {
 
 // ---- BASIC
 
-// Push to RAM types the program into the running machine through the key
-// queue. The interpreter reads lines from the keyboard. The queue
-// holds 64 events and a key is two. The pump waits above 32 queued.
-// The storage device will replace this with a load into the interpreter's
-// program memory.
+// Commands for the interpreter go through the key queue, the way a person
+// types them. The queue holds 64 events and a key is two. The pump waits
+// above 32 queued. Programs do not go this way: pushProgram writes them
+// into the interpreter's memory.
 void Ide::typeIntoMachine() {
-  if (computer_.frameCounter() < typingAfterFrame_) return;
   InputBus& in = computer_.input();
   while (typingPos_ < typing_.size() && in.queued() <= 32) {
     const char c = typing_[typingPos_++];
@@ -204,22 +203,25 @@ void Ide::basicPane() {
     }
   }
   ImGui::SameLine();
-  if (typingPos_ < typing_.size()) {
-    if (ImGui::SmallButton("Stop typing")) typing_.clear();
+  if (ImGui::SmallButton("Run in BASIC")) runInBasic();
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Push to machine")) {
+    if (!basicAtReady()) note("push waits until BASIC is at READY: boot it and press Run");
+    pushPending_ = true;
+    afterPush_.clear();
+    if (!running_) setRunning(true);
+  }
+  ImGui::SameLine();
+  if (machineChanged_) {
+    if (ImGui::SmallButton("Pull from machine")) pullProgram();
     ImGui::SameLine();
-    ImGui::TextDisabled("typing %zu of %zu", typingPos_, typing_.size());
+    ImGui::TextDisabled("the program in the machine changed and the editor has edits of its own");
+  } else if (pushPending_) {
+    ImGui::TextDisabled("waiting for READY");
+  } else if (basicAtReady()) {
+    ImGui::TextDisabled("in step with the machine: a line typed on the screen shows up here");
   } else {
-    if (ImGui::SmallButton("Run in BASIC")) runInBasic();
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Push to RAM")) {
-      typing_ = basicText_;
-      if (!typing_.empty() && typing_.back() != '\n') typing_ += '\n';
-      typingPos_ = 0;
-      typingAfterFrame_ = 0;
-      if (!running_) note("the machine is paused: press Run so BASIC can read the lines");
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("Run boots BASIC, types the program in and runs it. Watch the Screen pane.");
+    ImGui::TextDisabled("Run boots BASIC, puts the program in its memory and runs it.");
   }
   if (!basicSlots_.empty()) {
     std::string slots = basicDirty_ ? "slots (unburned): " : "slots: ";

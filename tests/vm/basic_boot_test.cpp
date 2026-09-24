@@ -10,6 +10,7 @@
 
 #if SC8_HAVE_BASIC
 #include "basic/basic_rom.h"
+#include "basic/program.h"
 #endif
 
 using namespace sc8;
@@ -55,6 +56,39 @@ TEST_SUITE("basic boot") {
     c.typeText("PRINT 6*7\n");
     runFrames(c, 40);
     CHECK(screenText(c.machine()).find("42") != std::string::npos);
+  }
+
+  TEST_CASE("the IDE's bridge: a program written into memory runs, a typed line reads back") {
+    std::vector<uint8_t> bytes(basicRom().begin(), basicRom().end());
+    CartridgeResult r = decodeCartridge(bytes);
+    REQUIRE(r.cartridge);
+    Computer c;
+    c.setSeed(1);
+    c.insert(std::move(*r.cartridge));
+    runFrames(c, 20);
+    auto& ram = c.machine().ram;
+    const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
+    REQUIRE(prog != 0);
+    CHECK(ram[basic::SYS_RUNNING] == 0);
+    // The empty program the boot leaves, the codec's empty program.
+    CHECK(basic::encodeProgram("") == std::vector<uint8_t>{0, 0, 3});
+    CHECK(std::vector<uint8_t>(ram.begin() + static_cast<long>(prog), ram.begin() + static_cast<long>(prog) + 3) ==
+          std::vector<uint8_t>{0, 0, 3});
+
+    std::vector<uint8_t> p = basic::encodeProgram("20 PRINT \"SECOND\"\n10 PRINT \"FIRST\"\n");
+    std::copy(p.begin(), p.end(), ram.begin() + static_cast<long>(prog));
+    ram[basic::SYS_PROG_LEN] = static_cast<uint8_t>(p.size() >> 8);
+    ram[basic::SYS_PROG_LEN + 1] = static_cast<uint8_t>(p.size() & 255);
+    c.typeText("RUN\n");
+    runFrames(c, 60);
+    const std::string s = screenText(c.machine());
+    CHECK_MESSAGE(s.find("FIRST\nSECOND") != std::string::npos, s);
+
+    c.typeText("30 PRINT \"THIRD\"\n");
+    runFrames(c, 60);
+    const size_t len = static_cast<size_t>((ram[basic::SYS_PROG_LEN] << 8) | ram[basic::SYS_PROG_LEN + 1]);
+    std::span<const uint8_t> stored(ram.data() + prog, len);
+    CHECK(basic::decodeProgram(stored) == "10 PRINT \"FIRST\"\n20 PRINT \"SECOND\"\n30 PRINT \"THIRD\"\n");
   }
 
   TEST_CASE("a program in a slot loads with !LOAD, the --basic file path") {

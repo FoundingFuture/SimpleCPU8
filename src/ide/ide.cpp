@@ -14,6 +14,7 @@
 
 #include "assets/assets.h"
 #include "basic/basic_rom.h"
+#include "basic/program.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
 #include "ide/panes.h"
@@ -185,28 +186,84 @@ void Ide::bootBasic() {
   romPath_.clear();
   loadCartridge(std::move(*r.cartridge), "the BASIC ROM");
   basicBooted_ = true;
+  // A fresh interpreter holds the empty program. Starting from it keeps
+  // the boot from counting as a change to the editor.
+  machineProgram_ = {0, 0, 3};
 }
 
 // The BASIC tab's Run: boot the interpreter unless it is already in the
-// slot, then type the program in and RUN it, the way a person would. The
-// typing waits twenty frames, because BASIC drains the keys while it boots.
+// slot, put the program in its memory and type RUN. The push waits for the
+// boot, since the system page is empty until bang_init fills it.
 void Ide::runInBasic() {
-  if (!basicBooted_ || computer_.machine().status != Status::Running) {
-    bootBasic();
-    typingAfterFrame_ = computer_.frameCounter() + 20;
-  } else {
-    typingAfterFrame_ = 0;
-  }
-  typing_ = "NEW\n" + basicText_;
-  if (typing_.back() != '\n') typing_ += '\n';
-  typing_ += "RUN\n";
-  typingPos_ = 0;
+  if (!basicBooted_ || computer_.machine().status != Status::Running) bootBasic();
+  pushPending_ = true;
+  afterPush_ = "RUN\n";
   setRunning(true);
+}
+
+// The interpreter is at its prompt: SYS_PROG is set, no program runs, and
+// no command is still on its way through the keyboard.
+bool Ide::basicAtReady() const {
+  if (!basicBooted_ || computer_.machine().status != Status::Running) return false;
+  const auto& ram = computer_.machine().ram;
+  const int prog = (ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1];
+  return prog != 0 && ram[basic::SYS_RUNNING] == 0 && typingPos_ >= typing_.size();
+}
+
+// Write the editor's program where SYS_PROG points and set SYS_PROG_LEN,
+// which is what NEW followed by typing every line would leave behind.
+bool Ide::pushProgram() {
+  if (!basicAtReady()) return false;
+  auto& ram = computer_.machine().ram;
+  const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
+  std::vector<uint8_t> bytes = basic::encodeProgram(basicText_);
+  if (prog + bytes.size() > ram.size()) return false;
+  std::copy(bytes.begin(), bytes.end(), ram.begin() + static_cast<std::ptrdiff_t>(prog));
+  ram[basic::SYS_PROG_LEN] = static_cast<uint8_t>(bytes.size() >> 8);
+  ram[basic::SYS_PROG_LEN + 1] = static_cast<uint8_t>(bytes.size() & 255);
+  machineProgram_ = std::move(bytes);
+  syncedText_ = basicText_;
+  machineChanged_ = false;
+  return true;
+}
+
+// Replace the editor's text with the machine's program.
+void Ide::pullProgram() {
+  basicText_ = basic::decodeProgram(machineProgram_);
+  syncedText_ = basicText_;
+  machineChanged_ = false;
+}
+
+// Once per frame. A pending push goes through as soon as BASIC is at
+// READY. Otherwise the program memory is compared with the last exchange
+// and a difference flows to the editor, or waits for Pull when the editor
+// has unsynced edits of its own.
+void Ide::syncBasic() {
+  if (!basicAtReady()) return;
+  if (pushPending_) {
+    if (!pushProgram()) return;
+    pushPending_ = false;
+    typing_ = afterPush_;
+    typingPos_ = 0;
+    return;
+  }
+  const auto& ram = computer_.machine().ram;
+  const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
+  size_t len = static_cast<size_t>((ram[basic::SYS_PROG_LEN] << 8) | ram[basic::SYS_PROG_LEN + 1]);
+  if (len < 3 || len > basic::PROGRAM_MAX || prog + len > ram.size()) return;
+  const auto first = ram.begin() + static_cast<std::ptrdiff_t>(prog);
+  if (std::equal(first, first + static_cast<std::ptrdiff_t>(len), machineProgram_.begin(), machineProgram_.end())) return;
+  machineProgram_.assign(first, first + static_cast<std::ptrdiff_t>(len));
+  if (basicText_ == syncedText_) pullProgram();
+  else machineChanged_ = true;
 }
 
 void Ide::loadCartridge(Cartridge cart, const std::string& what) {
   setRunning(false);
   basicBooted_ = false;
+  pushPending_ = false;
+  machineChanged_ = false;
+  machineProgram_.clear();
   basicSlots_ = cart.basic;
   basicDirty_ = false;
   haveSource_ = false;
@@ -447,6 +504,7 @@ void Ide::update() {
   else keyboard_.releaseAll(computer_.input());
   typeIntoMachine();
   if (running_) pace();
+  syncBasic();
   // The chip renders on its own clock, so a tune plays on while the CPU
   // sits paused.
   computer_.pumpAudio(audio_);
