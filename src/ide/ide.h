@@ -120,6 +120,15 @@ class Ide {
   // A project opened from a ROM saves into that ROM: the documents are
   // built, and the ROM file is written again with the project inside.
   bool saveIntoRom();
+  // Save on a ROM project asks first: the ROM is not a folder, and a save
+  // burns the documents into it. The person can burn, save the project
+  // as a folder instead, or stop. romSaveQuits_ says the question came
+  // from Save and quit. romSaveConfirmed_ is "don't ask again" for the
+  // session.
+  void romSaveDialog();
+  bool askRomSave_ = false;
+  bool romSaveQuits_ = false;
+  bool romSaveConfirmed_ = false;
   // The Save menu item's label: into the folder, the ROM, or a new folder.
   std::string saveTarget() const;
   // Build the documents in memory, as a ROM project or the scratch

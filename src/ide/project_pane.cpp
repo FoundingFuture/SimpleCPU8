@@ -278,7 +278,7 @@ void Ide::saveAll() {
 // goes there.
 std::string Ide::saveTarget() const {
   if (!projectDir_.empty()) return "Save project";
-  if (!romPath_.empty()) return "Save into " + fs::path(romPath_).filename().string();
+  if (!romPath_.empty()) return "Save into " + fs::path(romPath_).filename().string() + (romSaveConfirmed_ ? "" : "...");
   return "Save project...";
 }
 
@@ -308,7 +308,8 @@ bool Ide::saveIntoRom() {
 
 void Ide::saveProject() {
   if (projectDir_.empty() && !romPath_.empty()) {
-    saveIntoRom();
+    if (romSaveConfirmed_) saveIntoRom();
+    else askRomSave_ = true;
     return;
   }
   if (projectDir_.empty()) {

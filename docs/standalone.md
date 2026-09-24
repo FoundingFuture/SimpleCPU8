@@ -301,8 +301,10 @@ Power on.
 
 Save is the whole project: every changed document into its folder. A
 project opened from a ROM saves into that ROM. The documents are built
-and the file is written again with the project inside. A build error
-leaves the ROM as it was. Save project as writes the project to a folder
+and the file is written again with the project inside. Save asks first,
+since a ROM is not a folder. The person can burn into the ROM, save a
+project folder instead, or cancel. "Don't ask again" holds until the
+IDE closes. A build error leaves the ROM as it was. Save project as writes the project to a folder
 instead. The scratch project is asked for a folder. Quitting with unsaved
 documents asks: save and quit, quit without saving, or stay. Opening and saving go through a file dialog of the IDE's
 own. It walks folders and can make a new folder on the way.

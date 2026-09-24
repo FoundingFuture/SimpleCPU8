@@ -522,6 +522,7 @@ void Ide::frame() {
   // level and close Preferences, and the two would close each other.
   if (!askSettings_) dialog_.draw();
   quitDialog();
+  romSaveDialog();
   settingsDialog();
 }
 
@@ -765,7 +766,17 @@ void Ide::quitDialog() {
     }
     ImGui::Spacing();
     if (ImGui::Button("Save and quit")) {
-      if (projectDir_.empty()) {
+      if (projectDir_.empty() && !romPath_.empty()) {
+        askQuit_ = false;
+        ImGui::CloseCurrentPopup();
+        if (romSaveConfirmed_) {
+          done_ = saveIntoRom();
+          if (!done_) note("the ROM could not be saved, so the IDE stays open");
+        } else {
+          askRomSave_ = true;
+          romSaveQuits_ = true;
+        }
+      } else if (projectDir_.empty()) {
         askQuit_ = false;
         ImGui::CloseCurrentPopup();
         dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", fs::current_path(), {},
@@ -794,6 +805,54 @@ void Ide::quitDialog() {
     }
     ImGui::EndPopup();
   }
+}
+
+void Ide::romSaveDialog() {
+  if (!askRomSave_) return;
+  ImGui::OpenPopup("Save into the ROM?");
+  if (!ImGui::BeginPopupModal("Save into the ROM?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+  const std::string rom = fs::path(romPath_).filename().string();
+  ImGui::Text("This project is not a folder. It lives in the ROM file %s.", rom.c_str());
+  ImGui::Text("Saving builds the documents and burns them into that file, replacing what it holds.");
+  ImGui::TextDisabled("%s", romPath_.c_str());
+  ImGui::Spacing();
+  ImGui::Checkbox("Don't ask again until the IDE closes", &romSaveConfirmed_);
+  ImGui::Spacing();
+  auto close = [this]() {
+    askRomSave_ = false;
+    ImGui::CloseCurrentPopup();
+  };
+  const bool quits = romSaveQuits_;
+  if (ImGui::Button(("Burn into " + rom).c_str())) {
+    close();
+    romSaveQuits_ = false;
+    const bool saved = saveIntoRom();
+    if (quits) {
+      done_ = saved;
+      if (!saved) note("the ROM could not be saved, so the IDE stays open");
+    }
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Save as a project folder...")) {
+    close();
+    romSaveQuits_ = false;
+    romSaveConfirmed_ = false;
+    const fs::path startIn = !settings_.projectsDir.empty() && fs::is_directory(settings_.projectsDir)
+                                 ? fs::path(settings_.projectsDir)
+                                 : fs::current_path();
+    dialog_.open(FileDialog::Mode::OpenFolder, "Save the project as: pick or make its folder", startIn, {},
+                 [this, quits](const fs::path& p) {
+                   saveProjectAs(p.string());
+                   if (quits) done_ = !anyDirty();
+                 });
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel")) {
+    close();
+    romSaveQuits_ = false;
+    romSaveConfirmed_ = false;
+  }
+  ImGui::EndPopup();
 }
 
 // The style is scaled from a copy taken at startup, so a second apply
