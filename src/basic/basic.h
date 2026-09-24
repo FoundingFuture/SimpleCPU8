@@ -124,23 +124,57 @@ void ed_list(unsigned int first, unsigned int last);
 extern int vars[NVARS];
 extern unsigned char loop_back;
 
+/* The error codes a program reads back from SYS_ERR. The first twelve
+ * keep the numbers they always had. The rest split the old broad ones, so
+ * the message can say exactly what went wrong: this BASIC has the room to
+ * explain itself, which the old machines did not.
+ */
 #define E_OK      0
-#define E_SYNTAX  1
-#define E_NOLINE  2
-#define E_STACK   3
-#define E_MEMORY  4
-#define E_TYPE    5
+#define E_SYNTAX  1   /* a line not understood; the message says what was expected */
+#define E_NOLINE  2   /* GOTO, GOSUB or THEN to a line that is not there */
+#define E_STACK   3   /* no longer raised: split into 15 to 18 */
+#define E_MEMORY  4   /* the program memory is full */
+#define E_TYPE    5   /* a string where a number is needed */
 #define E_DIVZERO 6
-#define E_RANGE   7
+#define E_RANGE   7   /* a number out of range */
 #define E_BREAK   8
-#define E_BANG    9
-#define E_NOTFOUND 10
+#define E_BANG    9   /* a ! command no driver knows */
+#define E_NOTFOUND 10 /* no program of that name on the cartridge */
 #define E_STOFULL 11
 #define E_BADNAME 12
+#define E_USRWIDTH 13 /* USR's width is not 0, 1 or 2 */
+#define E_UNKNOWN 14  /* a word that is not a statement */
+#define E_GOSUBS  15  /* GOSUBs nested deeper than GOSUBMAX */
+#define E_RETURN  16  /* RETURN with no GOSUB */
+#define E_FORS    17  /* FOR loops nested deeper than FORMAX */
+#define E_NEXT    18  /* NEXT with no FOR */
+#define E_LINELONG 19 /* a program line longer than 250 characters */
+#define E_STRLONG 20  /* a string longer than 255 characters */
+#define E_STRMEM  21  /* the string memory is full */
+#define E_SAVEBIG 22  /* the program is too long to save */
+#define E_NEEDSTR 23  /* a number where a string is needed */
+#define E_STRCMP  24  /* strings compared with something other than = <> < > <= >= */
+#define E_NOTVAR  25  /* a name that is not a variable, assigned or read */
+#define E_ROUTINE 26  /* CALL, JMP or USR given a name at the prompt, where only numbers work */
+
+/* CALL, JMP and USR take a routine's slot. A name there works only in a
+ * project the builder resolved, so a name that is no variable gets its
+ * own message. True when that error was raised.
+ */
+unsigned char rt_routine_name(void);
 
 void rt_run(void);
 void rt_line(char *text);
 void rt_error(unsigned char code);
+/* A syntax error that names what should have come. The message then reads
+ * EXPECTED what BUT FOUND the token the lexer stands on.
+ */
+void rt_expect(char *what);
+/* The word the message names, when it is not the lexer's token: a !
+ * command's word, a program name. Up to the first space.
+ */
+void rt_found(char *text);
+extern int err_arg;   /* a number the message names: the missing line */
 int var_slot(void);
 
 /* The system page: the first 32 bytes of the zero page, which the compiler
@@ -168,6 +202,7 @@ int var_slot(void);
 #define SYS_RUNNING     0x15  /* byte: 1 while a program runs */
 #define SYS_PC          0x16  /* word: offset of the line being run */
 #define SYS_CALL        0x18  /* word: the instruction slot the last JSR or JMP went to */
+#define SYS_USR         0x1A  /* 3 words: USR's parameters on the way in, its answer on the way out */
 #define SYS_END         0x20  /* the first byte the compiler may use */
 
 /* A word into the page, high byte first, the way DOKE stores one. */

@@ -142,6 +142,19 @@ void type(Session& s, const std::string& line, uint64_t budget = 6000000) {
 
 bool has(const std::string& t, const std::string& needle) { return t.find(needle) != std::string::npos; }
 
+// The screen as one line, rows run together and spaces collapsed, so a
+// message the terminal wrapped at the edge still reads whole.
+std::string flat(const Session& s) {
+  std::string t;
+  for (int i = 0; i < ROWS * COLS; i++) {
+    const char c = static_cast<char>(s.m->ram[static_cast<size_t>(SCREEN + i)]);
+    const char ch = std::isprint(static_cast<unsigned char>(c)) ? c : ' ';
+    if (ch == ' ' && !t.empty() && t.back() == ' ') continue;
+    t += ch;
+  }
+  return t;
+}
+
 // The text after the first occurrence of a marker, or empty. The tests
 // split on the echoed command to look at what a RUN printed.
 std::string after(const std::string& t, const std::string& marker) {
@@ -440,7 +453,7 @@ TEST_SUITE("control flow") {
     s->runBudget(2000000);
     s->pushKey(27, false);
     s->runBudget(3000000);
-    CHECK(has(text(*s), "BREAK IN 10"));
+    CHECK(has(text(*s), "BREAK IN LINE 10"));
   }
 
   TEST_CASE("branches with IF THEN") {
@@ -564,7 +577,7 @@ TEST_SUITE("breaking out of a running program") {
     s->runBudget(3000000);
     const std::string t = text(*s);
     CHECK(has(t, "BREAK"));
-    CHECK((has(t, "BREAK IN 10") || has(t, "BREAK IN 20")));
+    CHECK((has(t, "BREAK IN LINE 10") || has(t, "BREAK IN LINE 20")));
   }
 
   TEST_CASE("stops on Ctrl and C, which arrives as control code 3") {
@@ -630,7 +643,7 @@ TEST_SUITE("breaking out of a running program") {
     s->runBudget(3000000);
     s->pushKey(27, false);
     s->runBudget(4000000);
-    CHECK(inOrder(text(*s), {"BREAK IN 10", "Z"}));
+    CHECK(inOrder(text(*s), {"BREAK IN LINE 10", "Z"}));
   }
 
   TEST_CASE("leaves a plain C alone, so typing does not stop a program") {
@@ -686,7 +699,7 @@ TEST_SUITE("errors are reported rather than swallowed") {
     auto s = boot();
     settle(*s);
     type(*s, "PRINT 1/0");
-    CHECK(has(text(*s), "DIVIDE BY ZERO"));
+    CHECK(has(text(*s), "DIVISION BY ZERO"));
   }
 
   // PRINT evaluated into the printer, and a failed expression comes back
@@ -699,7 +712,7 @@ TEST_SUITE("errors are reported rather than swallowed") {
     size_t row = 0;
     while (row < scr.size() && scr[row] != ">PRINT 10/0") row++;
     REQUIRE_LT(row + 1, scr.size());
-    CHECK_EQ(scr[row + 1], "? DIVIDE BY ZERO ERROR");
+    CHECK_EQ(scr[row + 1], "? DIVISION BY ZERO");
   }
 
   TEST_CASE("names a missing line, and which line asked") {
@@ -708,8 +721,7 @@ TEST_SUITE("errors are reported rather than swallowed") {
     type(*s, "10 GOTO 999");
     type(*s, "RUN", 8000000);
     const std::string t = text(*s);
-    CHECK(has(t, "NO SUCH LINE"));
-    CHECK(has(t, "IN 10"));
+    CHECK(has(flat(*s), "THERE IS NO LINE 999 IN LINE 10"));
   }
 }
 
@@ -764,12 +776,67 @@ TEST_SUITE("memory is reachable a byte or a word at a time") {
   }
 }
 
+TEST_SUITE("error messages say what went wrong") {
+  TEST_CASE("a syntax error names what it expected and what it found") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PRINT )");
+    CHECK(has(flat(*s), "? SYNTAX ERROR: EXPECTED A NUMBER, A VARIABLE OR ( BUT FOUND )"));
+    type(*s, "FOR I 1 TO 5");
+    CHECK(has(flat(*s), "EXPECTED = BUT FOUND 1"));
+    type(*s, "PRINT (1 + 2");
+    CHECK(has(flat(*s), "EXPECTED ) BUT FOUND THE END OF THE LINE"));
+    type(*s, "A = 1 B = 2");
+    CHECK(has(flat(*s), "EXPECTED : OR THE END OF THE LINE BUT FOUND B"));
+  }
+
+  TEST_CASE("a long name is not a variable, and an unknown word says so") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "SCORE = 5");
+    CHECK(has(flat(*s), "SCORE IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT"));
+    type(*s, "PRINT SCORE");
+    CHECK(has(after(flat(*s), "PRINT SCORE"), "SCORE IS NOT A VARIABLE"));
+    type(*s, "PRNT 5");
+    CHECK(has(flat(*s), "UNKNOWN WORD PRNT"));
+  }
+
+  TEST_CASE("the loop and subroutine errors are told apart") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "RETURN");
+    CHECK(has(flat(*s), "RETURN WITHOUT A GOSUB"));
+    type(*s, "NEXT");
+    CHECK(has(flat(*s), "NEXT WITHOUT A FOR"));
+    type(*s, "10 GOSUB 10");
+    type(*s, "RUN", 8000000);
+    CHECK(has(flat(*s), "TOO MANY GOSUBS INSIDE EACH OTHER: 16 AT MOST IN LINE 10"));
+  }
+
+  TEST_CASE("strings and numbers are told apart") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PRINT 1 + A$");
+    CHECK(has(flat(*s), "A STRING CANNOT BE USED AS A NUMBER"));
+    // A$ + starts a string, so the 1 after it is the one out of place.
+    type(*s, "PRINT A$ + 1");
+    CHECK(has(after(flat(*s), "A$ + 1"), "A NUMBER CANNOT BE USED AS A STRING"));
+  }
+
+  TEST_CASE("the code stays readable in SYS_ERR") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "NEXT");
+    CHECK_EQ(s->m->ram[0x12], 18);
+  }
+}
+
 TEST_SUITE("the bang statement") {
   TEST_CASE("says when nobody knows the command") {
     auto s = boot();
     settle(*s);
     type(*s, "!FROB");
-    CHECK(has(text(*s), "UNKNOWN ! COMMAND ERROR"));
+    CHECK(has(flat(*s), "NO DRIVER KNOWS THE COMMAND !FROB"));
   }
 
   TEST_CASE("reports the unknown command from a program, with its line") {
@@ -778,7 +845,7 @@ TEST_SUITE("the bang statement") {
     type(*s, "10 !FROB");
     type(*s, "RUN", 8000000);
     const std::string t = text(*s);
-    CHECK(has(t, "UNKNOWN ! COMMAND ERROR IN 10"));
+    CHECK(has(flat(*s), "NO DRIVER KNOWS THE COMMAND !FROB IN LINE 10"));
   }
 
   // The vector holds the default routine's slot after boot, so a driver has
@@ -824,7 +891,7 @@ TEST_SUITE("CALL and JMP") {
     auto s = boot();
     settle(*s);
     type(*s, "CALL DOUBLE");
-    CHECK(has(text(*s), "SYNTAX ERROR"));
+    CHECK(has(flat(*s), "DOUBLE IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS"));
     CHECK(s->m->status == Status::Running);
   }
 
@@ -892,6 +959,77 @@ TEST_SUITE("CALL and JMP") {
     // Nobody reads the keys any more, so the second line is never echoed.
     CHECK_EQ(s->m->ram[4], 99);
     CHECK_FALSE(has(text(*s), "PRINT"));
+  }
+}
+
+// USR(width, target, p1, p2, p3) calls a routine the way compiled C calls
+// a function: the parameters as words on the software stack, the answer
+// in the return cells. So a C function needs no glue, and an assembly
+// routine follows the same two rules.
+TEST_SUITE("USR") {
+  TEST_CASE("calls C functions with parameters and returns a byte or a word") {
+    TempProject p;
+    p.write("funcs.c",
+            "int TWICE(int x) { return x + x; }\n"
+            "int ADD3(int a, int b, int c) { return a + b + c; }\n"
+            "int SEVEN(void) { return 7; }\n"
+            "unsigned char buf[4];\n"
+            "unsigned char *FILL(int n) { buf[0] = n; buf[1] = n + n; return buf; }\n");
+    p.write("autorun.bas",
+            "10 PRINT USR(2, TWICE, 21); \" \"; USR(1, ADD3, 1, 2, 3); \" \"; USR(1, SEVEN)\n"
+            "20 P = USR(2, FILL, 7)\n"
+            "30 PRINT PEEK(P); \" \"; PEEK(P + 1)\n"
+            "40 PRINT USR(1, TWICE, 200); \" \"; USR(2, TWICE, 200)\n"
+            "50 END\n");
+    Cartridge c = p.build();
+    auto s = std::make_unique<Session>(std::move(c));
+    s->load();
+    settle(*s, 12000000);
+    const std::string t = text(*s);
+    CHECK_MESSAGE(has(t, "42 6 7"), t);
+    CHECK_MESSAGE(has(t, "7 14"), t);
+    // 400 is $0190: width 1 keeps the low byte.
+    CHECK_MESSAGE(has(t, "144 400"), t);
+  }
+
+  TEST_CASE("an assembly routine reads its parameter and answers in the return cells") {
+    TempProject p;
+    p.write("plus.asm",
+            ".org $F000\n"
+            "PLUS1:  LD D1 <- [__sp]\n"
+            "        LD A <- [D1+1]\n"
+            "        INC A\n"
+            "        LD [__ret+1] <- A\n"
+            "        LD A <- 0\n"
+            "        LD [__ret] <- A\n"
+            "        RET\n");
+    p.write("demo.bas", "10 PRINT 1\n");
+    Cartridge c = p.build();
+    auto s = std::make_unique<Session>(std::move(c));
+    s->load();
+    settle(*s);
+    type(*s, "PRINT USR(1, $F000, 41)");
+    CHECK(has(after(text(*s), "41)"), "42"));
+    // Width 0 calls for the effect and gives 0.
+    type(*s, "PRINT USR(0, $F000, 41)");
+    const std::string zero = after(text(*s), "USR(0, $F000, 41)");
+    const bool gaveZero = has(zero, "\n 0") || has(zero, "\n0");
+    CHECK_MESSAGE(gaveZero, zero);
+    // Three hundred calls that push six bytes each leave the stack level,
+    // or BASIC would run out of it long before the end.
+    type(*s, "FOR I = 1 TO 300 : X = USR(1, 61440, I) : NEXT I : PRINT X");
+    settle(*s, 12000000);
+    CHECK_MESSAGE(has(after(text(*s), "PRINT X"), "45"), text(*s));
+  }
+
+  TEST_CASE("a width other than 0, 1 or 2 is out of range, a missing target a syntax error") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PRINT USR(3, 0)");
+    CHECK(has(flat(*s), "RETURN VALUE WIDTH IS OUT OF RANGE [0,1,2]"));
+    type(*s, "PRINT USR(1)");
+    CHECK(has(flat(*s), "EXPECTED , AND A ROUTINE AFTER THE WIDTH BUT FOUND )"));
+    CHECK(s->m->status == Status::Running);
   }
 }
 
@@ -979,7 +1117,7 @@ TEST_SUITE("the storage driver") {
     auto s = boot();
     settle(*s);
     type(*s, "!LOAD \"NOPE\"");
-    CHECK(has(text(*s), "NOT FOUND ERROR"));
+    CHECK(has(flat(*s), "NO PROGRAM CALLED NOPE ON THE CARTRIDGE"));
     CHECK(s->changes == 0);
   }
 
@@ -987,7 +1125,7 @@ TEST_SUITE("the storage driver") {
     auto s = boot();
     settle(*s);
     type(*s, "!SAVE A");
-    CHECK(has(text(*s), "SYNTAX ERROR"));
+    CHECK(has(flat(*s), "SYNTAX ERROR: EXPECTED A PROGRAM NAME IN QUOTES BUT FOUND A"));
     CHECK(s->slots.empty());
   }
 
@@ -995,7 +1133,7 @@ TEST_SUITE("the storage driver") {
     auto s = boot();
     settle(*s);
     type(*s, "!SAVE \"\"");
-    CHECK(has(text(*s), "BAD NAME ERROR"));
+    CHECK(has(flat(*s), "A PROGRAM NAME IS 1 TO 16 CHARACTERS"));
     CHECK(s->slots.empty());
   }
 }

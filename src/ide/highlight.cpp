@@ -241,7 +241,7 @@ const std::set<std::string, std::less<>>& basicKeywords() {
       "JMP",  "JSR",   "KEY",   "LEN",    "LET",     "LIST",  "LOAD",   "MID$", "MOD",   "MOVE",
       "NEW",  "NEXT",  "NOT",   "OR",     "PAD",     "PAPER", "PEEK",   "PLOT", "POINT", "POKE",
       "PRINT", "REM",  "RETURN", "RND",   "RUN",     "SAVE",  "STEP",   "STOP", "STR$",  "THEN",
-      "TO",   "VAL",   "WAIT"};
+      "TO",   "USR",   "VAL",   "WAIT"};
   return words;
 }
 

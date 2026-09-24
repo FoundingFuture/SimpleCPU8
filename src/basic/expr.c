@@ -90,6 +90,76 @@ static int fn_call(void)
         if (lx_is("(")) { lx_next(); if (lx_is(")")) lx_next(); }
         return io_pad();
     }
+    /* USR(width, target, p1, p2, p3) calls a routine the way compiled C
+     * calls a function, so a C function and an assembly routine are called
+     * alike. Up to three parameters, each a word, go onto the software
+     * stack, the first at the lowest address. The routine leaves its answer
+     * in the return cells, __ret and __ret+1, high byte first. Width 1
+     * returns the low byte, width 2 the whole word, which can point to a
+     * buffer the routine filled. The stack pointer is put back after the
+     * call, so a routine that ignores its parameters leaves it level.
+     */
+    if (lx_is("USR")) {
+        int width;
+        int n;
+        int v;
+        lx_next();
+        if (!lx_is("(")) { rt_expect("( AFTER USR"); return 0; }
+        lx_next();
+        width = ex_int();
+        if (!lx_is(",")) { rt_expect(", AND A ROUTINE AFTER THE WIDTH"); return 0; }
+        lx_next();
+        if (rt_routine_name()) return 0;
+        a = ex_int();
+        doke(SYS_CALL, a);
+        n = 0;
+        while (n < 3) {
+            v = 0;
+            if (lx_is(",")) { lx_next(); v = ex_int(); }
+            doke(SYS_USR + n * 2, v);
+            n = n + 1;
+        }
+        if (!lx_is(")")) { rt_expect(") TO CLOSE USR, AFTER AT MOST THREE PARAMETERS"); return 0; }
+        lx_next();
+        if (err) return 0;
+        if (width < 0 || width > 2) { rt_error(E_USRWIDTH); return 0; }
+        /* Save __sp on the machine stack, make six bytes of room on the
+         * software stack and copy the three words into it. */
+        asm("LD D2 <- [__sp]");
+        asm("PUSHW D2");
+        asm("LD A <- [__sp+1]");
+        asm("ADD A <- 250");
+        asm("LD [__sp+1] <- A");
+        asm("LD A <- [__sp]");
+        asm("ADC A <- 255");
+        asm("LD [__sp] <- A");
+        asm("LD D2 <- [__sp]");
+        asm("LD A <- [$001A]");
+        asm("LD [D2+0] <- A");
+        asm("LD A <- [$001B]");
+        asm("LD [D2+1] <- A");
+        asm("LD A <- [$001C]");
+        asm("LD [D2+2] <- A");
+        asm("LD A <- [$001D]");
+        asm("LD [D2+3] <- A");
+        asm("LD A <- [$001E]");
+        asm("LD [D2+4] <- A");
+        asm("LD A <- [$001F]");
+        asm("LD [D2+5] <- A");
+        asm("LD D2 <- [$0018]");
+        asm("JSR D2");
+        /* The answer out of the return cells, then the stack back. */
+        asm("LD A <- [__ret]");
+        asm("LD [$001A] <- A");
+        asm("LD A <- [__ret+1]");
+        asm("LD [$001B] <- A");
+        asm("POPW D2");
+        asm("LD [__sp] <- D2");
+        asm("LD D1 <- [__sp]");
+        if (width == 0) return 0;
+        if (width == 1) return peek(SYS_USR + 1);
+        return (peek(SYS_USR) << 8) | peek(SYS_USR + 1);
+    }
     if (lx_is("PEEK")) {
         lx_next();
         if (lx_is("(")) lx_next();
@@ -117,7 +187,8 @@ static int fn_call(void)
             return gpu_read_pixel(a >> 8, a, y >> 8, y);
         }
     }
-    rt_error(E_SYNTAX);
+    /* Not a function either: a variable name too long, most likely. */
+    rt_error(E_NOTVAR);
     return 0;
 }
 
@@ -130,7 +201,7 @@ static int primary(void)
     if (lx_is("(")) {
         lx_next();
         v = ex_or();
-        if (lx_is(")")) lx_next(); else rt_error(E_SYNTAX);
+        if (lx_is(")")) lx_next(); else rt_expect(")");
         return v;
     }
 
@@ -151,7 +222,7 @@ static int primary(void)
         return fn_call();
     }
 
-    rt_error(E_SYNTAX);
+    rt_expect("A NUMBER, A VARIABLE OR (");
     return 0;
 }
 
@@ -218,7 +289,7 @@ static int ex_cmp(void)
         op1 = 0;
         op2 = 0;
         if (lx_tok == T_PUNCT) { op1 = lx_word[0]; op2 = lx_word[1]; }
-        if (op1 != 60 && op1 != 62 && op1 != 61) { rt_error(E_TYPE); return 0; }
+        if (op1 != 60 && op1 != 62 && op1 != 61) { rt_error(E_STRCMP); return 0; }
         lx_next();
         a = str_cmp(s, ex_str());
         if (op1 == 61) return a == 0;
@@ -354,7 +425,7 @@ static unsigned int str_primary(void)
         return s;
     }
 
-    rt_error(E_TYPE);
+    rt_error(E_NEEDSTR);
     return 0;
 }
 

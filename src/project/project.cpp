@@ -74,6 +74,8 @@ fs::path assetPath(const Layout& l, std::string_view name) {
 
 // CALL name, JSR name and JMP name in a BASIC line, name being an identifier rather
 // than a number, resolved to the instruction slot of that code label. The
+// same for the target of USR(width, name, ...), the word after the first
+// comma. The
 // interpreter knows only numbers, so the text that reaches the ROM holds
 // the slot. A one letter name, or a letter and a digit, is a BASIC
 // variable and stays. So does a name followed by a parenthesis, which is
@@ -127,9 +129,24 @@ std::string resolveLabels(const std::string& text, const std::map<std::string, L
         rewritten += line.substr(i);
         break;
       }
-      if (upper != "CALL" && upper != "JSR" && upper != "JMP") continue;
+      if (upper != "CALL" && upper != "JSR" && upper != "JMP" && upper != "USR") continue;
       size_t j = i;
       while (j < line.size() && line[j] == ' ') j++;
+      if (upper == "USR") {
+        // Past the opening parenthesis and the width, to the target.
+        if (j >= line.size() || line[j] != '(') continue;
+        int depth = 0;
+        size_t p = j;
+        for (; p < line.size(); p++) {
+          if (line[p] == '"') break;
+          if (line[p] == '(') depth++;
+          if (line[p] == ')' && --depth == 0) break;
+          if (line[p] == ',' && depth == 1) break;
+        }
+        if (p >= line.size() || line[p] != ',') continue;
+        j = p + 1;
+        while (j < line.size() && line[j] == ' ') j++;
+      }
       if (j >= line.size() || !(line[j] == '_' || std::isalpha(static_cast<unsigned char>(line[j])))) continue;
       const std::string name = word(j);
       size_t k = j + name.size();

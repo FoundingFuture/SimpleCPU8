@@ -22,7 +22,7 @@ static unsigned char take_name(void)
 {
     unsigned char n;
     unsigned char i;
-    if (lx_tok != T_STR) { rt_error(E_SYNTAX); return 0; }
+    if (lx_tok != T_STR) { rt_expect("A PROGRAM NAME IN QUOTES"); return 0; }
     n = str_len(lx_str);
     if (n > 17) n = 17;
     for (i = 0; i < n; i++) name_buf[i] = heap[lx_str + 1 + i];
@@ -35,7 +35,7 @@ static unsigned char check(void)
     unsigned char s;
     s = sto_status();
     if (s == STO_OK) return 1;
-    if (s == STO_NOT_FOUND) rt_error(E_NOTFOUND);
+    if (s == STO_NOT_FOUND) { rt_error(E_NOTFOUND); rt_found(name_buf); }
     else if (s == STO_FULL) rt_error(E_STOFULL);
     else if (s == STO_BAD_NAME) rt_error(E_BADNAME);
     else rt_error(E_SYNTAX);
@@ -57,7 +57,7 @@ static unsigned char serialise(void)
         n = (prog[p] << 8) | prog[p + 1];
         d = 0;
         while (n) { digits[d] = 48 + (n % 10); n = n / 10; d = d + 1; }
-        if (at + d + prog[p + 2] + 2 >= TEXTMAX) { rt_error(E_MEMORY); return 0; }
+        if (at + d + prog[p + 2] + 2 >= TEXTMAX) { rt_error(E_SAVEBIG); return 0; }
         while (d) { d = d - 1; textbuf[at] = digits[d]; at = at + 1; }
         textbuf[at] = 32;
         at = at + 1;

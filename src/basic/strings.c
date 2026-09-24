@@ -35,10 +35,10 @@ static void keep(unsigned int s)
 unsigned int str_new(unsigned int len)
 {
     unsigned int at;
-    if (len > 255) { rt_error(E_RANGE); return 0; }
+    if (len > 255) { rt_error(E_STRLONG); return 0; }
     if (heap_top + len + 1 >= HEAPMAX) {
         str_collect();
-        if (heap_top + len + 1 >= HEAPMAX) { rt_error(E_MEMORY); return 0; }
+        if (heap_top + len + 1 >= HEAPMAX) { rt_error(E_STRMEM); return 0; }
     }
     at = heap_top;
     heap[at] = len;
@@ -82,7 +82,7 @@ unsigned int str_cat(unsigned int a, unsigned int b)
 
     la = str_len(a);
     lb = str_len(b);
-    if (la + lb > 255) { rt_error(E_RANGE); return 0; }
+    if (la + lb > 255) { rt_error(E_STRLONG); return 0; }
     s = str_new(la + lb);
     if (s == 0) return 0;
     for (i = 0; i < la; i++) heap[s + 1 + i] = heap[a + 1 + i];

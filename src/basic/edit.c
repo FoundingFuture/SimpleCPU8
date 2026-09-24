@@ -58,7 +58,7 @@ void ed_store(int line, char *text)
      * way every BASIC has worked.
      */
     if (n == 0) return;
-    if (n > 250) { rt_error(E_RANGE); return; }
+    if (n > 250) { rt_error(E_LINELONG); return; }
     rec = n + 4;
     if (prog_len + rec >= PROGMAX) { rt_error(E_MEMORY); return; }
 

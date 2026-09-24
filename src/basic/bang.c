@@ -49,4 +49,5 @@ void bang_run(char *text)
     if (bang_call(text)) return;
     if (sto_bang(text)) return;
     rt_error(E_BANG);
+    rt_found(text);
 }

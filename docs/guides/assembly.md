@@ -1305,6 +1305,27 @@ page past those 32 bytes, because the interpreter's own variables are
 there. So this routine borrows `$04`, which BASIC overwrites on return
 anyway, as the one zero page byte an `ADD` can read.
 
+`USR` asks a routine for an answer instead. It calls the routine the way
+C calls a function. Up to three parameter words sit on the software
+stack, the first at the address `__sp` holds, high byte first. The
+answer goes in the return cells, `__ret` then `__ret+1`, high byte
+first. Those two labels are the interpreter's own and are the only zero
+page bytes past the system page a routine may use. BASIC puts the stack
+back after the call, so the routine does not pop its parameters.
+
+```asm
+; PLUS1: USR(1, PLUS1, n) answers n + 1. Only the low byte of n is read.
+PLUS1:  LD D1 <- [__sp]
+        LD A <- [D1+1]                ; the low byte of the first word
+        INC A
+        LD [__ret+1] <- A
+        LD A <- 0
+        LD [__ret] <- A
+        RET
+```
+
+`PRINT USR(1, PLUS1, 41)` prints 42.
+
 ## A small game
 
 The game is called Catch. A basket at the bottom of the screen moves

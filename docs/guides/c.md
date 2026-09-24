@@ -740,6 +740,51 @@ AND OF 200 AND 300 IT IS 361
 >
 ```
 
+`CALL` suits a function that works on BASIC's variables. A function that
+takes numbers and gives one back is called with `USR` instead. BASIC
+passes up to three numbers the way C passes arguments, and reads the
+function's return value. The first number says how many bytes of the
+answer to keep, 1 or 2. Every parameter is a word, so a function for
+`USR` takes `int` or `unsigned int` parameters. A `char` parameter would
+read the wrong byte. A function with more to give back fills a buffer
+and returns its address. BASIC reads the buffer with `PEEK`.
+
+`src/funcs.c`:
+
+```c
+int TWICE(int x) { return x + x; }
+int ADD3(int a, int b, int c) { return a + b + c; }
+int SEVEN(void) { return 7; }
+
+unsigned char buf[4];
+
+unsigned char *FILL(int n)
+{
+    buf[0] = n;
+    buf[1] = n + n;
+    return buf;
+}
+```
+
+`src/autorun.bas`:
+
+```basic
+10 PRINT USR(2, TWICE, 21); " "; USR(1, ADD3, 1, 2, 3); " "; USR(1, SEVEN)
+20 P = USR(2, FILL, 7)
+30 PRINT PEEK(P); " "; PEEK(P + 1)
+40 PRINT USR(1, TWICE, 200); " "; USR(2, TWICE, 200)
+50 END
+```
+
+```text
+42 6 7
+7 14
+144 400
+```
+
+Twice 200 is 400, which is `$0190`. Width 1 keeps the low byte, `$90`,
+144.
+
 The C files in a mixed project must not define `main`. That belongs to
 the interpreter. Every public function in your files is kept whether or
 not C calls it. BASIC calls it by name, and the build writes the

@@ -12,6 +12,14 @@ static int twice(int v)
     return v + v;
 }
 
+/* TRIPLE: called from BASIC with USR(2, TRIPLE, n). The parameter and
+ * the answer travel the way C passes them, so no glue is needed.
+ */
+int TRIPLE(int n)
+{
+    return n + n + n;
+}
+
 void DOUBLE(void)
 {
     calls = calls + 1;

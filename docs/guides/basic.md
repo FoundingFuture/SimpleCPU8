@@ -109,14 +109,25 @@ PRUNT "HELLO"
 ```
 
 ```text
-? SYNTAX ERROR
+? UNKNOWN WORD PRUNT
 READY
 >
 ```
 
-A syntax error means the machine did not understand the line. It is not
-angry and nothing is broken. Look at the line, find the typo, and type
-it again. You will see this message often. Everyone does.
+The machine did not understand the line, and it names the word it
+tripped on. It is not angry and nothing is broken. Fix the typo and type
+the line again. You will see messages like this often. Everyone does.
+
+When the words are right but in the wrong order, the message is a syntax
+error. It says what the machine expected and what it found instead:
+
+```basic
+PRINT (1 + 2
+```
+
+```text
+? SYNTAX ERROR: EXPECTED ) BUT FOUND THE END OF THE LINE
+```
 
 ## Numbers and words
 
@@ -407,12 +418,12 @@ The screen fills with HELLO and keeps filling. Press Escape, or hold
 Ctrl and press C, to stop it.
 
 ```text
-HELLO HELLO HELLO ? BREAK IN 20
+HELLO HELLO HELLO ? BREAK IN LINE 20
 READY
 >
 ```
 
-`BREAK IN 20` tells you which line was running when you stopped it. The
+`BREAK IN LINE 20` tells you which line was running when you stopped it. The
 program is still stored, so `LIST` and `RUN` work as before.
 
 Most loops should end by themselves. `FOR` counts for you.
@@ -644,7 +655,7 @@ READY
 `!SAVE` writes the program under a name of up to 16 characters.
 `!CATALOG` lists the names. `!LOAD` replaces the program in memory with
 the saved one. `!DELETE "FIRST"` removes it. Loading a name that is not
-there gives `NOT FOUND ERROR`.
+there says `NO PROGRAM CALLED FIRST ON THE CARTRIDGE`.
 
 When you started with `./r`, the cartridge lives only in memory. Close
 the window and the saved programs go with it. To keep them on disk,
@@ -712,18 +723,23 @@ Keep one idea per line. Colons let two or three instructions share a line,
 which is handy for a short `POKE 5,X: POKE 6,Y` pair. A long line of
 colons is hard to read back.
 
-When the machine stops with an error, the message names the line. `LIST`
-the program and read that line slowly. The errors you will meet most:
+When the machine stops with an error, the message ends with the line it
+was on, as in `IN LINE 30`. `LIST 30` shows that line. The errors you
+will meet most:
 
 | Message | Meaning |
 |---|---|
-| `SYNTAX ERROR` | the line was not understood |
-| `NO SUCH LINE ERROR` | a `GOTO`, `GOSUB` or `THEN` named a line that is not there |
-| `TYPE ERROR` | a string where a number was wanted, or the other way round |
-| `DIVIDE BY ZERO ERROR` | a `/` or `MOD` by 0 |
-| `TOO DEEP ERROR` | a `RETURN` or `NEXT` with no matching `GOSUB` or `FOR` |
-| `OUT OF RANGE ERROR` | a string longer than 255 characters |
-| `OUT OF MEMORY ERROR` | the program or its strings no longer fit |
+| `SYNTAX ERROR: EXPECTED ... BUT FOUND ...` | the words are in the wrong order, and it says what should have come |
+| `UNKNOWN WORD ...` | a word that is not a statement, often a typo |
+| `... IS NOT A VARIABLE` | a variable name is one letter, or a letter and a digit |
+| `THERE IS NO LINE ...` | a `GOTO`, `GOSUB` or `THEN` named a line that is not there |
+| `A STRING CANNOT BE USED AS A NUMBER` | a string where a number was wanted |
+| `A NUMBER CANNOT BE USED AS A STRING` | a number where a string was wanted |
+| `DIVISION BY ZERO` | a `/` or `MOD` by 0 |
+| `RETURN WITHOUT A GOSUB` | the program reached a `RETURN` it did not `GOSUB` to |
+| `NEXT WITHOUT A FOR` | a `NEXT` with no `FOR` open |
+| `THE STRING IS TOO LONG` | a string longer than 255 characters |
+| `THE PROGRAM MEMORY IS FULL` | the program no longer fits |
 | `BREAK` | you pressed Escape or Ctrl-C |
 
 ## A small game
@@ -830,6 +846,13 @@ graphics chip, with sprites and sound. docs/design/c-language.md
 describes the dialect, and the C guide beside this one carries on from
 here.
 
+`CALL` runs a routine for what it does. `USR` asks a routine for an
+answer. `PRINT USR(2, TWICE, 21)` hands 21 to a routine named TWICE and
+prints what it gives back. The first number says how big the answer is.
+A 1 means one box, 0 to 255. A 2 means two boxes, up to 65535. A routine
+with a longer answer fills a row of boxes and gives back where the row
+starts. `PEEK` and `DEEK` then read it. The C guide shows the other side.
+
 The system page at docs/basic-system-page.md lists every box BASIC keeps
 its own state in, from 0 to 31. Box 5 and box 6 came from there.
 examples/basic-c and examples/basic-driver show BASIC calling C and
@@ -895,6 +918,7 @@ Functions, used inside an expression:
 | `STR$(n)` | the number as a string |
 | `CHR$(n)` | the character with code n |
 | `MID$(s$,i,n)` | n characters from position i, count optional |
+| `USR(w,n,p1,p2,p3)` | the answer of the routine at slot n, given up to three numbers: nothing when w is 0, a byte when 1, a word when 2 |
 | `INKEY$` | the key pressed since the last look, or `""` |
 
 Operators, in order from tightest to loosest: `-` and `NOT` on one

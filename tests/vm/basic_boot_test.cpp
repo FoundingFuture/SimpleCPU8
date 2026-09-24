@@ -148,8 +148,9 @@ TEST_CASE("a slot named AUTORUN runs at power on") {
 
 #if SC8_HAVE_BASIC && defined(SC8_ROM_DIR)
 // examples/basic-c: BASIC, C and assembly in one ROM. AUTORUN sets A to
-// 21, CALL DOUBLE doubles it in C, and CALL ANSWER leaves 42 in A for
-// PEEK(4). Both numbers land on the screen.
+// 21, CALL DOUBLE doubles it in C, CALL ANSWER leaves 42 in A for
+// PEEK(4), and USR(2, TRIPLE, 14) has C answer 42. All three land on the
+// screen.
 TEST_CASE("the mixed example boots into BASIC and calls its C and assembly by name") {
   std::ifstream in(std::string(SC8_ROM_DIR) + "/basic-c.rom", std::ios::binary);
   REQUIRE_MESSAGE(in, "basic-c.rom is not built");
@@ -167,6 +168,6 @@ TEST_CASE("the mixed example boots into BASIC and calls its C and assembly by na
   c.insert(std::move(*r.cartridge));
   runFrames(c, 120);
   const std::string screen = screenText(c.machine());
-  CHECK_MESSAGE(screen.find("42\n42\n") != std::string::npos, screen);
+  CHECK_MESSAGE(screen.find("42\n42\n42\n") != std::string::npos, screen);
 }
 #endif

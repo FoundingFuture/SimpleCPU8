@@ -35,7 +35,7 @@ reads them.
 | $15 | SYS_RUNNING | byte | 1 while a program runs |
 | $16 | SYS_PC | word | the offset in the program of the line being run |
 | $18 | SYS_CALL | word | the instruction slot the last CALL or JMP went to |
-| $1A | reserved | 6 | free for what comes next |
+| $1A | SYS_USR | 6 | USR's three parameter words on the way in, its answer on the way out |
 
 The integer variables sit in 11 word slots per letter: the bare name first,
 then the digit forms 0 to 9. So `B` is slot 11 and `B7` is slot 19, and
@@ -89,8 +89,35 @@ A routine called this way has the contract a bang handler has. It may use
 the hardware stack in balance. It may not touch the zero page past the
 system page, which is BASIC's register file.
 
+## Asking a routine for an answer
+
+`USR(width, n, p1, p2, p3)` is a function. It calls the routine at slot
+n the way compiled C calls a function, so a C function needs no glue.
+The parameters are optional, up to three, and each is a word. BASIC
+parks them at SYS_USR and copies them onto the software stack. The first
+lands at the address `__sp` holds, high byte first, the next two above
+it. Then it calls the routine. The routine leaves its answer in the
+return cells, `__ret` and `__ret+1`, high byte first, where every C
+function leaves its value. Width 0 is for a routine called for what it
+does, and USR gives 0. Width 1 gives the low byte, 0 to 255. Width 2
+gives the whole word. That word can be the address of a buffer the
+routine filled, for `PEEK` and `DEEK` to read.
+
+```basic
+10 PRINT USR(2, TWICE, 21)
+20 P = USR(2, FILL, 7) : PRINT PEEK(P), PEEK(P + 1)
+```
+
+BASIC puts `__sp` back as it was after the call. A C function pops its
+own parameters, and an assembly routine that ignores them leaves the
+stack as it found it anyway. An assembly routine reads its parameters
+through `__sp` and writes its answer to `__ret`. Those two are the only
+bytes past the system page it may touch. A width other than 0, 1 or 2
+is `RETURN VALUE WIDTH IS OUT OF RANGE [0,1,2]`.
+
 In a project built by simplecpu-make, the number may be a name. `CALL
-DOUBLE` names a C function or an assembly label. The build writes the
+DOUBLE` and `USR(2, TWICE, 21)` name a C function or an assembly label.
+The build writes the
 label's slot into the program before the ROM is written. The interpreter
 itself knows only numbers. A name typed at the prompt is a syntax error.
 A C function called this way runs on the interpreter's own runtime. It may
@@ -100,20 +127,40 @@ example. docs/standalone.md, under Making a program, has the project side.
 
 ## The error codes
 
+This BASIC has room to explain itself, so a message says what went
+wrong in words. A syntax error adds what it expected and what it found.
+Every message ends with `IN LINE n` when a program was running. The code
+stays in SYS_ERR until the next command. Codes 1 to 12 keep the numbers
+they always had. Code 3 is no longer raised: codes 15 to 18 split it.
+
 | Code | Name | On the screen |
 |---|---|---|
 | 0 | E_OK | no error |
-| 1 | E_SYNTAX | `SYNTAX ERROR` |
-| 2 | E_NOLINE | `NO SUCH LINE ERROR` |
-| 3 | E_STACK | `TOO DEEP ERROR` |
-| 4 | E_MEMORY | `OUT OF MEMORY ERROR` |
-| 5 | E_TYPE | `TYPE ERROR` |
-| 6 | E_DIVZERO | `DIVIDE BY ZERO ERROR` |
-| 7 | E_RANGE | `OUT OF RANGE ERROR` |
-| 8 | E_BREAK | BREAK |
-| 9 | E_BANG | `UNKNOWN ! COMMAND ERROR` |
-| 10 | E_NOTFOUND | `NOT FOUND ERROR` |
-| 11 | E_STOFULL | `STORAGE FULL ERROR` |
-| 12 | E_BADNAME | `BAD NAME ERROR` |
+| 1 | E_SYNTAX | `SYNTAX ERROR: EXPECTED what BUT FOUND token` |
+| 2 | E_NOLINE | `THERE IS NO LINE n` |
+| 3 | E_STACK | not raised |
+| 4 | E_MEMORY | `THE PROGRAM MEMORY IS FULL: 6144 BYTES AT MOST` |
+| 5 | E_TYPE | `A STRING CANNOT BE USED AS A NUMBER` |
+| 6 | E_DIVZERO | `DIVISION BY ZERO` |
+| 7 | E_RANGE | `NUMBER OUT OF RANGE` |
+| 8 | E_BREAK | `BREAK` |
+| 9 | E_BANG | `NO DRIVER KNOWS THE COMMAND !word` |
+| 10 | E_NOTFOUND | `NO PROGRAM CALLED name ON THE CARTRIDGE` |
+| 11 | E_STOFULL | `THE CARTRIDGE IS FULL` |
+| 12 | E_BADNAME | `A PROGRAM NAME IS 1 TO 16 CHARACTERS WITHOUT SPACES` |
+| 13 | E_USRWIDTH | `RETURN VALUE WIDTH IS OUT OF RANGE [0,1,2]` |
+| 14 | E_UNKNOWN | `UNKNOWN WORD word` |
+| 15 | E_GOSUBS | `TOO MANY GOSUBS INSIDE EACH OTHER: 16 AT MOST` |
+| 16 | E_RETURN | `RETURN WITHOUT A GOSUB` |
+| 17 | E_FORS | `TOO MANY FOR LOOPS INSIDE EACH OTHER: 8 AT MOST` |
+| 18 | E_NEXT | `NEXT WITHOUT A FOR` |
+| 19 | E_LINELONG | `THE LINE IS TOO LONG: 250 CHARACTERS AT MOST` |
+| 20 | E_STRLONG | `THE STRING IS TOO LONG: 255 CHARACTERS AT MOST` |
+| 21 | E_STRMEM | `OUT OF MEMORY FOR STRINGS` |
+| 22 | E_SAVEBIG | `THE PROGRAM IS TOO LONG TO SAVE` |
+| 23 | E_NEEDSTR | `A NUMBER CANNOT BE USED AS A STRING` |
+| 24 | E_STRCMP | `STRINGS ARE COMPARED WITH = <> < > <= OR >=` |
+| 25 | E_NOTVAR | `name IS NOT A VARIABLE: ...` |
+| 26 | E_ROUTINE | `name IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: ...` |
 
 The codes are in src/basic/basic.h and the messages in run.c.
