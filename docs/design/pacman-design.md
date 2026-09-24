@@ -6,8 +6,9 @@ real targeting rules. Dots, power pills, and a set of mazes cycled per level.
 Built so far: the maze, the dots, movement, and every tunnel pair a maze
 declares. Levels cycle. Four ghosts hunt with the arcade's targets, turn blue
 on a power pill, and go home as eyes when eaten. Lives and the sound are in.
-The score strip is in, above the maze. This is the design record for the
-whole game.
+The score strip is in, above the maze. An attract screen and a game over
+screen wrap the game, so it runs until the host quits. This is the design
+record for the whole game.
 
 ## Contents
 
@@ -563,13 +564,49 @@ fixed total, because each maze has its own.
 Pac-Man starts with three lives. A death resets the actors to their starting
 positions and leaves the dots as they were.
 
-Nothing leaves game over, so reaching it ends the program. The frame loop's
-game over arm halts the CPU on the next arrival. The board, the score and the
-maze stay on screen, because the GPU holds them. Restart starts a new game.
+Game over is a screen, not a halt. The frame loop's game over arm leaves
+for it on the next arrival, once the death frame has completed.
 
-A loop polling the frame counter and acting on nothing would run the machine
-flat out for that same picture. Anything that later gives game over work to
-do has to move the halt, not work around it.
+### The three screens
+
+The program is a ring of three screens. Power on lands on the attract
+screen. A key starts the game. The last life leads to the game over screen,
+and a key there returns to the attract screen. The machine never halts.
+
+The attract screen is the arcade's introduction. `PAC-MAN` stands at the top
+in block letters. Below it the roster appears one line at a time: each ghost
+with its name and nickname, then Pac-Man. At the bottom Pac-Man walks left
+with the four ghosts behind him and eats a power pill. Then he chases them
+back to the right while they flee blue. Each one he reaches vanishes. A blinking
+`PRESS A KEY TO START` sits under the chase. The whole sequence loops.
+
+The screen uses the game's own five sprites and the game's own draw. It
+writes the actor window and calls `actdraw`. The mouth animation, the
+facings, the blue strip and the strip cache come for free. The roster is
+stamped into video memory with `CMD_STAMP`, which leaves the sprites free for
+the chase. Positions are computed from a tick rather than stepped.
+
+The game over screen fades the maze to black and clears it. `GAME` and
+`OVER` go up as two centred lines of block letters in red, with `PRESS A KEY`
+under them. The score strip stays above.
+
+The GPU's font has one size. `bigtext` draws block letters from a 5 by 7
+bitmap table, one `CMD_RECT` per set bit, four pixels a block. The table
+holds the eleven letters the two big lines need. A string is a list of
+offsets into it, because the CPU has no multiply.
+
+Any key or button leaves a waiting screen. `anykey` reads the key queue for
+a press. It reads the pad for a bit that was not set at the last call.
+`drainkeys` empties the queue and records the pad's level on entry to a
+screen. A key or button held from the previous screen therefore cannot skip
+the next one.
+
+What happens once, at power on, sits above `attract`. That is the palette
+map, the level table, the row tables, the sprites and the samples. What
+happens once per game sits in `newgame`. That is the score, the lives, the
+level and its pointer, the text overlay and the strip. The first maze is then
+drawn and faded in exactly as `nextlvl` draws the next. Per level state stays where `drawmaze`
+resets it. The strip cache is kept, because the attract screen kept it true.
 
 ## Sound
 
@@ -687,6 +724,9 @@ nobody sees.
 - A maze with a different dot count still ends at zero, not at 240.
 - Level twenty-two uses the last row of the table rather than reading past it.
 - Blinky speeds up when the dot count crosses his threshold, and not before.
+- The three screens run round in a ring, and a held button skips none of
+  them. `tests/vm/pacman_screens_test.cpp` drives the built ROM through the
+  virtual computer and reads the screens off the GPU.
 
 ## Still open
 

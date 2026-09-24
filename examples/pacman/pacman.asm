@@ -2,6 +2,17 @@
 ; maze out of ROM into RAM with one CMD_COPY, paints it, then fades the
 ; three maze palette entries up from black, so the draw is never seen
 ; happening.
+;
+; The program is three screens in a ring: the attract screen, the game and
+; the game over screen. Power on lands on the attract screen. A key starts a
+; game and the last life leads to game over. A key there goes back to the
+; attract screen. Nothing halts: the machine runs until the host quits.
+; DESIGN: the work that happens ONCE sits above `attract`, and the work that
+; happens once per GAME sits in newgame. The split is what makes a second
+; game start clean. The palette map, the level table, the row tables, the
+; sprites and the samples describe the machine and never change. The score,
+; the lives, the level pointer and the maze describe a game. Those are written
+; again for every one.
 
 ; --- silence first, before anything else runs. The audio chip survives a
 ; Reset, and so does data RAM, so a Reset pressed while the siren is looping
@@ -45,17 +56,17 @@
 ; --- the score strip, in the eight screen rows above the maze. The overlay
 ; rides over graphics and sprites, so it costs no video memory and no sprite.
 ; The maze's fades never touch it. $FC is the default palette's yellow, which
-; is outside the entries 1 to 3 the maze rewrites. The style is set once. hud
-; prints the strip now, and again whenever a value on it changes.
-        OUT GPU_TEXT_COLOR, $FC
-        OUT GPU_CMD, CMD_TEXT_STYLE
-        JSR hud
+; is outside the entries 1 to 3 the maze rewrites. The style is set by the
+; screen that owns the overlay: newgame sets the strip's yellow and prints the
+; strip, and the attract screen sets its own colour. hud prints the strip
+; again whenever a value on it changes.
 
 ; --- the per-level difficulty table, out of the cartridge and into RAM.
 ; DESIGN: the CPU cannot read the cartridge, so the GPU moves the bytes, the
 ; same one-cycle CMD_COPY loadmaze uses for a maze. It runs once, before the
 ; first draw, because drawmaze reads the row for Pac-Man's speed and msdur
-; reads it for the scatter duration.
+; reads it for the scatter duration. The pointer into it is per game and is
+; set in newgame.
 ; DESIGN: lvltab lives past work, not with the scalars. It is 126 bytes and
 ; the zero page has 68 to spare; nothing reads it with [addr8] anyway,
 ; because lvlptr walks it, exactly as rowtab, p2t and sqtab are walked.
@@ -67,25 +78,20 @@
         OUT GPU_LEN_HI, 0
         OUT GPU_LEN_LO, 147
         OUT GPU_CMD, CMD_COPY
-        LD D1 <- lvltab
-        LD [lvlptr] <- D1
-        LD A <- 20
-        LD [lvlrem] <- A     ; rows left to advance through before the last
 
-        JSR loadmaze
+; --- the two row tables. Both hold addresses and neither reads a maze, so
+; they are built once for every game the machine will play.
         JSR mkrows
         JSR mkhrows
-        JSR drawmaze
-        JSR fadein
 
-; --- Pac-Man, sprite 1, a 12 frame strip, from pacspr.
+; --- Pac-Man, sprite 1, a 12 frame strip, from pacspr. The five sprites are
+; created hidden: the attract screen shows them when its chase begins, and
+; newgame shows them under the fade-in of the first maze.
         OUT GPU_SPRITE, 1
         OUT GPU_SRC_BANK, get_bankbyte(pacspr)
         OUT GPU_SRC_HI, get_highbyte(pacspr)
         OUT GPU_SRC_LO, get_lowbyte(pacspr)
         OUT GPU_CMD, CMD_SPRITE_DEF
-        OUT GPU_SPRITE, 1    ; the def cleared the ports, so name it again
-        OUT GPU_CMD, CMD_SPRITE_SHOW
 
 ; --- the four ghosts, sprites 2 to 5. Each strip is four frames, one per
 ; facing, so a ghost's frame index is its direction with no arithmetic.
@@ -97,8 +103,6 @@
 ; to reach a ghost's own strip from a ghost NUMBER, and that is the wall
 ; loadmaze met and answered with mazetab. The table exists now, so the startup
 ; shares it rather than keeping a second spelling of the same four addresses.
-; The data ports clear behind every command, so the sprite is named again
-; for the CMD_SPRITE_SHOW below.
 ; DESIGN: this is the last strip write outside the draw, and it is not part of
 ; the state-and-art pairing adstrip owns. It exists to CREATE the five sprites,
 ; because CMD_SPRITE_SHOW needs a sprite to show. adstrip corrects whatever it
@@ -107,10 +111,6 @@
         LD [t3] <- A
 gsinit: LD A <- [t3]
         JSR ghstrip
-        LD A <- [t3]         ; the def cleared the ports, so name it again
-        ADD A <- 1
-        OUTA GPU_SPRITE
-        OUT GPU_CMD, CMD_SPRITE_SHOW
         LD A <- [t3]
         INC A
         LD [t3] <- A
@@ -118,37 +118,100 @@ gsinit: LD A <- [t3]
         JZ gsdone
         JMP gsinit
 gsdone:
-; put all five sprites where the records already say they are, rather than
-; wherever a freshly defined sprite defaults to, which is the top left corner.
-; actdraw reads the window, and nothing has been loaded into it yet at this
-; point in the program, so drawall's own loadact per actor is what fills it.
-        JSR drawall
 ; --- the seven samples reach the chip, once. The three held ones are given
 ; their loop flag here too; see sndinit.
         JSR sndinit
+
+; =========================== the attract screen ===========================
+; The title, the roster and the chase, looping until a key or a button is
+; pressed. vsync paces it on the GPU frame counter, the same wait the game
+; uses. The screen therefore runs at the game's own sixty frames a second.
+; DESIGN: the five game sprites ARE the attract screen's actors, drawn by the
+; game's own actdraw from the actor window. The attract writes ax, ay, adir
+; and astate and calls the draw, the same as the walk does. That buys the
+; mouth animation, the four facings, the blue strip and the strip cache for
+; free. The roster is stamped rather than shown. Five sprites cannot stand in
+; the roster and run the chase at once. CMD_STAMP bakes the sprite
+; into video memory and leaves the sprite free.
+; DESIGN: any key or button starts the game, not only fire. A person at a
+; title screen presses whatever is under a finger. A screen that ignores the
+; wrong key reads as a hang. anykey answers both the key queue and the pad.
+; drainkeys empties both before the screen begins waiting. A key held over
+; from the previous screen therefore cannot skip this one.
+attract: JSR drainkeys
+        JSR atsetup
+atloop: JSR vsync
+        JSR anykey
+        JZ atstay
+        JMP newgame
+atstay: JSR atstep
+        JSR atblink
+        JMP atloop
+
+; =========================== a new game ===========================
+; Everything a game owns starts here, and nothing a game owns starts anywhere
+; else. The maze, the actors, the mode clock and the fright are per level and
+; drawmaze resets those; this block resets what is per GAME and then draws
+; level 1 exactly as nextlvl draws level 2.
+; DESIGN: the strip cache astrip is NOT reset. It says what each sprite is
+; wearing, and the attract screen kept it true through actdraw. The first walk
+; of the game corrects the four ghosts back from blue. It is the compare that
+; corrects them after a pill. Zeroing it would define five strips for
+; nothing.
+; DESIGN: the sprites are placed by drawall before they are shown, and shown
+; before the fade-in. Shown first, all five would sit where the attract chase
+; left them until the walk ran. Placed after the fade, the maze would arrive
+; with no one on it. nextlvl learnt the same order; see the note there.
+newgame: LD D1 <- score
+        LD A <- 0
+        LD [D1] <- A
+        LD [D1+1] <- A
+        LD [gstate] <- A
+        LD [dietk] <- A
+        LD [ghchain] <- A
+        LD [pacstl] <- A
+        LD [pacph] <- A
+        LD [pacpd] <- A
+        LD [pactk] <- A
+        LD [wakaph] <- A
+        LD A <- 3
+        LD [lives] <- A
+        LD A <- 1
+        LD [level] <- A
+        LD [lvlno] <- A
+        LD D1 <- lvltab
+        LD [lvlptr] <- D1
+        LD A <- 20
+        LD [lvlrem] <- A     ; rows left to advance through before the last
+        OUT GPU_CMD, CMD_TEXT_CLEAR
+        OUT GPU_TEXT_COLOR, $FC
+        OUT GPU_CMD, CMD_TEXT_STYLE
+        JSR hud
+        JSR loadmaze
+        JSR drawmaze
+        JSR drawall
+        JSR showall
+        JSR fadein
 ; The board is up, so the game is playing rather than ready. gstate is 0
-; until this line, which is the whole of the draw and the fade-in.
+; from the top of this block until this line, which is the whole of the draw
+; and the fade-in.
         LD A <- 1
         LD [gstate] <- A
 
 ; =========================== main loop ===========================
 ; DESIGN: the frame's work is chosen by gstate, and only two of its four
-; values do anything. 1 is playing: step everyone, age the mode clock, then
-; ask whether a ghost caught him. 2 is dying: the pause counts down and
+; values do anything here. 1 is playing: step everyone, age the mode clock,
+; then ask whether a ghost caught him. 2 is dying: the pause counts down and
 ; nothing else runs, so no actor steps and no sprite moves. 3 is game over,
-; and it halts: see the arm itself. 0 (ready) cannot be seen from here, gstate
-; being 1 before main is ever entered and never going back.
+; and it leaves the loop: see the arm itself. 0 (ready) cannot be seen from
+; here, gstate being 1 before main is ever entered and never going back.
 ; DESIGN: contact runs AFTER actall, not inside it. It reads the sprites the
 ; GPU holds, and actall is what moves them to where the records say; asking
 ; before the walk would measure the previous frame's positions. It also means
 ; nothing is mid-walk when a death is declared, which is what lets resetact
 ; run the walk itself without saving acti, aastep and acur the way nextlvl
 ; has to.
-main:   IN GPU_FRAME
-        SUB A <- [mainfr]
-        JZ main
-        IN GPU_FRAME
-        LD [mainfr] <- A
+main:   JSR vsync
 ; --- the held sound, once a frame and outside the gstate dispatch, because
 ; every state has a bed and in three of the four it is silence. See sndbed.
         JSR sndbed
@@ -158,21 +221,482 @@ main:   IN GPU_FRAME
         LD A <- [gstate]
         SUB A <- 2
         JZ maindie
-; Game over, and nothing leaves state 3. So the program is finished, and a
-; finished program stops the machine rather than polling a frame counter it
-; will never act on. The GPU holds the picture with no help from the CPU, and
-; sndbed above has already dropped the bed to silence on this same pass.
-; DESIGN: the HALT belongs here and not in dieall. dieall runs inside the
-; actor walk, several returns deep, and halting there would leave the frame it
+; Game over, and nothing leaves state 3 from inside the game. The game over
+; screen takes over from here. sndbed above has already dropped the bed to
+; silence on this same pass.
+; DESIGN: the exit belongs here and not in dieall. dieall runs inside the
+; actor walk, several returns deep. Leaving there would abandon the frame it
 ; was in half finished. Reaching it from the dispatch means the death frame
 ; completed like any other.
-        HLT
+        JMP gameover
 mainplay: JSR actall
         JSR modestep
         JSR contact
         JMP main
 maindie: JSR diestep
         JMP main
+
+; =========================== game over ===========================
+; The maze fades to black under the five hidden sprites. Then the screen is
+; cleared and GAME OVER goes up in block letters, with the score strip still
+; above it. A key or a button returns to the attract screen.
+; DESIGN: block letters through bigtext, because the GPU's font has one size.
+; Two text rows reading GAME OVER would be lost in a 256 pixel screen. The
+; arcade's own game over is the loudest thing on its board.
+; DESIGN: the fade runs first and the keys are drained after it. A key pressed
+; during the fade is dropped too. The wait begins with an empty queue and the
+; pad's current level, whatever the player did while he died.
+gameover: JSR hideall
+        JSR fadeout
+        OUT GPU_COLOR, 0
+        OUT GPU_CMD, CMD_CLEAR
+        OUT GPU_COLOR, $E0   ; the default palette's red
+        OUT GPU_CMD, CMD_SET_COLOR
+        LD A <- 82
+        LD [bgx] <- A
+        LD A <- 76
+        LD [bgy] <- A
+        LD D1 <- biggame
+        JSR bigtext
+        LD A <- 82
+        LD [bgx] <- A
+        LD A <- 120
+        LD [bgy] <- A
+        LD D1 <- bigover
+        JSR bigtext
+        OUT GPU_TEXT_COL, 15
+        OUT GPU_TEXT_ROW, 21
+        OUT GPU_CMD, CMD_TEXT_AT
+        LD D1 <- gopress
+        JSR puts
+        JSR drainkeys
+gowait: JSR vsync
+        JSR anykey
+        JZ gowait
+        JMP attract
+
+; --- wait for the GPU's frame counter to move, then remember it.
+; DESIGN: IN sets no flags, so the SUB is what tests the counter. The frame
+; loop, the attract screen and the game over screen all pace on this one
+; routine and one byte. Leaving one screen for another therefore never waits
+; a frame twice or skips one.
+vsync:  IN GPU_FRAME
+        SUB A <- [mainfr]
+        JZ vsync
+        IN GPU_FRAME
+        LD [mainfr] <- A
+        RET
+
+; --- nonzero in A when a fresh press has arrived since the last call.
+; DESIGN: two sources, and they are read differently because they are
+; different things. IO_KEY is a queue of events. A press is an event with bit
+; 7 clear, and a release is skipped over to reach the next one. The pad is a
+; level. A press there is a bit that is set now and was not set at the last
+; call. The level test is what makes a held button harmless. drainkeys records
+; the level on entry to a screen. A button still down from the previous screen
+; then changes nothing until it is let go and pressed again.
+anykey: IN IO_KEY -> A
+        LD [t3] <- A
+        AND A <- $7F
+        JZ akpad             ; the queue is empty: ask the pad
+        LD A <- [t3]
+        AND A <- $80
+        JZ akyes             ; bit 7 clear: a press
+        JMP anykey           ; a release: look at the next event
+akpad:  IN IO_CONTROLLER -> A
+        LD [t3] <- A
+        XOR A <- [padprev]
+        AND A <- [t3]        ; set now and not before: a fresh press
+        LD [t4] <- A
+        LD A <- [t3]
+        LD [padprev] <- A
+        LD A <- [t4]
+        RET
+akyes:  LD A <- 1
+        RET
+
+; --- empty the key queue and take the pad's level as the baseline anykey
+; compares against. Called on entry to a screen that waits for a key.
+drainkeys: IN IO_KEY -> A
+        OR A <- 0            ; IN sets no flags
+        JZ dkpad
+        JMP drainkeys
+dkpad:  IN IO_CONTROLLER -> A
+        LD [padprev] <- A
+        RET
+
+; --- show or hide all five sprites. One loop, with the choice in t4: 1
+; shows and 0 hides. A command name is an OUT operand and not a value the
+; CPU can hold. The loop therefore branches on the flag rather than carrying
+; a byte.
+showall: LD A <- 1
+        JMP spall
+hideall: LD A <- 0
+spall:  LD [t4] <- A
+        LD A <- 1
+        LD [t3] <- A
+spnext: LD A <- [t3]
+        OUTA GPU_SPRITE
+        LD A <- [t4]
+        JZ sphide
+        OUT GPU_CMD, CMD_SPRITE_SHOW
+        JMP spstep
+sphide: OUT GPU_CMD, CMD_SPRITE_HIDE
+spstep: LD A <- [t3]
+        INC A
+        LD [t3] <- A
+        SUB A <- 6
+        JZ spdone
+        JMP spnext
+spdone: RET
+
+; --- print the zero terminated RAM string D1 points at, at the text cursor.
+; D1 comes back pointing past the terminator, so packed strings can be walked
+; one call at a time; the roster does exactly that.
+puts:   LD A <- [D1]+
+        JZ psdone
+        OUTA GPU_TEXT_CHAR
+        OUT GPU_CMD, CMD_TEXT_CHAR
+        JMP puts
+psdone: RET
+
+; --- draw a string of block letters. bgx and bgy are the top left corner
+; and D1 points at the string. The pen colour is the letters' colour. A letter
+; is a 5 by 7 bitmap drawn as 4 by 4 pixel blocks, one CMD_RECT per set bit.
+; So a letter is 20 by 28 pixels, and a column advances by 24.
+; DESIGN: the string holds OFFSETS into bigfont rather than letter numbers,
+; seven per letter. The CPU has no multiply, and the string is data anyway.
+; The string ends on 255, which no offset can be.
+; DESIGN: the bits are walked by doubling. Bit 4 is the leftmost column. One
+; AND tests it, and one add to itself brings the next column under it.
+bigtext: LD A <- [D1]+
+        LD [bgptr] <- D1
+        LD [bgg] <- A
+        SUB A <- 255
+        JZ bgdone
+        LD A <- 0
+        LD [bgr] <- A
+        LD A <- [bgy]
+        LD [bgpy] <- A
+bgrow:  LD A <- [bgg]
+        ADD A <- [bgr]
+        LD D2 <- bigfont
+        LD A <- [D2+A]
+        LD [bgbits] <- A
+        LD A <- 0
+        LD [bgc] <- A
+        LD A <- [bgx]
+        LD [bgpx] <- A
+bgcol:  LD A <- [bgbits]
+        AND A <- $10
+        JZ bgskip
+        OUT GPU_X_HI, 0
+        LD A <- [bgpx]
+        OUTA GPU_X
+        OUT GPU_Y_HI, 0
+        LD A <- [bgpy]
+        OUTA GPU_Y
+        OUT GPU_CMD, CMD_MOVE_TO
+        OUT GPU_X_HI, 0
+        LD A <- [bgpx]
+        ADD A <- 3
+        OUTA GPU_X
+        OUT GPU_Y_HI, 0
+        LD A <- [bgpy]
+        ADD A <- 3
+        OUTA GPU_Y
+        OUT GPU_CMD, CMD_RECT
+bgskip: LD A <- [bgbits]
+        ADD A <- [bgbits]
+        LD [bgbits] <- A
+        LD A <- [bgpx]
+        ADD A <- 4
+        LD [bgpx] <- A
+        LD A <- [bgc]
+        INC A
+        LD [bgc] <- A
+        SUB A <- 5
+        JZ bgnext
+        JMP bgcol
+bgnext: LD A <- [bgpy]
+        ADD A <- 4
+        LD [bgpy] <- A
+        LD A <- [bgr]
+        INC A
+        LD [bgr] <- A
+        SUB A <- 7
+        JZ bgglyph
+        JMP bgrow
+bgglyph: LD A <- [bgx]
+        ADD A <- 24
+        LD [bgx] <- A
+        LD D1 <- [bgptr]
+        JMP bigtext
+bgdone: RET
+
+; --- the attract screen from a clean slate: the title, no roster yet, the
+; five sprites hidden and wearing their own colours. Phase 0 and tick 0.
+; DESIGN: the five actdraw calls put the ghosts back into their own strips
+; after the chase turned them blue. They go through the same window and the
+; same cache the game uses. They also leave every sprite at the top left,
+; which nobody sees because all five are hidden.
+atsetup: JSR hideall
+        LD A <- 0
+        LD [acti] <- A
+        LD [ax] <- A
+        LD [adir] <- A
+        LD A <- 1
+        LD [astate] <- A
+        LD A <- 194
+        LD [ay] <- A
+asloop: JSR actdraw
+        LD A <- [acti]
+        INC A
+        LD [acti] <- A
+        SUB A <- 5
+        JZ asdrawn
+        JMP asloop
+asdrawn: OUT GPU_COLOR, 0
+        OUT GPU_CMD, CMD_CLEAR
+        OUT GPU_CMD, CMD_TEXT_CLEAR
+        OUT GPU_TEXT_COLOR, $FF
+        OUT GPU_CMD, CMD_TEXT_STYLE
+        OUT GPU_COLOR, $FC   ; Pac-Man's own yellow for the title
+        OUT GPU_CMD, CMD_SET_COLOR
+        LD A <- 46
+        LD [bgx] <- A
+        LD A <- 12
+        LD [bgy] <- A
+        LD D1 <- bigttl
+        JSR bigtext
+        LD A <- 0
+        LD [atph] <- A
+        LD [attk] <- A
+        LD A <- 8
+        LD [atrow] <- A
+        LD D1 <- atnames
+        LD [atnptr] <- D1
+        LD A <- 255          ; neither blink state, so the first frame prints
+        LD [blinkst] <- A
+        RET
+
+; --- one frame of the attract screen. atph is the phase and attk the frames
+; spent in it. Phases 0 to 4 reveal the roster one actor at a time. 5 is the
+; chase to the left and 6 the chase back to the right. 7 is a pause before it
+; all runs again.
+atstep: LD A <- [atph]
+        SUB A <- 5
+        JZ atleft
+        LD A <- [atph]
+        SUB A <- 6
+        JZ atright
+        LD A <- [atph]
+        SUB A <- 7
+        JZ atpause
+; the roster: on the phase's first frame stamp the actor and print its name,
+; then hold for 40 frames.
+        LD A <- [attk]
+        JZ atrnew
+        INC A
+        LD [attk] <- A
+        SUB A <- 40
+        JZ atnext
+        RET
+atnext: LD A <- 0
+        LD [attk] <- A
+        LD A <- [atph]
+        INC A
+        LD [atph] <- A
+        RET
+; DESIGN: the roster stamps sprite phase plus 2 for a ghost and sprite 1 for
+; Pac-Man. His frame 1 is the half open mouth facing right. The ghosts are at
+; frame 0 from atsetup, facing right too. The row is a text row, so the stamp
+; lands at eight times it less two. That centres a 12 pixel sprite on an 8
+; pixel line of text.
+atrnew: LD A <- [atph]
+        SUB A <- 4
+        JZ atrpac
+        LD A <- [atph]
+        ADD A <- 2
+        JMP atrst
+atrpac: LD A <- 1
+        LD [aspr] <- A
+        JSR adframe
+        LD A <- 1
+atrst:  OUTA GPU_SPRITE
+        OUT GPU_SPRITE_X_HI, 0
+        OUT GPU_SPRITE_X, 72
+        OUT GPU_SPRITE_Y_HI, 0
+        LD A <- [atrow]
+        LD [t3] <- A
+        ADD A <- [t3]
+        LD [t3] <- A
+        ADD A <- [t3]
+        LD [t3] <- A
+        ADD A <- [t3]        ; eight times the row
+        SUB A <- 2
+        OUTA GPU_SPRITE_Y
+        OUT GPU_CMD, CMD_STAMP
+        OUT GPU_TEXT_COL, 16
+        LD A <- [atrow]
+        OUTA GPU_TEXT_ROW
+        OUT GPU_CMD, CMD_TEXT_AT
+        LD D1 <- [atnptr]
+        JSR puts
+        LD [atnptr] <- D1
+        LD A <- [atrow]
+        ADD A <- 3
+        LD [atrow] <- A
+        LD A <- 1
+        LD [attk] <- A
+        RET
+; the chase to the left. Pac-Man leads from x 184 with the four ghosts 16
+; pixels apart behind him, all at a pixel a frame. He stands on the pill at x
+; 20 on frame 164. The pill is drawn on the first frame and eaten on the last.
+; DESIGN: positions are computed from the tick rather than stepped. A phase is
+; then a function of attk, and the two chases cannot drift apart. The ghosts
+; are hidden one by one on the way back. The first frame of this phase shows
+; all five again.
+atleft: LD A <- [attk]
+        JZ atlnew
+        JMP atlgo
+atlnew: JSR showall
+        OUT GPU_COLOR, $FE   ; the pill, in a peach the maze fades never touch
+        JSR atpill
+atlgo:  LD A <- 2            ; everyone faces left
+        LD [adir] <- A
+        LD A <- 184
+        SUB A <- [attk]
+        LD [atpx] <- A
+        LD A <- 200
+        SUB A <- [attk]
+        LD [atx] <- A
+        LD A <- 1
+        LD [astate] <- A
+        JSR atactors
+        LD A <- [attk]
+        INC A
+        LD [attk] <- A
+        SUB A <- 165
+        JZ atleat
+        RET
+atleat: OUT GPU_COLOR, 0
+        JSR atpill           ; the pill is gone
+        LD A <- 6
+        LD [atph] <- A
+        LD A <- 0
+        LD [attk] <- A
+        RET
+; the chase back. The ghosts are blue and flee to the right at a pixel a
+; frame; Pac-Man follows at two and eats each one he reaches, which hides its
+; sprite. He leaves the screen at frame 116.
+; DESIGN: frtk is held above the flashing threshold, so the blue strip shows
+; its plain frame; adfrgh reads it exactly as it does in the game. drawmaze
+; resets frtk through unfright before any game reads it.
+atright: LD A <- 0
+        LD [adir] <- A
+        LD A <- [attk]
+        ADD A <- [attk]
+        ADD A <- 20
+        LD [atpx] <- A
+        LD A <- [attk]
+        ADD A <- 36
+        LD [atx] <- A
+        LD A <- 2
+        LD [astate] <- A
+        LD A <- 100
+        LD [frtk] <- A
+        JSR atactors
+        LD A <- [attk]
+        INC A
+        LD [attk] <- A
+        SUB A <- 117
+        JZ atrend
+        RET
+atrend: LD A <- 7
+        LD [atph] <- A
+        LD A <- 0
+        LD [attk] <- A
+        RET
+; the pause: a second of the empty road, then the whole screen again.
+atpause: LD A <- [attk]
+        INC A
+        LD [attk] <- A
+        SUB A <- 60
+        JZ atsetup           ; a tail call: it starts over from the title
+        RET
+
+; --- draw the five chase actors from atpx, atx, adir and astate. Pac-Man is
+; at atpx and the ghosts at atx, 16 pixels apart. A ghost Pac-Man has reached
+; is hidden; that is a no-op on the way out, when he is behind all four.
+; DESIGN: astate is written for Pac-Man too, and it does not matter. adstrip
+; never reads his state byte, and actdraw takes his own arm before the
+; frightened test; see the note at adstrip.
+atactors: LD A <- 194
+        LD [ay] <- A
+        LD A <- 0
+        LD [acti] <- A
+        LD A <- [atpx]
+        LD [ax] <- A
+        JSR actdraw
+        LD A <- 1
+        LD [acti] <- A
+aaghost: LD A <- [atx]
+        LD [ax] <- A
+        JSR actdraw
+        LD A <- [atx]
+        SUB A <- [atpx]
+        JC aaeaten           ; the ghost is behind him
+        JZ aaeaten           ; or exactly under him
+        JMP aashown
+aaeaten: LD A <- [acti]
+        INC A
+        OUTA GPU_SPRITE
+        OUT GPU_CMD, CMD_SPRITE_HIDE
+aashown: LD A <- [atx]
+        ADD A <- 16
+        LD [atx] <- A
+        LD A <- [acti]
+        INC A
+        LD [acti] <- A
+        SUB A <- 5
+        JZ aafin
+        JMP aaghost
+aafin:  RET
+
+; --- the power pill of the chase. A disc of radius 3 at the centre of the
+; tile Pac-Man stops on. The pen colour is the caller's: peach to draw it and
+; the background to eat it.
+atpill: OUT GPU_CMD, CMD_SET_COLOR
+        OUT GPU_X_HI, 0
+        OUT GPU_X, 24
+        OUT GPU_Y_HI, 0
+        OUT GPU_Y, 206
+        OUT GPU_CMD, CMD_MOVE_TO
+        OUT GPU_RADIUS, 3
+        OUT GPU_CMD, CMD_CIRCLE
+        RET
+
+; --- PRESS A KEY TO START, on for 32 frames and off for 32. Bit 5 of the
+; GPU's frame counter is the clock. The line is printed only when the bit changes, so a
+; frame costs one IN and one compare.
+atblink: IN GPU_FRAME
+        AND A <- $20
+        LD [t3] <- A
+        SUB A <- [blinkst]
+        JZ abdone
+        LD A <- [t3]
+        LD [blinkst] <- A
+        OUT GPU_TEXT_COL, 11
+        OUT GPU_TEXT_ROW, 28
+        OUT GPU_CMD, CMD_TEXT_AT
+        LD A <- [blinkst]
+        JZ abon
+        LD D1 <- atblank
+        JMP puts             ; a tail call: puts' RET answers the frame loop
+abon:   LD D1 <- atpress
+        JMP puts
+abdone: RET
 
 ; --- copy the current level's maze into the working array.
 ; DESIGN: the CPU cannot read the cartridge, so the GPU moves the bytes, one
@@ -4258,13 +4782,11 @@ dieover: LD A <- [lives]
         LD A <- 1
         LD [gstate] <- A
         RET
-; DESIGN: nothing leaves state 3, so reaching it ends the program. The frame
-; loop's game over arm HALTS the machine on the next arrival. The board, the
-; score and the maze stay on screen because the GPU holds them, and Restart is
-; what starts a new game. A press to play again needs a screen to press it on,
-; and the score strip is stage 3's.
-; Anything that ever gives state 3 something to do has to move that HLT, not
-; work around it: the CPU is stopped from the frame after this one.
+; DESIGN: nothing leaves state 3 from inside the game, so reaching it ends
+; the game. The frame loop's game over arm leaves for the game over screen on
+; the next arrival, and that screen's key leads round to the attract screen
+; and a new game. This routine only sets the state. The screen change belongs
+; to the dispatch, which is reached with no frame half finished.
 dieall: LD A <- 3
         LD [gstate] <- A
         RET
@@ -4913,8 +5435,9 @@ pacpd:  db 0                   ; 0 opening, 1 closing
 pactk:  db 0                   ; frames until the next phase step
 ; --- the game as a whole, rather than one actor.
 ; gstate is what the frame loop dispatches on: 0 ready, 1 playing, 2 dying,
-; 3 game over. 0 stands for the whole of the startup draw and fade, and the
-; line that ends it is the one just before the loop is entered.
+; 3 game over. 0 stands for the whole of newgame's draw and fade, and the
+; line that ends it is the one just before the loop is entered. The attract
+; screen and the game over screen run outside the loop and leave it alone.
 ; lives sits beside score, in the block the score strip prints.
 gstate: db 0
 dietk:  db 0                   ; frames left in the dying pause
@@ -4982,6 +5505,32 @@ srn2:   db 0
 srn3:   db 0
 srn4:   db 0
 wakaph: db 0                   ; which of the two chomp tones is next
+; --- the screens around the game. padprev is the pad level anykey compares
+; against, and blinkst the last state of the blinking line. atph and attk are
+; the attract screen's phase and its frames in that phase. atrow is the text
+; row the next roster entry goes on and atnptr the next name in atnames. atpx
+; and atx are the x of Pac-Man and of the ghost being drawn in the chase.
+padprev: db 0
+blinkst: db 0
+atph:   db 0
+attk:   db 0
+atrow:  db 0
+atnptr: dw 0
+atpx:   db 0
+atx:    db 0
+; --- bigtext's scratch. bgx and bgy are the corner the caller sets, bgptr
+; the string and bgg the glyph's offset. bgr and bgc are the row and column
+; of the bitmap being walked. bgbits holds the row's bits, and bgpx, bgpy the
+; block's pixel.
+bgx:    db 0
+bgy:    db 0
+bgptr:  dw 0
+bgg:    db 0
+bgr:    db 0
+bgc:    db 0
+bgbits: db 0
+bgpx:   db 0
+bgpy:   db 0
 ; --- the actors. Five records of eight bytes, laid out exactly like the
 ; window: x, y, dir, acc, spd, state, scol, srow. A record is the durable home
 ; of an actor's position; the window is where it is worked on for one step.
@@ -8092,6 +8641,37 @@ mazetab: db get_bankbyte(maze1), get_highbyte(maze1), get_lowbyte(maze1)
         db get_bankbyte(maze2), get_highbyte(maze2), get_lowbyte(maze2)
         db get_bankbyte(maze3), get_highbyte(maze3), get_lowbyte(maze3)
         db get_bankbyte(maze4), get_highbyte(maze4), get_lowbyte(maze4)
+; --- the screens' text, in RAM because puts reads it with the CPU. The
+; roster names are packed and walked by atnptr, one name per phase. They are
+; in the order of the records and the sprites: Blinky, Pinky, Inky, Clyde,
+; then Pac-Man. The blank line is the blinking line's off state, the same width.
+atnames: db "BLINKY - SHADOW", 0
+        db "PINKY - SPEEDY", 0
+        db "INKY - BASHFUL", 0
+        db "CLYDE - POKEY", 0
+        db "PAC-MAN", 0
+atpress: db "PRESS A KEY TO START", 0
+atblank: db "                    ", 0
+gopress: db "PRESS A KEY", 0
+; --- the block letter font bigtext draws: the eleven letters the two big
+; lines need, 5 wide by 7 high. A row is one byte, with bit 4 the left
+; column. The letters are P A C - M N G E O V R, seven bytes apart from
+; offset 0.
+bigfont: db $1E, $11, $11, $1E, $10, $10, $10   ; P
+        db $0E, $11, $11, $1F, $11, $11, $11    ; A
+        db $0E, $11, $10, $10, $10, $11, $0E    ; C
+        db $00, $00, $00, $1F, $00, $00, $00    ; -
+        db $11, $1B, $15, $15, $11, $11, $11    ; M
+        db $11, $19, $15, $13, $11, $11, $11    ; N
+        db $0E, $11, $10, $17, $11, $11, $0F    ; G
+        db $1F, $10, $10, $1E, $10, $10, $1F    ; E
+        db $0E, $11, $11, $11, $11, $11, $0E    ; O
+        db $11, $11, $11, $11, $11, $0A, $04    ; V
+        db $1E, $11, $11, $1E, $14, $12, $11    ; R
+; the big lines, as offsets into bigfont, each ended by 255.
+bigttl: db 0, 7, 14, 21, 28, 7, 35, 255       ; PAC-MAN
+biggame: db 42, 7, 28, 49, 255                ; GAME
+bigover: db 56, 63, 49, 70, 255               ; OVER
 .data
 ; DESIGN: scripts/gensprites.mjs generates pacspr and the four ghostNspr
 ; strips by maths, not hand-typed bitmaps, so a palette change is one edit.
