@@ -231,6 +231,14 @@ that the processor handles in one instruction. Use it for anything that
 fits in 0 to 255: a sprite number, a colour, a count of lives. Use `int`
 for coordinates and scores.
 
+Conditions compile straight to jumps. `if (lives > 0)` is a subtract
+and one conditional jump, with no 0 or 1 worked out in between. Two
+`unsigned char` values, or one and a constant that fits in a byte, are
+compared in one byte. An `int` takes two. A pointer or an `int` tested
+on its own, as in `while (p)` or `if (!next)`, is a single word load:
+the load sets the zero flag from all 16 bits. A loop tests at its
+bottom, so each pass costs one jump.
+
 Declare variables at the top of a block or where they are first needed.
 Both work. A variable declared outside every function is a global. It
 starts at zero and every function can see it.

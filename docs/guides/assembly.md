@@ -46,7 +46,7 @@ is that nothing is hidden. The cost is that a multiply is a loop, and a
 line of C is ten lines here.
 
 The processor has one byte register for arithmetic, two pointer
-registers, a stack and four flags. It has 80 instructions. Everything
+registers, a stack and four flags. It has 84 instructions. Everything
 else is a chip on the bus, reached through `OUT` and `IN`. The chips are
 the ones the C libraries covered. They are the GPU, the input device,
 the audio chip, the coprocessor and storage. In C a chip was a header. Here
@@ -240,16 +240,29 @@ A=00 D1=0000 D2=0000 SP=0fff PC=0002 flags=--ZC
 The sum wrapped to zero and carried. `Z` and `C` together mean the byte
 overflowed to exactly zero.
 
-The four jump instructions read one flag each. `JZ` jumps when `Z` is
-set, `JC` on `C`, `JN` on `N` and `JV` on `V`. There is no jump on a
-clear flag, so a loop tests for the set case and jumps over. To compare
-`A` with a value, subtract the value. `Z` then means equal and `C`
-means `A` was smaller.
+The eight conditional jumps read one flag each, two jumps to a flag.
+`JZ` jumps when `Z` is set and `JNZ` when it is clear. `JC` and `JNC`
+do the same for `C`, `JN` and `JP` for `N`, and `JV` and `JNV` for `V`.
+`JP` is jump if plus: `N` clear means bit 7 is clear, and zero counts as
+plus. To compare `A` with a value, subtract the value. `Z` then means
+equal, `C` means `A` was smaller, and `JNC` jumps when `A` was the same
+or larger.
+
+Every test has a jump both ways, so a loop never needs a jump over a
+jump. A countdown ends in its own test:
+
+```asm
+        LD A <- 10
+loop:   SUB A <- 1
+        JNZ loop
+```
 
 A byte load into `A` sets `Z` and `N` from the byte. A word load into
-`D1` or `D2` sets `Z` only. Stores and pointer steps set nothing. A port
-read into `A` sets nothing either, so test the value with `AND A <-
-$FF` before a `JZ`.
+`D1` or `D2` sets `Z` from all 16 bits and leaves the other flags. That
+makes the load itself a NULL test: `LD D1 <- [head]` and then `JZ
+empty` or `JNZ follow`. `POPW` and `INW` set `Z` the same way. Stores
+and pointer steps set nothing. A port read into `A` sets nothing
+either, so test the value with `AND A <- $FF` before a `JZ`.
 
 ## The memories
 
@@ -293,8 +306,8 @@ moves them.
 
 ## The instructions
 
-The 80 opcodes fall into six families. One mnemonic covers every load
-and store. So the surface is 26 mnemonics, plus four spellings that
+The 84 opcodes fall into six families. One mnemonic covers every load
+and store. So the surface is 30 mnemonics, plus four spellings that
 map one to one onto them. Each table lists the syntax, what the
 instruction does and the flags it writes. The IDE's manual pane shows
 the same facts. It adds the cycle count of each under both microcode
@@ -311,6 +324,10 @@ Control and jumps:
 | `JC target` | jumps when `C` is set | none |
 | `JN target` | jumps when `N` is set | none |
 | `JV target` | jumps when `V` is set | none |
+| `JNZ target` | jumps when `Z` is clear | none |
+| `JNC target` | jumps when `C` is clear | none |
+| `JP target` | jumps when `N` is clear, jump if plus | none |
+| `JNV target` | jumps when `V` is clear | none |
 | `JMP D1`, `JMP D2` | `PC <- D1` or `D2`, the jump table instruction | none |
 | `JSR target` | pushes the next slot number, then jumps | none |
 | `JSR D1`, `JSR D2` | the same through a register | none |
@@ -1033,8 +1050,7 @@ wait:   JSR frame
         LD A <- [hold]
         DEC A
         LD [hold] <- A
-        JZ off
-        JMP wait
+        JNZ wait
 off:    LD A <- [cur]
         OUTA APU_NOTE
         OUT APU_ARG, 1                ; 1: this note only
@@ -1042,8 +1058,7 @@ off:    LD A <- [cur]
         LD A <- [left]
         DEC A
         LD [left] <- A
-        JZ done
-        JMP note
+        JNZ note
 done:   HLT
 
 ; frame: returns when the next frame has started. Uses: A.
@@ -1360,8 +1375,7 @@ noleft: LD A <- [pad]
         JZ noright
         LD A <- [bx]
         SUB A <- 239                  ; C is set while bx is under 239
-        JC right
-        JMP noright
+        JNC noright
 right:  LD A <- [bx]
         ADD A <- 2
         LD [bx] <- A
@@ -1524,8 +1538,7 @@ noleft: LD A <- [pad]
         JZ noright
         LD A <- [bx]
         SUB A <- 239                  ; C is set while bx is under 239
-        JC right
-        JMP noright
+        JNC noright
 right:  LD A <- [bx]
         ADD A <- 2
         LD [bx] <- A
@@ -1578,8 +1591,7 @@ tick:   LD A <- [ring]
         JZ wait
         DEC A
         LD [ring] <- A
-        JZ stop
-        JMP wait
+        JNZ wait
 stop:   OUT APU_NOTE, 72
         OUT APU_ARG, 1
         OUT APU_CMD, CMD_NOTE_OFF

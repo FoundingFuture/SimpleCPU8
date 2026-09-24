@@ -10,7 +10,7 @@ namespace {
 
 using enum OperandKind;
 
-constexpr std::array<OpDef, 80> OPS = {{
+constexpr std::array<OpDef, 84> OPS = {{
     {0x00, "NOP", None},
     {0x01, "HLT", None},
 
@@ -102,6 +102,13 @@ constexpr std::array<OpDef, 80> OPS = {{
     {0x62, "INB", Port},
     {0x63, "INW D1", Port},
     {0x64, "INW D2", Port},
+
+    // The inverted conditional jumps. The low nibble is the jump they
+    // invert: JZ is $09, JNZ is $79.
+    {0x79, "JNZ", Target},
+    {0x7a, "JNC", Target},
+    {0x7b, "JP", Target},
+    {0x7c, "JNV", Target},
 }};
 
 struct Tables {

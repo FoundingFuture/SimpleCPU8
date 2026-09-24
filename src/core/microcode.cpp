@@ -162,6 +162,10 @@ Microcode buildNaive() {
   m.set("JC", {{S::PC_INC}, {S::PC_LOAD_C}});
   m.set("JN", {{S::PC_INC}, {S::PC_LOAD_N}});
   m.set("JV", {{S::PC_INC}, {S::PC_LOAD_V}});
+  m.set("JNZ", {{S::PC_INC}, {S::PC_LOAD_NZ}});
+  m.set("JNC", {{S::PC_INC}, {S::PC_LOAD_NC}});
+  m.set("JP", {{S::PC_INC}, {S::PC_LOAD_NN}});
+  m.set("JNV", {{S::PC_INC}, {S::PC_LOAD_NV}});
   // The naive fetch does not step PC, so JSR steps it first to push PC+1.
   m.set("JSR", {{S::PC_INC},
                 {S::STK_WRITE_PCH},
@@ -239,6 +243,10 @@ Microcode buildOptimal() {
   m.set("JC", {{S::PC_LOAD_C}});
   m.set("JN", {{S::PC_LOAD_N}});
   m.set("JV", {{S::PC_LOAD_V}});
+  m.set("JNZ", {{S::PC_LOAD_NZ}});
+  m.set("JNC", {{S::PC_LOAD_NC}});
+  m.set("JP", {{S::PC_LOAD_NN}});
+  m.set("JNV", {{S::PC_LOAD_NV}});
   // PC already stepped in fetch: the pushes read PC+1. The last push reads
   // the old PC while PC_LOAD commits the target at end of cycle.
   m.set("JSR", {{S::STK_WRITE_PCH, S::SP_DEC}, {S::STK_WRITE_PCL, S::SP_DEC, S::PC_LOAD}});

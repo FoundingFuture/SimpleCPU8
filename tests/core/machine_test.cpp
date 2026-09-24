@@ -12,6 +12,11 @@ const Microcode& naive() {
   return mc;
 }
 
+const Microcode& optimal() {
+  static const Microcode mc = buildOptimal();
+  return mc;
+}
+
 Machine bare() { return Machine({}, naive()); }
 
 void row(Machine& m, std::initializer_list<std::string_view> names) { m.executeRow(rowOf(names)); }
@@ -185,6 +190,32 @@ TEST_SUITE("ALU flags") {
     CHECK_EQ(m.acc, 0);
     CHECK(m.flags.z);
     CHECK(m.flags.c);
+  }
+}
+
+TEST_SUITE("conditional jumps") {
+  TEST_CASE("each jump and its inverse take opposite paths on one flag") {
+    struct Pair {
+      uint8_t set, clear;
+      bool Flags::*flag;
+    };
+    const Pair pairs[] = {{0x09, 0x79, &Flags::z}, {0x0a, 0x7a, &Flags::c}, {0x0b, 0x7b, &Flags::n},
+                          {0x0c, 0x7c, &Flags::v}};
+    for (const Pair& p : pairs) {
+      for (bool on : {false, true}) {
+        for (const Microcode* mc : {&naive(), &optimal()}) {
+          for (uint8_t op : {p.set, p.clear}) {
+            Machine m({{op, 3}, {0x00, 0}, {0x00, 0}, {0x00, 0}}, *mc);
+            m.flags.*p.flag = on;
+            m.instructionStep();
+            const bool taken = (op == p.set) == on;
+            INFO("op ", int(op), " flag ", on);
+            CHECK_EQ(m.pc, taken ? 3 : 1);
+            CHECK_EQ(m.flags.*p.flag, on);
+          }
+        }
+      }
+    }
   }
 }
 

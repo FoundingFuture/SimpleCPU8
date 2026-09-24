@@ -339,6 +339,10 @@ bool Machine::executeRow(const Row& row, const RowInfo& info) {
       case S::PC_LOAD_C: if (flags.c) writes.push(T::PC, irOperand); break;
       case S::PC_LOAD_N: if (flags.n) writes.push(T::PC, irOperand); break;
       case S::PC_LOAD_V: if (flags.v) writes.push(T::PC, irOperand); break;
+      case S::PC_LOAD_NZ: if (!flags.z) writes.push(T::PC, irOperand); break;
+      case S::PC_LOAD_NC: if (!flags.c) writes.push(T::PC, irOperand); break;
+      case S::PC_LOAD_NN: if (!flags.n) writes.push(T::PC, irOperand); break;
+      case S::PC_LOAD_NV: if (!flags.v) writes.push(T::PC, irOperand); break;
       case S::HALT: halt = true; break;
 
       case S::ACC_TO_A: writes.push(T::A, acc); break;

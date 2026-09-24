@@ -494,7 +494,7 @@ class Gen {
 
     if (v.init->isList) {
       std::vector<std::string> vals;
-      for (const ExprPtr& x : v.init->list) vals.push_back(initItem(x, v.pos));
+      for (const ExprPtr& x : v.init->list) vals.push_back(initItem(x, v.pos, width));
       const size_t n = v.type.arrayLen ? static_cast<size_t>(*v.type.arrayLen) : vals.size();
       while (vals.size() < n) vals.push_back("0");
       std::string joined;
@@ -512,19 +512,20 @@ class Gen {
       }
       return v.name + ":" + pad + "db " + joinBytes(bytes, false);
     }
-    return v.name + ":" + pad + dir + " " + initItem(v.init->one, v.pos);
+    return v.name + ":" + pad + dir + " " + initItem(v.init->one, v.pos, width);
   }
 
   // One initializer item, as assembly source. A label keeps its name so the
   // assembler folds the address, which is the only thing that knows it yet.
-  std::string initItem(const ExprPtr& e, const Pos& pos) {
+  // A number for a byte is cut to its byte: -1 in a signed char is 255.
+  std::string initItem(const ExprPtr& e, const Pos& pos, int width) {
     if (e->k == ExprKind::Un && e->op == "&" && e->e->k == ExprKind::Id) return e->e->name;
     if (e->k == ExprKind::Id) {
       auto g = globals_.find(e->name);
       if (g != globals_.end() && g->second.type.arrayLen) return e->name;
     }
     if (e->k == ExprKind::Str) return stringLabel(e->bytes);
-    return S(constOf(e, pos));
+    return S(constOf(e, pos) & (width == 1 ? 0xff : 0xffff));
   }
 
   int constOf(const ExprPtr& e, const Pos& pos) {
@@ -766,7 +767,7 @@ class Gen {
       case StmtKind::If: {
         const std::string els = uniq("else");
         const std::string end = uniq("endif");
-        genTest(s.c, els);
+        branch(s.c, false, els, 0);
         genStmt(s.t);
         if (s.f) {
           op("JMP " + end);
@@ -780,16 +781,20 @@ class Gen {
       }
 
       case StmtKind::While: {
+        // The test sits at the bottom, so a pass through the loop costs
+        // one conditional jump and no JMP. Entry jumps to the test once.
         const std::string top = uniq("while");
+        const std::string test = uniq("wtest");
         const std::string end = uniq("wend");
+        if (!isTrue(s.c)) op("JMP " + test);
         lab(top);
-        genTest(s.c, end);
         breaks_.push_back(end);
-        continues_.push_back(top);
+        continues_.push_back(test);
         genStmt(s.loopBody);
         breaks_.pop_back();
         continues_.pop_back();
-        op("JMP " + top);
+        lab(test);
+        branch(s.c, true, top, 0);
         lab(end);
         return;
       }
@@ -805,8 +810,7 @@ class Gen {
         breaks_.pop_back();
         continues_.pop_back();
         lab(cont);
-        genTest(s.c, end);
-        op("JMP " + top);
+        branch(s.c, true, top, 0);
         lab(end);
         return;
       }
@@ -817,9 +821,11 @@ class Gen {
         const std::string end = uniq("forend");
         scopes_.emplace_back();
         const int save = frameCursor_;
+        const std::string test = uniq("fortest");
         if (s.init) genStmt(s.init);
+        // As in while, the test is at the bottom.
+        if (s.c && !isTrue(s.c)) op("JMP " + test);
         lab(top);
-        if (s.c) genTest(s.c, end);
         breaks_.push_back(end);
         continues_.push_back(cont);
         genStmt(s.loopBody);
@@ -827,7 +833,9 @@ class Gen {
         continues_.pop_back();
         lab(cont);
         if (s.step) genExpr(s.step, 0);
-        op("JMP " + top);
+        lab(test);
+        if (s.c) branch(s.c, true, top, 0);
+        else op("JMP " + top);
         lab(end);
         frameCursor_ = save;
         scopes_.pop_back();
@@ -845,12 +853,9 @@ class Gen {
         for (size_t i = 0; i < s.cases.size(); i++) {
           const SwitchCase& c = s.cases[i];
           if (!c.value) { dflt = bodies[i]; continue; }
-          loadConst(1, *c.value, t);
-          compareInto(2, "==", 0, 1, t);
-          op("LD A <- " + lo(2));
-          // uniqSkip emits the branch itself. Wrapping it in another JZ once
-          // made the skip label jump to itself, which is a very tight loop.
-          jumpIfTrue(bodies[i]);
+          // A byte switch never matches a case its byte cannot hold.
+          if (isByte(t) && !fitsByte(t, *c.value)) continue;
+          compareSides("==", sideOf(0), immSide(toInt32(*c.value)), isByte(t) ? 1 : 2, false, true, bodies[i]);
         }
         op("JMP " + dflt.value_or(end));
         breaks_.push_back(end);
@@ -879,30 +884,211 @@ class Gen {
     }
   }
 
-  // The machine has JZ and no jump-if-not-zero, so "go there when true" is
-  // the inverse branch over a jump. A is already loaded and its flags set.
-  void jumpIfTrue(const std::string& target) {
-    const std::string skip = uniq("nz");
-    op("JZ " + skip);
-    op("JMP " + target);
-    lab(skip);
+  // ---- conditions ------------------------------------------------------------
+  //
+  // A condition in an if, a loop or a ?: is never turned into a 0 or 1
+  // first. branch() jumps on the flags the test itself leaves: a compare is
+  // a subtract and a jump on C, Z, or N and V; && and || jump past each
+  // other; ! swaps the jump. Every flag has a jump both ways (JZ and JNZ,
+  // JC and JNC, JN and JP, JV and JNV), so no test needs a jump over a jump.
+
+  // One side of a comparison: a slot's two bytes, or a constant folded into
+  // the instructions as immediates.
+  struct Side {
+    std::string lo, hi;
+  };
+  Side sideOf(int slot) { return {lo(slot), hi(slot)}; }
+  static Side immSide(int v) {
+    v &= 0xffff;
+    return {S(v & 0xff), S(v >> 8)};
   }
 
-  // Evaluate a condition and jump to `falseLabel` when it is zero.
-  void genTest(const ExprPtr& e, const std::string& falseLabel) {
-    const CType t = genExpr(e, 0);
-    truthy(0, t);
-    op("JZ " + falseLabel);
+  static bool isTrue(const ExprPtr& e) {
+    const auto v = foldConst(e);
+    return v && *v != 0;
   }
 
-  // Leaves Z set when the value in `slot` is zero.
+  static bool isByte(const CType& t) { return t.ptr == 0 && !t.arrayLen && sizeOf(t) == 1; }
+  static bool fitsByte(const CType& t, double v) { return isSigned(t) ? v >= -128 && v <= 127 : v >= 0 && v <= 255; }
+
+  // Jumps to `label` when the condition's truth is `when` and falls through
+  // otherwise. Slots below `slot` are left alone.
+  void branch(const ExprPtr& ep, bool when, const std::string& label, int slot) {
+    const Expr& e = *ep;
+    if (const auto v = foldConst(ep)) {
+      if ((*v != 0) == when) op("JMP " + label);
+      return;
+    }
+    if (e.k == ExprKind::Un && e.op == "!") {
+      branch(e.e, !when, label, slot);
+      return;
+    }
+    if (e.k == ExprKind::Bin && (e.op == "&&" || e.op == "||")) {
+      // && jumps out on the first false side, || on the first true one.
+      const bool out = e.op == "||";
+      if (when == out) {
+        branch(e.l, when, label, slot);
+        branch(e.r, when, label, slot);
+      } else {
+        const std::string skip = uniq(out ? "orskip" : "andskip");
+        branch(e.l, out, skip, slot);
+        branch(e.r, when, label, slot);
+        lab(skip);
+      }
+      return;
+    }
+    if (e.k == ExprKind::Bin && isCompare(e.op) && compareBranch(ep, when, label, slot)) return;
+    const CType t = genExpr(ep, slot);
+    truthy(slot, t);
+    op((when ? "JNZ " : "JZ ") + label);
+  }
+
+  // Leaves Z set when the value in `slot` is zero. A word is loaded into
+  // D2, which sets Z from all sixteen bits, so a pointer's NULL test is one
+  // load. D2 is scratch between the compiler's own instructions.
   void truthy(int slot, const CType& t) {
     if (sizeOf(t) == 1 && t.ptr == 0) {
       op("LD A <- " + lo(slot));
     } else {
-      op("LD A <- " + lo(slot));
-      op("OR A <- " + hi(slot));
+      op("LD D2 <- " + word(slot));
     }
+  }
+
+  // A comparison as a branch. Both sides are compared at one width: a byte
+  // when both are bytes of one signedness, or one is a byte and the other a
+  // constant that fits it, since C's promotion to int changes no order
+  // there. A constant side is an immediate. False when the operands are
+  // not the CPU's to compare (a double, a long).
+  bool compareBranch(const ExprPtr& ep, bool when, const std::string& label, int slot) {
+    const Expr& e = *ep;
+    const CType lt0 = typeOf(e.l);
+    const CType rt0 = typeOf(e.r);
+    if (isFloat(lt0) || isFloat(rt0) || isWide(lt0) || isWide(rt0)) return false;
+    const CType rtype = common(lt0, rt0);
+    int width = sizeOf(rtype);
+    bool sgn = isSigned(rtype) && rtype.ptr == 0;
+    const auto lc = foldConst(e.l);
+    const auto rc = foldConst(e.r);
+    if (isByte(lt0) && isByte(rt0) && isSigned(lt0) == isSigned(rt0)) {
+      width = 1;
+      sgn = isSigned(lt0);
+    } else if (isByte(lt0) && rc && fitsByte(lt0, *rc)) {
+      width = 1;
+      sgn = isSigned(lt0);
+    } else if (isByte(rt0) && lc && fitsByte(rt0, *lc)) {
+      width = 1;
+      sgn = isSigned(rt0);
+    }
+    auto side = [&](const ExprPtr& x, int at) {
+      const CType got = genExpr(x, at);
+      if (width == 2) convert(at, got, rtype);
+      return sideOf(at);
+    };
+    Side a;
+    Side b;
+    if (lc && !rc) {
+      a = immSide(toInt32(*lc));
+      b = side(e.r, slot);
+    } else if (rc) {
+      a = side(e.l, slot);
+      b = immSide(toInt32(*rc));
+    } else {
+      a = side(e.l, slot);
+      b = side(e.r, slot + 1);
+    }
+    compareSides(e.op, a, b, width, sgn, when, label);
+    return true;
+  }
+
+  // The jump for a compare of two sides already in place.
+  void compareSides(const std::string& cop, const Side& a, const Side& b, int width, bool sgn, bool when,
+                    const std::string& label) {
+    if (cop == "==" || cop == "!=") {
+      // Equality does not care about order, so the constant, if any, goes
+      // on the right.
+      if (a.lo[0] != '[') {
+        compareSides(cop, b, a, width, sgn, when, label);
+        return;
+      }
+      const bool onEqual = (cop == "==") == when;
+      const std::string jeq = onEqual ? "JZ " : "JNZ ";
+      if (b.lo == "0" && (width == 1 || b.hi == "0")) {
+        // Against zero the load is the test.
+        if (width == 1) op("LD A <- " + a.lo);
+        else op("LD D2 <- " + a.hi);
+        op(jeq + label);
+        return;
+      }
+      op("LD A <- " + a.lo);
+      op("SUB A <- " + b.lo);
+      if (width == 1) {
+        op(jeq + label);
+      } else if (onEqual) {
+        // Equal needs both bytes, so a low byte that differs is done.
+        const std::string skip = uniq("ne");
+        op("JNZ " + skip);
+        op("LD A <- " + a.hi);
+        op("SUB A <- " + b.hi);
+        op("JZ " + label);
+        lab(skip);
+      } else {
+        op("JNZ " + label);
+        op("LD A <- " + a.hi);
+        op("SUB A <- " + b.hi);
+        op("JNZ " + label);
+      }
+      return;
+    }
+
+    // The other four are all "x < y" with the sides swapped or the answer
+    // inverted, so one subtract shape serves them.
+    // a <  b : less(a, b)
+    // a >  b : less(b, a)
+    // a >= b : not less(a, b)
+    // a <= b : not less(b, a)
+    const bool swap = cop == ">" || cop == "<=";
+    const bool invert = cop == ">=" || cop == "<=";
+    const Side& x = swap ? b : a;
+    const Side& y = swap ? a : b;
+    op("LD A <- " + x.lo);
+    op("SUB A <- " + y.lo);
+    if (width == 2) {
+      // The load sets Z and N but leaves C, the borrow the SBC needs.
+      op("LD A <- " + x.hi);
+      op("SBC A <- " + y.hi);
+    }
+    const bool onLess = when != invert;
+    if (!sgn) {
+      // C is the borrow, so it is set exactly when x is below y.
+      op((onLess ? "JC " : "JNC ") + label);
+      return;
+    }
+    // Signed less is N xor V: with no overflow N is the sign of the
+    // difference, with overflow it is the opposite.
+    const std::string ovf = uniq("ovf");
+    const std::string skip = uniq("cmpskip");
+    op("JV " + ovf);
+    op((onLess ? "JN " : "JP ") + label);
+    op("JMP " + skip);
+    lab(ovf);
+    op((onLess ? "JP " : "JN ") + label);
+    lab(skip);
+  }
+
+  // A condition as a value, 0 or 1 in `slot`.
+  CType boolValue(const ExprPtr& ep, int slot) {
+    const std::string yes = uniq("true");
+    const std::string done = uniq("tdone");
+    branch(ep, true, yes, slot);
+    op("LD A <- 0");
+    op("JMP " + done);
+    lab(yes);
+    op("LD A <- 1");
+    lab(done);
+    op("LD " + lo(slot) + " <- A");
+    op("LD A <- 0");
+    op("LD " + hi(slot) + " <- A");
+    return T(BaseType::Int);
   }
 
   // ---- expressions -----------------------------------------------------------
@@ -1164,7 +1350,7 @@ class Gen {
         const std::string f = uniq("cf");
         const std::string end = uniq("ce");
         const CType t = typeOf(ep);
-        genTest(e.c, f);
+        branch(e.c, false, f, slot);
         const CType tt = genExpr(e.t, slot);
         convert(slot, tt, t);
         op("JMP " + end);
@@ -1340,22 +1526,7 @@ class Gen {
       return r;
     }
 
-    if (e.op == "!") {
-      const CType t = genExpr(e.e, slot);
-      const std::string zero = uniq("not1");
-      const std::string done = uniq("notd");
-      truthy(slot, t);
-      op("JZ " + zero);
-      op("LD A <- 0");
-      op("JMP " + done);
-      lab(zero);
-      op("LD A <- 1");
-      lab(done);
-      op("LD " + lo(slot) + " <- A");
-      op("LD A <- 0");
-      op("LD " + hi(slot) + " <- A");
-      return T(BaseType::Int);
-    }
+    if (e.op == "!") return boolValue(ep, slot);
 
     if (e.op == "&") return genAddress(e.e, slot);
 
@@ -1412,36 +1583,7 @@ class Gen {
     const Expr& e = *ep;
     const std::string& bop = e.op;
 
-    if (bop == "&&" || bop == "||") {
-      const std::string shortcut = uniq(bop == "&&" ? "andfalse" : "ortrue");
-      const std::string done = uniq("logdone");
-      const CType lt = genExpr(e.l, slot);
-      truthy(slot, lt);
-      if (bop == "&&") {
-        op("JZ " + shortcut);
-      } else {
-        const std::string cont = uniq("orcont");
-        op("JZ " + cont);
-        op("JMP " + shortcut);
-        lab(cont);
-      }
-      const CType rt = genExpr(e.r, slot);
-      truthy(slot, rt);
-      const std::string rzero = uniq("rz");
-      op("JZ " + rzero);
-      op("LD A <- 1");
-      op("JMP " + done);
-      lab(rzero);
-      op("LD A <- 0");
-      op("JMP " + done);
-      lab(shortcut);
-      op(std::string("LD A <- ") + (bop == "&&" ? "0" : "1"));
-      lab(done);
-      op("LD " + lo(slot) + " <- A");
-      op("LD A <- 0");
-      op("LD " + hi(slot) + " <- A");
-      return T(BaseType::Int);
-    }
+    if (bop == "&&" || bop == "||") return boolValue(ep, slot);
 
     const CType lt0 = typeOf(e.l);
     const CType rt0 = typeOf(e.r);
@@ -1462,6 +1604,7 @@ class Gen {
     const CType rtype = common(lt0, rt0);
     const bool compare = isCompare(bop);
     const int width = sizeOf(rtype);
+    if (compare && !isWide(rtype)) return boolValue(ep, slot);
 
     const CType lt = genExpr(e.l, slot);
     convert(slot, lt, rtype);
@@ -1535,76 +1678,17 @@ class Gen {
     op("LD " + hi(a) + " <- A");
   }
 
-  // The machine has no CMP, so a comparison is a subtract and a flag idiom.
-  // Unsigned order is C, the borrow. Signed order is N xor V.
+  // The machine has no CMP, so a comparison is a subtract and a jump on
+  // its flags, and the value is 0 or 1 by which way the jump went.
   void compareInto(int dst, const std::string& cop, int a, int b, const CType& t) {
     use(dst);
-    const int width = sizeOf(t);
-    const bool sgn = isSigned(t) && t.ptr == 0;
     const std::string yes = uniq("cmpy");
     const std::string done = uniq("cmpd");
-
-    // Equality is its own shape: the difference of both bytes, ORed.
-    if (cop == "==" || cop == "!=") {
-      op("LD A <- " + lo(a));
-      op("SUB A <- " + lo(b));
-      if (width == 2) {
-        op("LD [" + S(ZP_CMP) + "] <- A");
-        op("LD A <- " + hi(a));
-        op("SUB A <- " + hi(b));
-        op("OR A <- [" + S(ZP_CMP) + "]");
-      }
-      op("JZ " + yes);
-      op(std::string("LD A <- ") + (cop == "==" ? "0" : "1"));
-      op("JMP " + done);
-      lab(yes);
-      op(std::string("LD A <- ") + (cop == "==" ? "1" : "0"));
-      lab(done);
-      op("LD " + lo(dst) + " <- A");
-      op("LD A <- 0");
-      op("LD " + hi(dst) + " <- A");
-      return;
-    }
-
-    // The other four are all "a < b" with the sides swapped or the answer
-    // inverted, so one subtract shape serves them.
-    // a <  b : less(a, b)
-    // a >  b : less(b, a)
-    // a >= b : not less(a, b)
-    // a <= b : not less(b, a)
-    // So the sides swap for > and <=, and the answer inverts for >= and <=.
-    const bool swap = cop == ">" || cop == "<=";
-    const bool invert = cop == ">=" || cop == "<=";
-    const int x = swap ? b : a;
-    const int y = swap ? a : b;
-
-    op("LD A <- " + lo(x));
-    op("SUB A <- " + lo(y));
-    if (width == 2) {
-      op("LD A <- " + hi(x));
-      op("SBC A <- " + hi(y));
-    }
-
-    const std::string no = uniq("cmpn");
-    if (sgn) {
-      // N xor V, and nothing between the subtract and the branches that
-      // would disturb a flag. A load would set Z and N, so there is none.
-      const std::string vset = uniq("cmpv");
-      op("JV " + vset);
-      op("JN " + yes);
-      op("JMP " + no);
-      lab(vset);
-      op("JN " + no);
-      op("JMP " + yes);
-    } else {
-      // C is the borrow, so it is set exactly when x is below y.
-      op("JC " + yes);
-    }
-    lab(no);
-    op(std::string("LD A <- ") + (invert ? "1" : "0"));
+    compareSides(cop, sideOf(a), sideOf(b), sizeOf(t), isSigned(t) && t.ptr == 0, true, yes);
+    op("LD A <- 0");
     op("JMP " + done);
     lab(yes);
-    op(std::string("LD A <- ") + (invert ? "0" : "1"));
+    op("LD A <- 1");
     lab(done);
     op("LD " + lo(dst) + " <- A");
     op("LD A <- 0");
@@ -1965,7 +2049,7 @@ class Gen {
       case ExprKind::Cond: {
         const std::string f = uniq("dcf");
         const std::string end = uniq("dce");
-        genTest(e.c, f);
+        branch(e.c, false, f, slot);
         genDouble(e.t, d, slot);
         op("JMP " + end);
         lab(f);

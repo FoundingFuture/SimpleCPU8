@@ -279,7 +279,7 @@ struct Placed {
 };
 
 const std::unordered_map<std::string_view, bool> BRANCHES = {
-    {"JMP", true}, {"JZ", true}, {"JC", true}, {"JN", true}, {"JV", true}, {"JSR", true}};
+    {"JMP", true}, {"JZ", true}, {"JC", true}, {"JN", true}, {"JV", true}, {"JNZ", true}, {"JNC", true}, {"JP", true}, {"JNV", true}, {"JSR", true}};
 
 bool isAluMnemonic(std::string_view m) {
   return m == "ADD" || m == "SUB" || m == "ADC" || m == "SBC" || m == "AND" || m == "OR" ||

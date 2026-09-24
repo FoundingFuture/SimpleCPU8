@@ -157,6 +157,10 @@ Control, branches, calls:
 | 0x0A | JC t | `PC <- t` when C | |
 | 0x0B | JN t | `PC <- t` when N | |
 | 0x0C | JV t | `PC <- t` when V | |
+| 0x79 | JNZ t | `PC <- t` when not Z. Added after v2 | |
+| 0x7A | JNC t | `PC <- t` when not C. Added after v2 | |
+| 0x7B | JP t | `PC <- t` when not N, jump if plus. Added after v2 | |
+| 0x7C | JNV t | `PC <- t` when not V. Added after v2 | |
 | 0x0E | JSR t | Push PC+1 (2 bytes), `PC <- t` | |
 | 0x0F | RET | Pop 2 bytes into PC | |
 
@@ -282,6 +286,7 @@ Sequencing and PC:
 | PC_INC | `PC <- PC + 1` (step unit) |
 | PC_LOAD | `PC <- OP16` |
 | PC_LOAD_Z / _C / _N / _V | `PC <- OP16` when the flag is set |
+| PC_LOAD_NZ / _NC / _NN / _NV | `PC <- OP16` when the flag is clear. Added after v2 |
 | PC_FROM_D1 / PC_FROM_D2 | `PC <- D1` or `PC <- D2`. Added after v2 |
 | STK_TO_PCL / STK_TO_PCH | PC half from stack RAM |
 | HALT | Stop the clock at end of cycle |
@@ -486,6 +491,10 @@ JZ t:
   PC_INC
   PC_LOAD_Z
 
+JNZ t:
+  PC_INC
+  PC_LOAD_NZ
+
 JSR t:
   STK_WRITE_PCH
   SP_DEC
@@ -597,6 +606,9 @@ JMP t:
 JZ t:
   PC_LOAD_Z
 
+JNZ t:
+  PC_LOAD_NZ
+
 JSR t:
   STK_WRITE_PCH, SP_DEC
   STK_WRITE_PCL, SP_DEC, PC_LOAD
@@ -655,7 +667,7 @@ single resource the instruction must use, plus forced dependency rows.
 | LD [addr16] <- D1 | 4 | 3 | 3 |
 | ADD, SUB, ADC, SBC, AND, OR, XOR (direct and immediate) | 6 | 3 | 3 |
 | JMP | 2 | 2 | 2 |
-| JZ, JC, JN, JV | 3 | 2 | 2 |
+| JZ, JC, JN, JV, JNZ, JNC, JP, JNV | 3 | 2 | 2 |
 | JSR | 7 | 3 | 3 |
 | RET | 5 | 3 | 3 |
 | PUSHB A | 4 | 2 | 2 |
@@ -684,7 +696,7 @@ loop:   LD A <- [D1]+       ; value byte
         ADD A <- [sum]
         LD [sum] <- A
         LD D1 <- [D1]       ; is an error: same-register word load
-        LD D2 <- [D1]       ; next pointer
+        LD D2 <- [D1]       ; next pointer, Z set when it is NULL
         JZ done
         ; continue from D2 next iteration
 done:   HLT
@@ -751,6 +763,11 @@ The machine moved on. These lines are corrections, not new proposals.
   them, so nesting stops near 2048 rather than 128.
 - Four opcodes at 0x04 to 0x07 jump and call through a D register, on the two
   signals PC_FROM_D1 and PC_FROM_D2. It is `JMP D1`, not `JMP [D1]`.
+- Four opcodes at 0x79 to 0x7C jump when a flag is clear. They are JNZ, JNC,
+  JP and JNV. Their signals are PC_LOAD_NZ, PC_LOAD_NC, PC_LOAD_NN and PC_LOAD_NV. The
+  low nibble is the opcode of the jump each inverts. They cost what the set
+  jumps cost. Without them a test that went the other way was a jump over a
+  jump. The machine now has 84 opcodes and 30 mnemonics.
 - Data RAM is 65536 bytes, not the 2048 this document assumed.
 - The machine keeps four arrays over data RAM that no program can reach.
   `ramReadAt` and `ramWriteAt` hold cycle stamps, `ramReads` and `ramWrites`

@@ -166,7 +166,7 @@ The target is harsher than a 6502. Each row here shapes the code generator.
 | ALU operands are `imm8` or zero page only | every expression temp lives in `$00` to `$FF`. The zero page is the register file |
 | one byte register, two pointer registers | accumulator codegen, in the Small-C tradition |
 | no multiply, divide, or shift | a runtime library, on the ACP where it wins. mul8, div8, mul16 and div16 are the pure CPU version, already written as demos |
-| no CMP, only JZ JC JN JV | compares are SUB and a flag idiom. Signed compare is N xor V |
+| no CMP. A jump on each flag, set and clear | compares are SUB and a jump on its flags, straight from the condition. Signed compare is N xor V. A word load sets Z, so a NULL test is the load |
 | no indexed store, loads only through `[D1+A]` | array stores go through a pointer register |
 | the hardware stack is not addressable | C locals cannot live on it |
 | Harvard, program memory read only, 3 byte slots | no self-modifying code. `const` data the CPU reads must be in RAM |

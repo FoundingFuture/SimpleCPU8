@@ -81,6 +81,19 @@ const std::map<std::string, Meta>& meta() {
       {"JV", {"BRANCH", "JV target", "a code label, or an instruction number", readsFlag('V'), "PC",
               "Jumps when the V flag is set. V means signed overflow: the result's sign is wrong for two's "
               "complement math."}},
+      {"JNZ", {"BRANCH", "JNZ target", "a code label, or an instruction number", readsFlag('Z'), "PC",
+               "Jumps when the Z flag is clear, the inverse of JZ. A loop that counts down ends in SUB A <- 1 "
+               "and JNZ loop. After a word load into D1 or D2, Z tells whether the word is zero, so LD D1 <- "
+               "[addr16] and JNZ follow a pointer that is not NULL."}},
+      {"JNC", {"BRANCH", "JNC target", "a code label, or an instruction number", readsFlag('C'), "PC",
+               "Jumps when the C flag is clear, the inverse of JC. After SUB or a compare it jumps when no "
+               "borrow occurred, so when the left side was at least the right side, unsigned."}},
+      {"JP", {"BRANCH", "JP target", "a code label, or an instruction number", readsFlag('N'), "PC",
+              "Jumps when the N flag is clear, the inverse of JN: jump if plus. Zero counts as plus, because "
+              "bit 7 of zero is clear."}},
+      {"JNV", {"BRANCH", "JNV target", "a code label, or an instruction number", readsFlag('V'), "PC",
+               "Jumps when the V flag is clear, the inverse of JV. After a signed SUB, N alone is the sign of "
+               "the difference when no overflow occurred."}},
       {"JSR", {"BRANCH", "JSR target", "a code label, an instruction number, or D1 or D2", NO_FLAGS,
                "PC, SP, stack, D1, D2",
                "Pushes the address of the next instruction on the stack, high byte first, then jumps. RET comes "
@@ -224,6 +237,14 @@ std::vector<InstrPage> buildPages() {
     }
     const std::string name(def.name);
     page->shapes.push_back({name, def.op, cyclesUnder(naive, name), cyclesUnder(optimal, name)});
+  }
+  // The inverted jumps have opcodes of their own at $79 to $7C, but they
+  // read best beside the jumps they invert.
+  const auto afterJv = std::find_if(pages.begin(), pages.end(), [](const InstrPage& p) { return p.mnemonic == "JV"; });
+  const auto firstInverted =
+      std::find_if(pages.begin(), pages.end(), [](const InstrPage& p) { return p.mnemonic == "JNZ"; });
+  if (afterJv != pages.end() && pages.end() - firstInverted >= 4 && firstInverted > afterJv) {
+    std::rotate(afterJv + 1, firstInverted, firstInverted + 4);
   }
   // The sugar pages own no opcode rows. They borrow the shapes of the
   // opcodes they assemble to.

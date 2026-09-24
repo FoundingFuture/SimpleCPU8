@@ -160,7 +160,11 @@ std::vector<std::string_view> componentsFor(Signal s) {
     case Signal::PC_LOAD_Z:
     case Signal::PC_LOAD_C:
     case Signal::PC_LOAD_N:
-    case Signal::PC_LOAD_V: return {"PC", "IR", "FLAGS"};
+    case Signal::PC_LOAD_V:
+    case Signal::PC_LOAD_NZ:
+    case Signal::PC_LOAD_NC:
+    case Signal::PC_LOAD_NN:
+    case Signal::PC_LOAD_NV: return {"PC", "IR", "FLAGS"};
     // No IR: the target is in the register, not in the operand.
     case Signal::PC_FROM_D1: return {"PC", "D1"};
     case Signal::PC_FROM_D2: return {"PC", "D2"};
@@ -221,7 +225,11 @@ std::vector<std::string_view> wiresFor(Signal s) {
     case Signal::PC_LOAD_Z:
     case Signal::PC_LOAD_C:
     case Signal::PC_LOAD_N:
-    case Signal::PC_LOAD_V: out = {"ir-pc"}; break;
+    case Signal::PC_LOAD_V:
+    case Signal::PC_LOAD_NZ:
+    case Signal::PC_LOAD_NC:
+    case Signal::PC_LOAD_NN:
+    case Signal::PC_LOAD_NV: out = {"ir-pc"}; break;
     case Signal::PC_FROM_D1: out = {"d1-pc"}; break;
     case Signal::PC_FROM_D2: out = {"d2-pc"}; break;
     case Signal::ACC_TO_A: out = {"acc-a"}; break;

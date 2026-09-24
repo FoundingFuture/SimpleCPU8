@@ -149,6 +149,7 @@ Sequencing and the program counter:
 | `PC_INC` | `PC <- PC + 1`, through the step unit |
 | `PC_LOAD` | `PC <- OP16` |
 | `PC_LOAD_Z`, `PC_LOAD_C`, `PC_LOAD_N`, `PC_LOAD_V` | `PC <- OP16` when that flag is set. When it is clear the row does nothing to `PC` |
+| `PC_LOAD_NZ`, `PC_LOAD_NC`, `PC_LOAD_NN`, `PC_LOAD_NV` | `PC <- OP16` when that flag is clear, for `JNZ`, `JNC`, `JP` and `JNV` |
 | `PC_FROM_D1`, `PC_FROM_D2` | `PC <- D1` or `D2`, the register itself, not the byte it points at |
 | `HALT` | stops the clock at the end of the cycle. The row's other writes still commit |
 
@@ -330,7 +331,7 @@ optimal `NOP` has no rows, so `NOP` costs the fetch alone, one cycle.
 The cap is 16 rows per microprogram, `ROW_CAP` in src/core/mcparse.h.
 
 The fetch is shared by every instruction, so a row saved there is saved
-eighty times. The naive fetch is `FETCH` alone. Every naive instruction
+eighty-four times. The naive fetch is `FETCH` alone. Every naive instruction
 then ends with its own `PC_INC` row. The optimal fetch is `FETCH,
 PC_INC`. That row is legal: `FETCH` reads program memory at the old
 `PC` and writes `IR`, while `PC_INC` writes `PC`. One program access,
@@ -342,7 +343,7 @@ the return address is `PC + 1`. Under the naive fetch `PC` is still the
 slot of the `JSR` itself, so the naive `JSR` steps it first. Under the
 optimal fetch it already holds the right value. A fetch that steps `PC`
 therefore needs a different `JSR`, and a different `JZ` with it.
-Microcode is one set, not eighty independent programs.
+Microcode is one set, not eighty-four independent programs.
 
 ## The two shipped sets
 
@@ -537,8 +538,8 @@ The program in `main.asm` prints a table. It lists every instruction
 with two costs. `MY` is the cost under the ROM's set and `OP` the cost
 under the optimal set. The build counts the rows of each section plus the
 rows of `fetch`, and writes the lines into a generated file,
-`cycles.asm`, which it appends to the program. Eighty instructions fill
-two pages of forty. A key press turns the page, and so do four seconds.
+`cycles.asm`, which it appends to the program. Eighty-four instructions
+fill two pages of forty-two. A key press turns the page, and so do four seconds.
 A fresh project shows `ADD A <- i8` at `6 3` on page two. Change a
 row, build, run, and the `MY` number moves. The table is the truth
 about the set the ROM carries, because the same parser counted it.

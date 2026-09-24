@@ -53,6 +53,15 @@ std::string repeat(std::string_view s, size_t n) {
 }  // namespace
 
 TEST_SUITE("assembler syntax") {
+  TEST_CASE("the inverted jumps take a label") {
+    Assembled a = ok("top: JNZ top\nJNC top\nJP end\nJNV end\nend: HLT");
+    REQUIRE_EQ(a.program.size(), 5u);
+    CHECK(a.program[0] == Instr{0x79, 0});
+    CHECK(a.program[1] == Instr{0x7a, 0});
+    CHECK(a.program[2] == Instr{0x7b, 4});
+    CHECK(a.program[3] == Instr{0x7c, 4});
+  }
+
   TEST_CASE("arrows work in both directions") {
     Assembled a = ok("LD A <- 5");
     Assembled b = ok("LD 5 -> A");

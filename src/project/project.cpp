@@ -742,8 +742,7 @@ loop:   OUT GPU_X_HI, 0
         LD [x] <- A
         JZ turnx
         SUB A <- 255
-        JZ turnx
-        JMP ystep
+        JNZ ystep
 turnx:  LD A <- [dx]
         XOR A <- 0xFE
         LD [dx] <- A
@@ -752,8 +751,7 @@ ystep:  LD A <- [y]
         LD [y] <- A
         JZ turny
         SUB A <- 255
-        JZ turny
-        JMP wait
+        JNZ wait
 turny:  LD A <- [dy]
         XOR A <- 0xFE
         LD [dy] <- A
@@ -779,8 +777,8 @@ const char* const CYCLES_ASM = R"(; %NAME%: what every instruction costs, in mic
 ; into cycles.asm, which it generates and appends to this file. Change a
 ; row in microcode.txt, build, run: the MY column moves.
 ;
-; Eighty instructions in two pages of forty, two columns of twenty. A key
-; turns the page, and so do four seconds.
+; Eighty-four instructions in two pages of forty-two, two columns of
+; twenty-one. A key turns the page, and so do four seconds.
         OUT GPU_TEXT_COLOR, 0xFF
         OUT GPU_TEXT_BG, 0
         OUT GPU_TEXT_FLAGS, 0
@@ -800,14 +798,14 @@ show:   OUT GPU_CMD, CMD_TEXT_CLEAR
         LD [col] <- A
         LD A <- 2
         LD [row] <- A
-        LD A <- 40
+        LD A <- 42
         LD [left] <- A
         ; D1 walks the address table: three bytes an entry, and page two
-        ; starts forty entries in.
+        ; starts forty-two entries in.
         LD D1 <- &cycles_addr
         LD A <- [first]
         JZ entry
-        LD D1 <- &cycles_addr + 120
+        LD D1 <- &cycles_addr + 126
 entry:  LD A <- [left]
         JZ foot
         LD A <- [col]
@@ -828,10 +826,9 @@ entry:  LD A <- [left]
         LD A <- [row]
         ADD A <- 1
         LD [row] <- A
-        SUB A <- 22
-        JZ nextcol
-        JMP entry
-nextcol: LD A <- 2
+        SUB A <- 23
+        JNZ entry
+        LD A <- 2
         LD [row] <- A
         LD A <- 21
         LD [col] <- A
@@ -865,10 +862,9 @@ tick:   IN GPU_FRAME
         ADD A <- 1
         LD [ticks] <- A
         SUB A <- 240
-        JZ flip
-        JMP poll
+        JNZ poll
 flip:   LD A <- [first]
-        XOR A <- 40
+        XOR A <- 42
         LD [first] <- A
         JMP show
 head:   OUT GPU_CART_BANK, get_bankbyte(header)

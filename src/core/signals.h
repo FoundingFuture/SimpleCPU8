@@ -24,6 +24,10 @@ namespace sc8 {
   X(PC_LOAD_C, W(PCH, PCL), MemNone, 0, AluNone, 0, 0, 0, 0, 0)               \
   X(PC_LOAD_N, W(PCH, PCL), MemNone, 0, AluNone, 0, 0, 0, 0, 0)               \
   X(PC_LOAD_V, W(PCH, PCL), MemNone, 0, AluNone, 0, 0, 0, 0, 0)               \
+  X(PC_LOAD_NZ, W(PCH, PCL), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
+  X(PC_LOAD_NC, W(PCH, PCL), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
+  X(PC_LOAD_NN, W(PCH, PCL), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
+  X(PC_LOAD_NV, W(PCH, PCL), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
   X(PC_FROM_D1, W(PCH, PCL), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
   X(PC_FROM_D2, W(PCH, PCL), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
   X(HALT, W(), MemNone, 0, AluNone, 0, 0, 0, 0, 0)                            \

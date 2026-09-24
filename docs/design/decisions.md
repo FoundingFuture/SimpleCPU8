@@ -605,6 +605,27 @@ camera transform runs `ACP_INVERSE`.
 
 A light, when it comes, gets the same treatment and needs no new mechanism.
 
+## Jumps on a clear flag
+
+The machine had four flags and one jump for each, on the set state. A test
+that went the other way was a jump over a jump: `JZ done` and then `JMP
+loop`. That pair was 149 of the 447 conditional jumps in the demos. It was
+132 of the 1003 in the BASIC interpreter. It costs 5 naive cycles and 4 optimal
+where one jump costs 3 and 2.
+
+So the machine gained JNZ, JNC, JP and JNV, one for each flag's clear state.
+They cost one decode each and four signals of the same shape as the set
+jumps. The datapath gains nothing: the flag is read, inverted, and gates
+the same PC load. The hardware pays its rent in every loop.
+
+The null pointer test came with them and needed no hardware. A word load
+into D1 or D2 already set Z from all sixteen bits. So `LD D2 <- [p]` and a
+jump is the test. The C compiler now uses it for every word and pointer
+condition. It also compiles a condition straight to jumps on the flags of
+its subtract. No condition is turned into a 0 or 1 first. The BASIC
+interpreter came out a fifth smaller. A loop benchmark ran in 30% fewer
+cycles.
+
 ## Deferred instructions
 
 Each of these waits behind the same test, must justify its hardware:
