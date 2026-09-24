@@ -36,13 +36,15 @@ int main(int argc, char** argv) {
   // The layout is kept in the settings folder and written only by Save
   // layout in the Settings menu, never on every change.
   ImGui::GetIO().IniFilename = nullptr;
-  {
-    const std::filesystem::path layout = sc8::Settings::layoutFile();
-    if (!layout.empty() && std::filesystem::exists(layout)) ImGui::LoadIniSettingsFromDisk(layout.string().c_str());
-  }
 
   {
+    // The IDE registers the handler for its own entries in the layout
+    // file, so the file is read after the IDE exists.
     sc8::Ide ide;
+    {
+      const std::filesystem::path layout = sc8::Settings::layoutFile();
+      if (!layout.empty() && std::filesystem::exists(layout)) ImGui::LoadIniSettingsFromDisk(layout.string().c_str());
+    }
     ide.applyScale();
     std::string screenshot;
     bool run = false;

@@ -451,35 +451,111 @@ void Ide::microcodePane() {
 
 namespace sc8 {
 
-// One view of the inside of the machine. Each section opens and closes
-// on its own, and the whole view scrolls, so a person keeps the datapath
-// and the stack in sight together or folds what is not needed now.
+namespace {
+
+// The lines the flow needs for the longest instruction in the set: its
+// name, the done FETCH line and its rows. During fetch the flow shows the
+// name and the fetch rows, so those count too. The flow keeps this height
+// whatever runs, so the sections under it stay put.
+int flowLines(const Microcode& set) {
+  size_t longest = 0;
+  size_t fetch = 0;
+  for (const Microcode::Section& sec : set.sections()) {
+    if (sec.name == "fetch") fetch = sec.rows.size();
+    else longest = std::max(longest, sec.rows.size());
+  }
+  return 1 + static_cast<int>(std::max(fetch, longest + 1));
+}
+
+}  // namespace
+
+bool Ide::sectionHeader(Section s, Place here) {
+  static const char* const NAMES[SEC_COUNT] = {"Datapath", "Flow", "Registers", "Memory", "Stack", "Screen", "Manual"};
+  SectionState& st = sections_[s];
+  const bool shownHere = st.open && st.place == here;
+  std::string label = NAMES[s];
+  if (st.open && st.place != here) label += here == Place::Cpu ? "  (in the side pane)" : "  (in the CPU view)";
+  label += "###section-";
+  label += NAMES[s];
+  // The state lives in sections_, not in ImGui's tree storage, so it is
+  // pushed every frame and a click is read back from the return value.
+  ImGui::SetNextItemOpen(shownHere, ImGuiCond_Always);
+  const bool open = ImGui::CollapsingHeader(label.c_str());
+  if (open != shownHere) {
+    st.open = open;
+    if (open) st.place = here;
+  }
+  return open;
+}
+
+// One view of the inside of the machine. The run controls stay on top.
+// Under them each section opens and closes on its own, and the sections
+// scroll, so a person keeps the datapath and the stack in sight together
+// or folds what is not needed now.
 void Ide::cpuPane() {
   ImGui::Begin("CPU");
+  runControls();
+  ImGui::Separator();
+  ImGui::BeginChild("cpu-sections", ImVec2(0, 0), ImGuiChildFlags_None);
   const float line = ImGui::GetTextLineHeightWithSpacing();
-  if (ImGui::CollapsingHeader("Datapath", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (sectionHeader(SecDatapath, Place::Cpu)) {
     ImGui::BeginChild("cpu-datapath", ImVec2(0, line * 20.0f), ImGuiChildFlags_None);
     datapathBody();
     ImGui::EndChild();
   }
-  if (ImGui::CollapsingHeader("Flow", ImGuiTreeNodeFlags_DefaultOpen)) {
-    ImGui::BeginChild("cpu-flow", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY);
+  if (sectionHeader(SecFlow, Place::Cpu)) {
+    const float height = line * static_cast<float>(flowLines(computer_.machine().microcode()));
+    ImGui::BeginChild("cpu-flow", ImVec2(0, height), ImGuiChildFlags_None);
     flowBody();
     ImGui::EndChild();
   }
-  if (ImGui::CollapsingHeader("Registers", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (sectionHeader(SecRegisters, Place::Cpu)) {
     ImGui::BeginChild("cpu-registers", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY);
     registersBody();
     ImGui::EndChild();
   }
-  if (ImGui::CollapsingHeader("Memory", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (sectionHeader(SecMemory, Place::Cpu)) {
     ImGui::BeginChild("cpu-memory", ImVec2(0, line * 14.0f), ImGuiChildFlags_None);
     memoryBody();
     ImGui::EndChild();
   }
-  if (ImGui::CollapsingHeader("Stack", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (sectionHeader(SecStack, Place::Cpu)) {
     ImGui::BeginChild("cpu-stack", ImVec2(0, line * 12.0f), ImGuiChildFlags_None);
     stackBody();
+    ImGui::EndChild();
+  }
+  ImGui::EndChild();
+  ImGui::End();
+}
+
+// The pane beside the CPU view: the screen, the registers, the memory,
+// the stack and the manual. The manual comes last and takes the height
+// that is left, so folding it leaves room for the rest.
+void Ide::sidePane() {
+  ImGui::Begin("Side##cpu");
+  const float line = ImGui::GetTextLineHeightWithSpacing();
+  if (sectionHeader(SecScreen, Place::Side)) {
+    screenBody(std::max(64.0f, ImGui::GetContentRegionAvail().x));
+  }
+  if (sectionHeader(SecRegisters, Place::Side)) {
+    ImGui::BeginChild("side-registers", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY);
+    registersBody();
+    ImGui::EndChild();
+  }
+  if (sectionHeader(SecMemory, Place::Side)) {
+    ImGui::BeginChild("side-memory", ImVec2(0, line * 14.0f), ImGuiChildFlags_None);
+    memoryBody();
+    ImGui::EndChild();
+  }
+  if (sectionHeader(SecStack, Place::Side)) {
+    ImGui::BeginChild("side-stack", ImVec2(0, line * 12.0f), ImGuiChildFlags_None);
+    stackBody();
+    ImGui::EndChild();
+  }
+  if (sectionHeader(SecManual, Place::Side)) {
+    const float height = std::max(line * 16.0f, ImGui::GetContentRegionAvail().y);
+    ImGui::BeginChild("side-manual", ImVec2(0, height), ImGuiChildFlags_None);
+    manualBody();
     ImGui::EndChild();
   }
   ImGui::End();

@@ -279,9 +279,15 @@ layout in that menu, to `layout.ini` beside the settings. It is read at
 the next start. Reset layout puts the built in one back. A change a person
 makes on the way is never saved behind their back.
 
-The CPU level is one view with sections: Datapath, Flow, Registers,
-Memory and Stack. Each opens or folds on its own, so the whole inside of
-the machine scrolls as one. The Run level has Memory and Stack as panes
+The CPU level is one view with the run controls on top. Under them sit
+five sections: Datapath, Flow, Registers, Memory and Stack. Each opens
+or folds on its own, and the sections scroll as one. The Flow is as
+tall as the longest instruction in the set plus its FETCH line. So the
+sections under it stay put while the machine steps. The side pane on the
+right holds sections too: Screen, Registers, Memory, Stack and Manual.
+Registers, Memory and Stack show in one pane at a time. Opening one in a
+pane folds it in the other. The Manual comes last and takes the height
+that is left. Save layout keeps which sections are open and where. The Run level has Memory and Stack as panes
 beside the manual. Memory is the whole 64K behind a clipper. It jumps to
 the zero page, D1, D2 and the text screen, and follows the last bus
 access while stepping. The stack shows its 4096 bytes with SP

@@ -338,6 +338,11 @@ void inputRefPage() {
 // file. The tabs stay, so the person can always pick another.
 void Ide::manualPane(const char* name) {
   ImGui::Begin(name);
+  manualBody();
+  ImGui::End();
+}
+
+void Ide::manualBody() {
   if (ImGui::BeginTabBar("manualtabs")) {
     static const struct { const char* label; Guide guide; } GUIDE_TABS[] = {
         {"BASIC", Guide::Basic}, {"C", Guide::C}, {"Assembly", Guide::Assembly}, {"Microcode", Guide::Microcode}};
@@ -392,7 +397,6 @@ void Ide::manualPane(const char* name) {
     ImGui::EndTabBar();
   }
   manualTab_ = -1;
-  ImGui::End();
 }
 
 }  // namespace sc8

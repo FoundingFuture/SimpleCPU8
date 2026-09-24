@@ -1,7 +1,8 @@
 // The IDE: one Computer, one project, and the panes that look at both,
 // arranged in levels. A level is a saved dock layout. Project holds the
 // files, the screen, the messages and the manual. Run holds the screen
-// and the debugger. CPU holds the datapath and the microcode rows.
+// and the debugger. CPU holds the datapath, the flow and the microcode
+// rows, with a side pane for the screen, the manual and the state.
 // Switching level swaps the layout.
 //
 // There is always a project. It is a folder of sources (.c, .h, .asm,
@@ -170,16 +171,41 @@ class Ide {
   void assemblyPane();
   void messagesPane();
   void manualPane(const char* name);
+  void manualBody();
   void screenPane(const char* name);
+  // The picture as a square, side pixels wide, centred in the width
+  // there is, with the status line under it.
+  void screenBody(float side);
   void registersPane(const char* name);
   void registersBody();
   void memoryBody();
   void stackBody();
   void datapathBody();
   void flowBody();
-  // The CPU level's one view: the datapath, the flow, the registers, the
-  // memory and the stack as sections that open and close.
+  // The CPU level's one view: the run controls on top, then the datapath,
+  // the flow, the registers, the memory and the stack as sections that
+  // open and close. The side pane beside it holds the screen, the
+  // registers, the memory, the stack and the manual the same way.
   void cpuPane();
+  void sidePane();
+  // Registers, memory and stack show in one of the two at a time.
+  // Opening one in a pane folds it in the other.
+  enum class Place { Cpu, Side };
+  enum Section : size_t { SecDatapath, SecFlow, SecRegisters, SecMemory, SecStack, SecScreen, SecManual, SEC_COUNT };
+  struct SectionState {
+    bool open;
+    Place place;
+  };
+  static constexpr SectionState SECTION_DEFAULTS[SEC_COUNT] = {
+      {true, Place::Cpu}, {true, Place::Cpu},  {true, Place::Cpu}, {true, Place::Cpu},
+      {true, Place::Cpu}, {true, Place::Side}, {true, Place::Side}};
+  SectionState sections_[SEC_COUNT] = {};
+  // Draw a section's header in a pane. True when its body shows there.
+  bool sectionHeader(Section s, Place here);
+  // The section states travel in the layout file, so Save layout keeps
+  // them and Reset layout brings the defaults back.
+  void registerLayoutHandler();
+  void resetSections();
   void runControls();
   void memoryPane(const char* name);
   void stackPane(const char* name);

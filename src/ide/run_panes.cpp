@@ -46,18 +46,23 @@ void Ide::screenPane(const char* name) {
   ImGui::Begin(name);
   const ImVec2 avail = ImGui::GetContentRegionAvail();
   // One line under the picture stays for the status.
-  const float side = std::max(64.0f, std::min(avail.x, avail.y - ImGui::GetTextLineHeightWithSpacing()));
+  screenBody(std::max(64.0f, std::min(avail.x, avail.y - ImGui::GetTextLineHeightWithSpacing())));
+  ImGui::End();
+}
+
+void Ide::screenBody(float side) {
+  const float width = ImGui::GetContentRegionAvail().x;
   // Center the square in the pane.
-  ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (avail.x - side) * 0.5f));
+  ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (width - side) * 0.5f));
   // A render texture is stored upside down, so the source rectangle flips it.
   const Rectangle src{0, 0, static_cast<float>(panes::PANE_SIDE), -static_cast<float>(panes::PANE_SIDE)};
   rlImGuiImageRect(&panes::target().texture, static_cast<int>(side), static_cast<int>(side), src);
   // The machine gets the keyboard while the pane is focused or hovered.
   // Clicking the picture focuses the pane, so a click is how a player
   // takes the keys from the editor.
-  screenHasKeys_ = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
+  screenHasKeys_ = screenHasKeys_ || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) ||
                    ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
-  if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ImGui::SetWindowFocus();
+  if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) ImGui::SetWindowFocus();
   const Machine& m = computer_.machine();
   if (m.status != Status::Running) {
     ImGui::TextColored(STOP, "%s%s", std::string(statusName(m.status)).c_str(),
@@ -67,7 +72,6 @@ void Ide::screenPane(const char* name) {
   } else {
     ImGui::TextDisabled("click the screen to give it the keyboard");
   }
-  ImGui::End();
 }
 
 // ---- registers and the run controls
@@ -119,13 +123,13 @@ void Ide::runControls() {
 
 void Ide::registersPane(const char* name) {
   ImGui::Begin(name);
+  runControls();
+  ImGui::Separator();
   registersBody();
   ImGui::End();
 }
 
 void Ide::registersBody() {
-  runControls();
-  ImGui::Separator();
   const Machine& m = computer_.machine();
   const std::string status(statusName(m.status));
   if (m.status == Status::Running) ImGui::TextColored(running_ ? ACCENT : ImVec4(1, 1, 1, 1), "%s", running_ ? "running" : "paused");

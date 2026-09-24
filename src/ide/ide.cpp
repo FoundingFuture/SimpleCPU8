@@ -90,10 +90,55 @@ std::string disassemble(const Instr& in) {
 std::span<const Speed> speedLadder() { return LADDER; }
 
 Ide::Ide() {
+  resetSections();
+  registerLayoutHandler();
   customText_.reserve(1 << 15);
   settings_.load();
   audio_.start();
   newScratchProject();
+}
+
+// The sections of the CPU view and the side pane, as one entry in the
+// layout file:
+//
+//   [SC8Sections][State]
+//   Memory=1,side
+//
+// A line names a section, whether it is open and where it shows.
+void Ide::registerLayoutHandler() {
+  static const char* const KEYS[SEC_COUNT] = {"Datapath", "Flow", "Registers", "Memory", "Stack", "Screen", "Manual"};
+  ImGuiSettingsHandler h;
+  h.TypeName = "SC8Sections";
+  h.TypeHash = ImHashStr("SC8Sections");
+  h.UserData = this;
+  h.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler* handler, const char*) -> void* { return handler->UserData; };
+  h.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void* entry, const char* text) {
+    Ide* ide = static_cast<Ide*>(entry);
+    const std::string line = text;
+    const size_t eq = line.find('=');
+    if (eq == std::string::npos || eq + 1 >= line.size()) return;
+    for (size_t i = 0; i < SEC_COUNT; i++) {
+      if (line.compare(0, eq, KEYS[i]) != 0 || std::string_view(KEYS[i]).size() != eq) continue;
+      SectionState& st = ide->sections_[i];
+      st.open = line[eq + 1] == '1';
+      if (line.find(",side", eq) != std::string::npos) st.place = Place::Side;
+      else if (line.find(",cpu", eq) != std::string::npos) st.place = Place::Cpu;
+    }
+  };
+  h.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* handler, ImGuiTextBuffer* out) {
+    const Ide* ide = static_cast<const Ide*>(handler->UserData);
+    out->appendf("[%s][State]\n", handler->TypeName);
+    for (size_t i = 0; i < SEC_COUNT; i++) {
+      const SectionState& st = ide->sections_[i];
+      out->appendf("%s=%d,%s\n", KEYS[i], st.open ? 1 : 0, st.place == Place::Side ? "side" : "cpu");
+    }
+    out->append("\n");
+  };
+  ImGui::AddSettingsHandler(&h);
+}
+
+void Ide::resetSections() {
+  std::copy(std::begin(SECTION_DEFAULTS), std::end(SECTION_DEFAULTS), std::begin(sections_));
 }
 
 // A ROM opens as a project. A folder opens as a project. A source file
@@ -425,7 +470,7 @@ void Ide::frame() {
   // an imgui.ini from before the pane rebuilds the level once rather than
   // leaving the newcomer floating.
   static const ImGuiID IDS[3] = {ImHashStr("sc8-level-project-3"), ImHashStr("sc8-level-run-2"),
-                                 ImHashStr("sc8-level-cpu-3")};
+                                 ImHashStr("sc8-level-cpu-4")};
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const int active = static_cast<int>(level_);
   for (int i = 0; i < 3; i++) {
@@ -469,7 +514,7 @@ void Ide::frame() {
       microcodePane();
       listingPane("Listing##micro");
       messagesPane();
-      manualPane("Manual##cpu");
+      sidePane();
       break;
   }
   dialog_.draw();
@@ -523,15 +568,17 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
       break;
     case Level::Cpu:
       // The CPU view large in the middle, its sections stacked. The
-      // listing on the left, the microcode rows on the right.
+      // listing on the left. On the right the microcode rows and the
+      // messages on top, the side pane with the screen and the manual
+      // under them.
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.28f, &right, &left);
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.62f, &mid, &left);
-      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.25f, &rightBottom, &right);
+      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.60f, &rightBottom, &right);
       ImGui::DockBuilderDockWindow("Listing##micro", left);
       ImGui::DockBuilderDockWindow("CPU", mid);
-      ImGui::DockBuilderDockWindow("Manual##cpu", right);
+      ImGui::DockBuilderDockWindow("Messages", right);
       ImGui::DockBuilderDockWindow("Microcode", right);
-      ImGui::DockBuilderDockWindow("Messages", rightBottom);
+      ImGui::DockBuilderDockWindow("Side##cpu", rightBottom);
       break;
   }
   ImGui::DockBuilderFinish(dockspace);
@@ -654,6 +701,7 @@ void Ide::menuBar() {
       std::error_code ec;
       fs::remove(Settings::layoutFile(), ec);
       ImGui::ClearIniSettings();
+      resetSections();
       for (bool& b : layoutBuilt_) b = false;
       note("layout reset to the built in one");
     }
