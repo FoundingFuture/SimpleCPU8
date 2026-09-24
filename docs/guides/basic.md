@@ -1,0 +1,912 @@
+# BASIC for beginners
+
+A book for someone who has never written a program. It uses the BASIC
+built into SimpleCPU-8. Every program in it was typed into the machine
+and run before it was printed here. Read it in order. Each chapter adds
+one idea and one small program to type in.
+
+## Contents
+
+- [What a computer does](#what-a-computer-does)
+- [Starting BASIC](#starting-basic)
+- [Talking to the machine](#talking-to-the-machine)
+- [Numbers and words](#numbers-and-words)
+- [A stored program](#a-stored-program)
+- [Remembering things](#remembering-things)
+- [Memory as numbered boxes](#memory-as-numbered-boxes)
+- [Making decisions](#making-decisions)
+- [Doing things again](#doing-things-again)
+- [Working with words](#working-with-words)
+- [Drawing](#drawing)
+- [Reading keys](#reading-keys)
+- [Saving and loading](#saving-and-loading)
+- [The IDE](#the-ide)
+- [Longer programs](#longer-programs)
+- [A small game](#a-small-game)
+- [Where to go next](#where-to-go-next)
+- [Every word](#every-word)
+
+## What a computer does
+
+A computer follows a list of instructions. The list is called a program.
+The computer reads one instruction, does it, and moves to the next. It
+never gets bored and never skips a step. It also never guesses. If an
+instruction makes no sense to it, it stops and says so.
+
+SimpleCPU-8 is a small computer that lives inside a window on your
+screen. It has four parts you will meet in this book.
+
+The processor reads the instructions and does the arithmetic.
+
+The memory is where the computer keeps things. It is a long row of
+boxes. This machine has 65536 boxes, which people call 64K. Each box
+has a number, from 0 to 65535, and each box holds one number from 0 to
+255. A program, its words and its pictures all live in these boxes.
+
+The screen shows you what the computer is doing. It is 256 dots wide and
+256 dots tall. A dot is called a pixel. When the screen shows text, each
+letter takes a cell 6 pixels wide and 8 tall. So the screen holds 42
+letters across and 32 lines down.
+
+The keyboard is how you talk back. A key you press goes into a small
+queue. A program takes keys out of that queue when it wants them.
+
+BASIC is a language for giving the computer instructions in words that
+look like English. `PRINT "HELLO"` puts HELLO on the screen. You type an
+instruction, the machine does it, and you see the result at once.
+
+## Starting BASIC
+
+Build the project first, following README.md. Then start the machine
+with BASIC in it:
+
+```bash
+./r
+```
+
+That is the same as `build/release/src/vm/simplecpu --basic`. A window
+opens showing the machine's screen. It says:
+
+```text
+SimpleCPU-8 BASIC
+READY
+>
+```
+
+`READY` means BASIC is waiting for you. The `>` is the prompt, and the
+white block after it is the cursor. Whatever you type appears at the
+cursor. Press Enter to send a line to the machine. Backspace rubs out the
+last letter. Small letters are turned into capitals as you type.
+
+F5 restarts the machine. Everything you typed is gone afterwards, so
+read the chapter on saving before you rely on it.
+
+## Talking to the machine
+
+Type this and press Enter:
+
+```basic
+PRINT "HELLO"
+```
+
+The screen shows:
+
+```text
+>PRINT "HELLO"
+HELLO
+READY
+>
+```
+
+`PRINT` is an instruction. It means put this on the screen. The quotes
+mark where the text starts and stops. The machine prints the text, then
+says `READY` again, because it has nothing more to do.
+
+Now make a mistake on purpose:
+
+```basic
+PRUNT "HELLO"
+```
+
+```text
+? SYNTAX ERROR
+READY
+>
+```
+
+A syntax error means the machine did not understand the line. It is not
+angry and nothing is broken. Look at the line, find the typo, and type
+it again. You will see this message often. Everyone does.
+
+## Numbers and words
+
+`PRINT` can do arithmetic. Type each line and read what comes back.
+
+```basic
+PRINT 6*7
+PRINT 2+3*4
+PRINT (2+3)*4
+```
+
+```text
+42
+14
+20
+```
+
+The star means multiply, because the keyboard has no times sign. The
+machine multiplies before it adds, the way a maths teacher does.
+Brackets change the order.
+
+Division has a surprise:
+
+```basic
+PRINT 7/2, 7 MOD 2
+```
+
+```text
+3 1
+```
+
+This machine works only in whole numbers. `7/2` is 3, and the half is
+thrown away. `MOD` gives the remainder instead, which is 1 here. The
+comma between the two prints a space.
+
+Numbers run from -32768 to 32767. Go past the end and the count wraps
+round to the other end:
+
+```basic
+PRINT 32767+1
+```
+
+```text
+-32768
+```
+
+Text in quotes is called a string. A semicolon joins two things with no
+gap. A comma puts one space between them.
+
+```basic
+PRINT "SIX TIMES SEVEN IS"; 6*7
+PRINT "A";"B"
+PRINT "A","B"
+```
+
+```text
+SIX TIMES SEVEN IS42
+AB
+A B
+```
+
+The first line has no space before 42. The machine prints numbers with
+nothing in front of them. Put the space inside the quotes when you want
+one.
+
+## A stored program
+
+So far each line ran as soon as you pressed Enter. A program is a list
+of lines the machine keeps and runs later. To store a line, put a number
+in front of it:
+
+```basic
+10 PRINT "HELLO"
+20 PRINT 6*7
+```
+
+Nothing is printed except `READY`. The lines are stored, not run. Now
+type:
+
+```basic
+RUN
+```
+
+```text
+HELLO
+42
+READY
+>
+```
+
+`RUN` runs the stored lines in number order, lowest first. `LIST` shows
+them:
+
+```basic
+LIST
+```
+
+```text
+10 PRINT "HELLO"
+20 PRINT 6*7
+READY
+>
+```
+
+The numbers are the reason lines can be kept in order however you type
+them. They also give you room to change your mind. People count in tens
+so a new line can go between two old ones. Type `15 PRINT "AND"` and it
+lands between 10 and 20.
+
+To replace a line, type it again with the same number. To delete a line,
+type its number and nothing else. `NEW` throws the whole program away.
+
+```basic
+10 PRINT "OLD"
+10 PRINT "NEW"
+LIST
+10
+LIST
+```
+
+```text
+10 PRINT "NEW"
+READY
+>10
+READY
+>LIST
+READY
+>
+```
+
+A program holds up to 6144 bytes of lines, and a line holds up to 79
+characters.
+
+## Remembering things
+
+A variable is a box with a name. You put a number in it, and later you
+take the number out. The name is one capital letter, or a letter and a
+digit. `A`, `B`, `Z`, `A0` and `T9` are all variable names. That gives
+you 286 boxes for numbers.
+
+```basic
+10 A=5
+20 B=A*2
+30 PRINT A, B
+```
+
+```text
+5 10
+```
+
+`A=5` means put 5 in box A. `B=A*2` means look in box A, double what you
+find, and put that in box B. The old word `LET` still works, so
+`LET C=3` is the same as `C=3`.
+
+A box for text has a dollar sign after its letter. There are 26 of them,
+`A$` to `Z$`, and each holds up to 255 characters.
+
+```basic
+10 A$="HELLO"
+20 PRINT A$
+```
+
+```text
+HELLO
+```
+
+`INPUT` stops the program and waits for you to type something. Whatever
+you type goes into the variable.
+
+```basic
+10 INPUT "YOUR NAME"; N$
+20 PRINT "HELLO, "; N$
+30 INPUT "YOUR AGE"; A
+40 PRINT "IN TEN YEARS YOU WILL BE "; A+10
+```
+
+```text
+YOUR NAME? ADA
+HELLO, ADA
+YOUR AGE? 12
+IN TEN YEARS YOU WILL BE 22
+```
+
+The question mark is printed by `INPUT`. If you type letters where a
+number was expected, the variable gets 0.
+
+## Memory as numbered boxes
+
+The variables are boxes with names. Underneath, every box in the machine
+has a number instead. `PEEK` looks into a box by its number and `POKE`
+puts a value in.
+
+```basic
+10 POKE 40000,77
+20 PRINT PEEK(40000)
+```
+
+```text
+77
+```
+
+Box 40000 now holds 77. A box holds one byte, which is a number from 0
+to 255.
+
+The screen is made of boxes too. Box 64192 is the top left cell of the
+text screen. The 42 boxes after it are the rest of the top row, and the
+next 42 are the second row. A cell shows the character whose code is in
+its box. The code for `A` is 65.
+
+```basic
+10 POKE 64192,65
+20 POKE 64192+41,66
+30 POKE 64192+42,67
+```
+
+An `A` appears in the top left corner, a `B` in the top right, and a `C`
+at the start of the second row. `PRINT` does the same thing for you: it
+puts codes into these boxes, one after another.
+
+Two more boxes are worth knowing. Box 5 holds the column of the cursor
+and box 6 holds its row. Change them, and the next `PRINT` starts there.
+
+```basic
+10 CLS
+20 POKE 5,10: POKE 6,5
+30 PRINT "HERE";
+```
+
+`CLS` clears the screen. The colon lets two instructions share one line.
+The semicolon at the end of `PRINT` stops it moving to a new line. The
+word HERE appears at column 10, row 5.
+
+`DEEK` and `DOKE` do the same for a pair of boxes at once, so a number up
+to 65535 fits. `DOKE 40000,1000` puts 3 in box 40000 and 232 in box
+40001, because 3 times 256 plus 232 is 1000. `DEEK(40000)` reads it back
+as 1000. You will not need them until the chapter on drawing.
+
+## Making decisions
+
+`IF` runs an instruction only when something is true.
+
+```basic
+10 A=7
+20 IF A>5 THEN PRINT "BIG"
+30 IF A<5 THEN PRINT "SMALL"
+40 IF A=7 THEN PRINT "SEVEN"
+50 IF A<>7 THEN PRINT "NOT SEVEN"
+60 IF A>0 AND A<10 THEN PRINT "ONE DIGIT"
+```
+
+```text
+BIG
+SEVEN
+ONE DIGIT
+```
+
+`>` means greater than, `<` less than, `=` equal, and `<>` not equal.
+`<=` and `>=` mean less or equal and greater or equal. `AND` needs both
+sides true. `OR` needs one. `NOT` turns true into false.
+
+A number after `THEN` sends the program to that line:
+
+```basic
+70 IF A=1 OR A=7 THEN 90
+80 PRINT "SKIPPED"
+90 PRINT "DONE"
+```
+
+Add these lines to the program above and run it. `SKIPPED` never
+appears, because line 70 jumps straight to 90.
+
+## Doing things again
+
+`GOTO` sends the program to a line. Send it backwards and it goes round
+for ever.
+
+```basic
+10 PRINT "HELLO ";
+20 GOTO 10
+```
+
+The screen fills with HELLO and keeps filling. Press Escape, or hold
+Ctrl and press C, to stop it.
+
+```text
+HELLO HELLO HELLO ? BREAK IN 20
+READY
+>
+```
+
+`BREAK IN 20` tells you which line was running when you stopped it. The
+program is still stored, so `LIST` and `RUN` work as before.
+
+Most loops should end by themselves. `FOR` counts for you.
+
+```basic
+10 FOR I=1 TO 5
+20 PRINT I; " TIMES 3 IS "; I*3
+30 NEXT I
+```
+
+```text
+1 TIMES 3 IS 3
+2 TIMES 3 IS 6
+3 TIMES 3 IS 9
+4 TIMES 3 IS 12
+5 TIMES 3 IS 15
+```
+
+Line 10 puts 1 in box I. The lines down to `NEXT` run, then `NEXT` adds
+1 to I and goes back. When I passes 5 the program carries on past
+`NEXT`. `STEP` changes the amount added, and a negative step counts
+down. `WAIT 30` pauses for 30 frames, which is half a second.
+
+```basic
+10 FOR I=5 TO 1 STEP -1
+20 PRINT I
+30 WAIT 30
+40 NEXT I
+50 PRINT "GO"
+```
+
+Two habits keep `FOR` loops out of trouble on this machine. Put `FOR`
+and `NEXT` on lines of their own. And never start the line after a `FOR`
+with another `FOR`. A loop inside a loop works when a `PRINT` or any
+other instruction sits between the two `FOR` lines.
+
+`GOSUB` jumps to a line and remembers where it came from. `RETURN` goes
+back. That lets a piece of program be used from more than one place.
+
+```basic
+10 GOSUB 100
+20 GOSUB 100
+30 PRINT "END"
+40 END
+100 PRINT "SUB"
+110 RETURN
+```
+
+```text
+SUB
+SUB
+END
+```
+
+`END` stops the program. Without it, line 100 would run a third time and
+`RETURN` would have nowhere to go.
+
+## Working with words
+
+Strings can be joined with `+`, measured, and cut into pieces.
+
+```basic
+10 A$="SIMPLE"
+20 B$="CPU"
+30 C$=A$+B$
+40 PRINT C$
+50 PRINT LEN(C$)
+60 PRINT MID$(C$,3,2)
+70 PRINT MID$(C$,7)
+80 PRINT STR$(42)+"!"
+90 PRINT VAL("12")+1
+100 PRINT CHR$(65), ASC("A")
+110 IF A$="SIMPLE" THEN PRINT "SAME"
+```
+
+```text
+SIMPLECPU
+9
+MP
+CPU
+42!
+13
+A 65
+SAME
+```
+
+`LEN` counts the characters. `MID$(C$,3,2)` takes 2 characters starting
+at the third. Leave the count out and it takes the rest. `STR$` turns a
+number into text and `VAL` turns text back into a number. `CHR$` gives
+the character with a code and `ASC` gives the code of a character.
+Strings compare with the same signs as numbers, in alphabet order.
+
+There is no `LEFT$` or `RIGHT$`. `MID$(A$,1,3)` is the first three
+characters, and `MID$(A$,LEN(A$)-2)` is the last three. There are no
+lists of variables either. This BASIC has no `DIM` and no arrays. When a
+program needs a row of numbers, `POKE` them into a run of boxes and
+`PEEK` them back.
+
+## Drawing
+
+Six words draw on the 256 by 256 screen. `PAPER` fills it with a colour.
+`COLOR` picks the pen. `MOVE` puts the pen at a point without drawing.
+`DRAW` draws a line from the pen to a point. `CIRCLE` fills a disc
+around the pen. `PLOT` puts one white dot at a point. `POINT(X,Y)` reads
+the colour of a pixel back.
+
+A colour is a number from 0 to 255. Multiply the red by 32 and the green
+by 4, then add the blue. Red and green go from 0 to 7, blue from 0 to
+3. So 224 is red, 28 is green, 3 is blue, 255 is white and 0 is black.
+X runs from 0 on the left to 255 on the right. Y runs from 0 at the top
+to 255 at the bottom.
+
+There is a catch. The screen shows either the text or the picture, never
+both. While BASIC is talking to you it shows the text. The drawing words
+draw the picture behind it, and nothing changes on the screen. Type this
+and see for yourself:
+
+```basic
+10 PAPER 3
+20 COLOR 224
+30 MOVE 128,128
+40 CIRCLE 40
+50 PRINT POINT(128,128)
+```
+
+```text
+224
+```
+
+The pixel in the middle is red, so the disc was drawn. It stays hidden.
+BASIC has no word to switch the screen over. A project can add one, in
+two lines of C, and call it from BASIC. Make a folder called `paint`
+with a folder `src` inside it, and put two files in `src`.
+
+The first is `src/gfx.c`:
+
+```c
+#include <gpu.h>
+
+void GRAPHICS(void)
+{
+    gpu_set_graphicsmode();
+}
+
+void TEXT(void)
+{
+    gpu_set_textmode(0xFA, 0xC0);
+}
+```
+
+The second is `src/autorun.bas`:
+
+```basic
+10 CALL GRAPHICS
+20 PAPER 3
+30 COLOR 224
+40 MOVE 128,128
+50 CIRCLE 40
+60 COLOR 255
+70 MOVE 0,0
+80 DRAW 255,255
+90 WAIT 300
+100 CALL TEXT
+110 PRINT "BACK"
+```
+
+Build and run it from the folder above `paint`:
+
+```bash
+build/release/src/tools/simplecpu-make paint
+build/release/src/vm/simplecpu --rom paint/build/paint.rom
+```
+
+A red disc on blue appears, with a white line from corner to corner.
+Five seconds later the text comes back and says `BACK`. `CALL` runs a
+piece of machine code by name. The build turns the name into a number
+before the program goes into the machine. The chapter on saving explains
+what the folder and `autorun.bas` mean.
+
+## Reading keys
+
+`INKEY$` gives the key pressed since the program last looked, or an
+empty string when there was none. It does not wait.
+
+```basic
+10 PRINT "PRESS A KEY"
+20 K$=INKEY$
+30 IF K$="" THEN 20
+40 PRINT "YOU PRESSED "; K$; " WHICH IS CODE "; ASC(K$)
+```
+
+```text
+PRESS A KEY
+YOU PRESSED Q WHICH IS CODE 81
+```
+
+Line 30 goes back to line 20 until a key arrives. `KEY()` does the same
+job with numbers. It gives the code of the key, or 0. The arrow keys
+have codes 17, 18, 19 and 20 for up, down, left and right. Enter is 13
+and Escape is 27.
+
+A game wants to know which keys are held down right now. `PAD()`
+answers that. Each key has a value, and `PAD()` adds up the values of
+the keys that are down. Up is 1, down 2, left 4, right 8, fire 16,
+space 32 and Enter 64. The arrow keys
+and W, A, S, D both count. Fire is Z or Ctrl. `PAD()` gives 0 when
+nothing is held.
+
+## Saving and loading
+
+Restarting the machine loses the program. The machine has a cartridge,
+called the ROM, and a program can be saved into it under a name. The
+commands that do this start with an exclamation mark.
+
+```basic
+10 PRINT "HI"
+20 PRINT "THERE"
+!SAVE "FIRST"
+NEW
+LIST
+!CATALOG
+!LOAD "FIRST"
+LIST
+```
+
+```text
+>!SAVE "FIRST"
+READY
+>NEW
+READY
+READY
+>LIST
+READY
+>!CATALOG
+FIRST
+READY
+>!LOAD "FIRST"
+READY
+>LIST
+10 PRINT "HI"
+20 PRINT "THERE"
+READY
+>
+```
+
+`!SAVE` writes the program under a name of up to 16 characters.
+`!CATALOG` lists the names. `!LOAD` replaces the program in memory with
+the saved one. `!DELETE "FIRST"` removes it. Loading a name that is not
+there gives `NOT FOUND ERROR`.
+
+When you started with `./r`, the cartridge lives only in memory. Close
+the window and the saved programs go with it. To keep them on disk,
+copy the cartridge file and start from the copy:
+
+```bash
+cp build/release/roms/basic.rom mine.rom
+build/release/src/vm/simplecpu --rom mine.rom
+```
+
+Now every `!SAVE` and `!DELETE` writes `mine.rom`. The file is a
+cassette with your programs on it.
+
+A program can also live in a plain text file, which any editor can
+open. The file holds the lines the way `LIST` prints them. Start the
+machine with the file and it is loaded and run:
+
+```bash
+build/release/src/vm/simplecpu --basic hello.bas --run
+```
+
+The third way is a project folder, which the drawing chapter used. A
+folder with a `src` folder holding `.bas` files is a BASIC project.
+`simplecpu-make` builds it into a cartridge in `build/`. A file called
+`autorun.bas` runs when the cartridge boots, so the cartridge is a
+finished game that starts by itself. `simplecpu-make new mygame --basic`
+lays out a new project with a first program in it.
+
+## The IDE
+
+`./r --ide` opens the IDE, a bigger window with more panes. Its Edit
+level has three tabs across the top: Source, BASIC and Project. The
+BASIC tab is a text editor with the machine's screen beside it.
+
+Type a program in the editor. Press Run in BASIC. The IDE boots BASIC,
+puts the program in the machine's memory and types `RUN` for you. Load
+and Save read and write a `.bas` file on disk. Save into ROM writes a
+named slot the way `!SAVE` does.
+
+The editor and the machine share one program. While the machine waits at
+`READY`, a line you type on the small screen appears in the editor. The
+pane says so under its buttons. When you have edited the text and the
+machine's copy has changed too, the pane offers Pull from machine.
+
+The Project tab opens a project folder, lists its files and builds them
+with one button. Press BASIC beside `new project in that folder` and the
+IDE lays out a BASIC project for you.
+
+## Longer programs
+
+A few habits make a program of fifty lines readable.
+
+`REM` marks a remark. The machine ignores the rest of the line, so a
+remark is a note for you. Put one at the top saying what the program
+does, and one before each part.
+
+Count lines in tens, and keep a gap of a hundred or more between the
+parts. The main loop can start at 100, the subroutines at 1000. A
+`GOSUB 1000` then says something about where it goes.
+
+Keep one idea per line. Colons let two or three instructions share a line,
+which is handy for a short `POKE 5,X: POKE 6,Y` pair. A long line of
+colons is hard to read back.
+
+When the machine stops with an error, the message names the line. `LIST`
+the program and read that line slowly. The errors you will meet most:
+
+| Message | Meaning |
+|---|---|
+| `SYNTAX ERROR` | the line was not understood |
+| `NO SUCH LINE ERROR` | a `GOTO`, `GOSUB` or `THEN` named a line that is not there |
+| `TYPE ERROR` | a string where a number was wanted, or the other way round |
+| `DIVIDE BY ZERO ERROR` | a `/` or `MOD` by 0 |
+| `TOO DEEP ERROR` | a `RETURN` or `NEXT` with no matching `GOSUB` or `FOR` |
+| `OUT OF RANGE ERROR` | a string longer than 255 characters |
+| `OUT OF MEMORY ERROR` | the program or its strings no longer fit |
+| `BREAK` | you pressed Escape or Ctrl-C |
+
+## A small game
+
+The game is called Catch the Stars. A star falls from the top of the
+screen. You are a `^` on the bottom row, moving with the left and right
+arrows. Catch the star for a point. Miss three and the game is over.
+Build it in three steps and run it after each one.
+
+Step one draws you and moves you. Box 5 and box 6 place the cursor, so
+`PRINT` puts the `^` where P says.
+
+```basic
+10 REM CATCH THE STARS
+20 CLS
+50 P=20
+90 POKE 5,P: POKE 6,30: PRINT "^";
+100 WAIT 3
+110 B=PAD()
+120 POKE 5,P: POKE 6,30: PRINT " ";
+130 IF B=4 AND P>0 THEN P=P-1
+140 IF B=8 AND P<40 THEN P=P+1
+170 GOTO 90
+```
+
+Line 90 draws you. Line 100 waits three frames, so the loop runs about
+twelve times a second. Line 110 reads the keys. Line 120 rubs you out by
+printing a space over the `^`. Lines 130 and 140 move P, and stop it at
+the edges. Line 170 goes round again. Run it, hold an arrow key, and
+watch the `^` slide. Press Escape to stop.
+
+Step two adds the star. X and Y are its column and row. It starts at a
+random column on row 0 and moves down one row per turn. `RND(41)` gives
+a number from 0 to 40.
+
+```basic
+60 X=RND(41)
+70 Y=0
+80 POKE 5,X: POKE 6,Y: PRINT "*";
+150 POKE 5,X: POKE 6,Y: PRINT " ";
+160 Y=Y+1
+170 IF Y<30 THEN 80
+180 GOTO 60
+```
+
+Line 170 replaces the old one. The loop now runs from 80 to 170 until
+the star reaches row 30, and line 180 starts a new star.
+
+Step three keeps score. S counts stars caught and L counts lives. When
+the star reaches row 30 it is caught if X equals P.
+
+```basic
+30 S=0
+40 L=3
+180 IF X=P THEN S=S+1
+190 IF X<>P THEN L=L-1
+200 POKE 5,0: POKE 6,31: PRINT "SCORE "; S; "  LIVES "; L;
+210 IF L>0 THEN 60
+220 CLS
+230 PRINT "GAME OVER. YOU CAUGHT "; S; " STARS."
+240 END
+```
+
+The whole program, as `LIST` shows it:
+
+```basic
+10 REM CATCH THE STARS
+20 CLS
+30 S=0
+40 L=3
+50 P=20
+60 X=RND(41)
+70 Y=0
+80 POKE 5,X: POKE 6,Y: PRINT "*";
+90 POKE 5,P: POKE 6,30: PRINT "^";
+100 WAIT 3
+110 B=PAD()
+120 POKE 5,P: POKE 6,30: PRINT " ";
+130 IF B=4 AND P>0 THEN P=P-1
+140 IF B=8 AND P<40 THEN P=P+1
+150 POKE 5,X: POKE 6,Y: PRINT " ";
+160 Y=Y+1
+170 IF Y<30 THEN 80
+180 IF X=P THEN S=S+1
+190 IF X<>P THEN L=L-1
+200 POKE 5,0: POKE 6,31: PRINT "SCORE "; S; "  LIVES "; L;
+210 IF L>0 THEN 60
+220 CLS
+230 PRINT "GAME OVER. YOU CAUGHT "; S; " STARS."
+240 END
+```
+
+Save it with `!SAVE "STARS"` before you change anything. Then change
+things. `WAIT 2` makes it faster. A second star needs two more variables
+and a copy of lines 60 to 170. A `GOSUB` for drawing would shorten the
+copy. That is how every game grows, one line at a time.
+
+## Where to go next
+
+BASIC reads every word of every line again each time round a loop,
+which is why the star falls slowly. The machine's C compiler turns a
+program into machine code once, before it runs. C also reaches the whole
+graphics chip, with sprites and sound. The drawing
+chapter used two lines of it. docs/design/c-language.md describes the
+dialect, and the C guide beside this one carries on from here.
+
+The system page at docs/basic-system-page.md lists every box BASIC keeps
+its own state in, from 0 to 31. Box 5 and box 6 came from there.
+examples/basic-c and examples/basic-driver show BASIC calling C and
+assembly.
+
+## Every word
+
+Commands you type at the prompt:
+
+| Word | Does |
+|---|---|
+| `RUN` | runs the stored program from its lowest line |
+| `LIST` | prints the stored program |
+| `NEW` | throws the stored program away |
+
+Statements, in a program or at the prompt:
+
+| Word | Does |
+|---|---|
+| `PRINT a; b, c` | prints things, `;` with no gap, `,` with a space |
+| `INPUT "text"; V` | prints the text and a `?`, waits for a line, stores it |
+| `V=expr` or `LET V=expr` | puts a value in a variable |
+| `IF cond THEN stmt` | runs the statement when cond is not 0 |
+| `IF cond THEN 100` | goes to line 100 when cond is not 0 |
+| `GOTO 100` | goes to line 100 |
+| `GOSUB 100` | goes to line 100 and remembers where it was |
+| `RETURN` | goes back to the line after the last `GOSUB` |
+| `FOR I=a TO b STEP s` | starts a counted loop, `STEP` optional |
+| `NEXT` | adds the step and goes back while I is in range |
+| `END` or `STOP` | stops the program |
+| `REM text` | a remark, ignored |
+| `CLS` | clears the text screen |
+| `WAIT n` | pauses n frames, 60 to a second |
+| `POKE a,v` | puts byte v in box a |
+| `DOKE a,v` | puts word v in boxes a and a+1, high byte first |
+| `PAPER c` | fills the picture with colour c |
+| `COLOR c` | sets the pen colour |
+| `MOVE x,y` | puts the pen at x,y |
+| `DRAW x,y` | draws a line from the pen to x,y |
+| `CIRCLE r` | fills a disc of radius r around the pen |
+| `PLOT x,y` | puts a white dot at x,y |
+| `CALL n` or `JSR n` | runs machine code at slot n, the A register goes to box 4 |
+| `JMP n` | jumps to machine code at slot n and never comes back |
+| `!SAVE "N"` | saves the program into the cartridge as N |
+| `!LOAD "N"` | loads N from the cartridge |
+| `!DELETE "N"` | removes N from the cartridge |
+| `!CATALOG` | lists the names in the cartridge |
+
+Functions, used inside an expression:
+
+| Word | Gives |
+|---|---|
+| `RND(n)` | a random number from 0 to n-1 |
+| `ABS(n)` | n without its sign |
+| `PEEK(a)` | the byte in box a |
+| `DEEK(a)` | the word in boxes a and a+1 |
+| `POINT(x,y)` | the colour of the pixel at x,y |
+| `KEY()` | the code of the key pressed since the last look, or 0 |
+| `PAD()` | the keys held down, added up as bits |
+| `LEN(s$)` | the length of a string |
+| `ASC(s$)` | the code of its first character |
+| `VAL(s$)` | the number the string spells |
+| `STR$(n)` | the number as a string |
+| `CHR$(n)` | the character with code n |
+| `MID$(s$,i,n)` | n characters from position i, count optional |
+| `INKEY$` | the key pressed since the last look, or `""` |
+
+Operators, in order from tightest to loosest: `-` and `NOT` on one
+value, then `*`, `/` and `MOD`, then `+` and `-`, then `=`, `<>`, `<`,
+`>`, `<=` and `>=`, then `AND`, then `OR`. A number may be written in
+hex with a dollar sign, so `$F000` is 61440. Strings join with `+`.
