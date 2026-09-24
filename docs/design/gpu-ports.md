@@ -231,7 +231,9 @@ The %s and %r conversions take a pointer into RAM. The template is in
 ROM, but the strings it points at live in RAM. %s reads to a zero byte.
 %r prints an exact count set by the width, so %5r draws five raw bytes.
 
-Text mode fills the screen with characters read from data RAM.
+Text mode draws characters read from data RAM over the VRAM. A pixel no
+glyph lights shows the picture under it. The text background fills a cell
+only when the style's opaque flag is set, as it does for the overlay.
 CMD_SET_TEXTMODE switches the mode and sets the base together, reading
 GPU_ADDR_HI and GPU_ADDR_LO. One command, so a mapped mode with no buffer
 under it cannot be reached. The GPU reads 1344 bytes every frame, so a store
@@ -271,8 +273,8 @@ no longer have to sit in the assembled RAM image.
 ## Moving a block of RAM
 
 CMD_RAM_MOVE moves bytes from one place in data RAM to another. The CPU has
-no block move. Without this command a copy is a load and a store per byte,
-which is what every struct assignment and every memcpy would cost.
+no block move. Without this command a copy is a load and a store per byte.
+That is what every struct assignment and every memcpy would cost.
 
 It is a move and not a copy, in the sense the C function memmove has. The
 two blocks may overlap, and the GPU picks the direction that survives the

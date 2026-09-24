@@ -1,7 +1,7 @@
 # Text and printf design
 
 Two text features for the GPU of SimpleCPU-8. Eddie asked for a printf that
-draws over graphics, and a real text mode that ignores graphics. This doc is
+draws over graphics, and a real text mode read from memory. This doc is
 the built design. It records the decisions and the reasoning.
 
 Both features share one font and one glyph renderer. The CPU stays 8 bit and
@@ -135,13 +135,25 @@ uses `GPU_TEXT_COLOR`. The two never clash, because they are different registers
 Both hold a palette index.
 
 The background rides in `GPU_TEXT_BG`. A flag byte, `GPU_TEXT_FLAGS`, has one bit
-for an opaque background on the overlay. The default overlay background is
-transparent, so text sits over graphics with only its glyph pixels.
+for an opaque background. The default background is transparent, so text sits
+over graphics with only its glyph pixels. The rule is the same in both
+features. An opaque style fills each cell with the background first. A
+transparent one leaves the pixels under the cell alone.
 
 ## Feature 2, text mode
 
-Text mode shows characters only. The screen is the 42 by 32 grid, filled from
-memory. It is one of the video modes below.
+Text mode shows characters read from memory. The screen is the 42 by 32 grid,
+drawn over the graphics VRAM. It is one of the video modes below.
+
+A pixel that is not a glyph pixel shows the VRAM pixel under it. So a program
+can draw with the graphics commands and print in the same mode. BASIC is the
+program that wanted this. It runs in text mode, and its PLOT and CIRCLE drew
+into a VRAM nobody saw. The background follows the style's opaque flag, as the
+overlay does. A style without the flag is transparent. Black text on black is
+still what a fresh machine shows, because VRAM starts black. BASIC clears the
+VRAM to its PAPER colour on CLS, so its screen stays one colour. Text mode
+shows the VRAM as it is. The scroll registers and the sprites belong to
+graphics mode.
 
 The character buffer is a region of data RAM. A command maps it. The GPU gets a
 read-only second port into data RAM. So the CPU writes a byte with
@@ -152,7 +164,8 @@ appear to collide.
 `CMD_TEXT_MAP` sets a 16 bit base address from the `GPU_CART_LO` and
 `GPU_CART_HI` latches. The screen is always the full 42 by 32, so it reads 1344
 bytes from that base every frame. A write to the mapped region shows up with no
-command. The colors come from `GPU_TEXT_COLOR` and `GPU_TEXT_BG`.
+command. The colors come from `GPU_TEXT_COLOR` and `GPU_TEXT_BG`, and the
+background is drawn only when `GPU_TEXT_FLAGS` says opaque.
 
 ## Video modes
 
@@ -196,7 +209,7 @@ New commands for `GPU_CMD`.
 - CMD_VIDEO_MODE, 0x33: switch video mode from GPU_ARG.
 - CMD_LOAD_FONT, 0x34: load a 256-glyph font from the cartridge.
 
-New assembler constants for `GPU_ARG` at a mode switch: MODE_GRAPHICS is 0 and
+New assembler constants for `GPU_ARG` at a mode switch. MODE_GRAPHICS is 0 and
 MODE_TEXT is 1.
 
 ## String literals in the assembler
@@ -211,7 +224,7 @@ among other `db` values on the same line.
 ## The 2KB RAM
 
 Data RAM grew from 1024 to 2048 bytes. A full text screen was 1024 bytes then,
-on the 8 by 8 font this machine started with, so it fit in the upper 1KB. Map
+on the 8 by 8 font this machine started with. So it fit in the upper 1KB. Map
 the screen at $400 and keep the lower 1KB for data. Writing to the upper 1KB
 needs a 16 bit address, so a D register walks the screen. RAM grew again later,
 to the full 65536 bytes a 16 bit address can already reach. No data address

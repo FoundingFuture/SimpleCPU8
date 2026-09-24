@@ -7,11 +7,22 @@ unsigned char loop_back;
 static unsigned int gosub[GOSUBMAX];
 static unsigned char ngosub;
 
+/* A FOR remembers the line it is on and where its body starts within that
+ * line, so NEXT can go back to the statement after the FOR whether the
+ * body shares the FOR's line or follows it.
+ */
 static unsigned int for_line[FORMAX];
+static unsigned int for_pos[FORMAX];
 static int for_var[FORMAX];
 static int for_to[FORMAX];
 static int for_step[FORMAX];
 static unsigned char nfor;
+
+/* The offset of the line being run, 0 at the prompt, and where NEXT asked
+ * the FOR's line to pick up again.
+ */
+static unsigned int cur_line;
+static unsigned int resume_pos;
 
 static char line_buf[LINEMAX];
 
@@ -73,12 +84,21 @@ static void do_print(void)
         if (lx_is(";")) { newline = 0; lx_next(); continue; }
         if (lx_is(",")) { term_putc(32); newline = 1; lx_next(); continue; }
         newline = 1;
+        /* The value is checked before it is printed. An expression that
+         * failed comes back as 0, and PRINT 1/0 used to show that 0 in
+         * front of the error message.
+         */
         if (lx_tok == T_STR || IS_STRNAME) {
-            str_put(ex_str());
+            unsigned int s;
+            s = ex_str();
+            if (err) return;
+            str_put(s);
         } else {
-            term_putn(ex_int());
+            int v;
+            v = ex_int();
+            if (err) return;
+            term_putn(v);
         }
-        if (err) return;
     }
     if (newline) term_nl();
 }
@@ -212,7 +232,11 @@ static unsigned char statement(void)
             for_to[nfor] = ex_int();
             for_step[nfor] = 1;
             if (lx_is("STEP")) { lx_next(); for_step[nfor] = ex_int(); }
-            for_line[nfor] = pc;
+            /* The body starts at the token after the FOR. lx_pos is past
+             * it already, so seeking there reads the body's first token.
+             */
+            for_line[nfor] = cur_line;
+            for_pos[nfor] = lx_pos;
             nfor = nfor + 1;
             return 1;
         }
@@ -229,11 +253,14 @@ static unsigned char statement(void)
             v = vars[for_var[t]] + for_step[t];
             vars[for_var[t]] = v;
             if (for_step[t] >= 0 ? v <= for_to[t] : v >= for_to[t]) {
+                /* Back to the statement after the FOR. On this line the
+                 * body starts again in place, on another line rt_run
+                 * reads that line from the body's first token.
+                 */
+                resume_pos = for_pos[t];
+                if (for_line[t] == cur_line) return 3;
                 pc = for_line[t];
                 loop_back = 1;
-                /* Back to the line the FOR is on, and past the FOR itself:
-                 * re-running it would reset the counter for ever.
-                 */
                 return 2;
             }
             nfor = nfor - 1;
@@ -282,7 +309,7 @@ static unsigned char statement(void)
         }
     }
     if (lx_is("CIRCLE")) { lx_next(); gpu_circle(ex_int()); return 1; }
-    if (lx_is("PAPER")) { lx_next(); gpu_clear(ex_int()); return 1; }
+    if (lx_is("PAPER")) { lx_next(); term_paper(ex_int()); return 1; }
     if (lx_is("WAIT")) {
         lx_next();
         {
@@ -376,50 +403,33 @@ static unsigned char statement(void)
     return 1;
 }
 
-/* Every statement on one line, separated by colons. */
-static void run_line(char *text)
+/* Every statement on one line, separated by colons, from a position in the
+ * text. That is 0 for a fresh line, and the body's first token when NEXT
+ * sent the program back to the line its FOR is on. The FOR itself is not
+ * run again: re-running it would reset the counter for ever.
+ */
+static void run_line(char *text, unsigned int pos)
 {
     unsigned char r;
-    lx_start(text);
+    lx_seek(text, pos);
     for (;;) {
         if (lx_tok == T_END) return;
         r = statement();
         if (err || running == 0) return;
         if (r == 0) return;         /* the statement moved pc itself */
         if (r == 2) return;         /* NEXT jumped back to the FOR's line */
+        if (r == 3) {               /* NEXT went back to a FOR on this line */
+            /* The break check between lines never comes round for a loop
+             * that lives on one line, so it is made here instead.
+             */
+            if (key_break()) { rt_error(E_BREAK); return; }
+            lx_seek(text, resume_pos);
+            continue;
+        }
         if (lx_is(":")) { lx_next(); continue; }
         if (lx_tok == T_END) return;
         rt_error(E_SYNTAX);
         return;
-    }
-}
-
-/* A NEXT sends us back to the line the FOR is on, and the body has to start
- * again AFTER the FOR statement. So the FOR's own line is re-read and the
- * FOR is skipped: it is the one statement that must not run twice.
- */
-static void run_from_for(char *text)
-{
-    lx_start(text);
-    /* Walk past FOR I = a TO b [STEP c] without acting on it. */
-    if (lx_is("FOR")) {
-        lx_next();
-        if (lx_tok == T_NAME) lx_next();
-        if (lx_is("=")) lx_next();
-        ex_int();
-        if (lx_is("TO")) lx_next();
-        ex_int();
-        if (lx_is("STEP")) { lx_next(); ex_int(); }
-    }
-    for (;;) {
-        if (lx_tok == T_END) return;
-        if (lx_is(":")) { lx_next(); continue; }
-        {
-            unsigned char r;
-            r = statement();
-            if (err || running == 0) return;
-            if (r == 0 || r == 2) return;
-        }
     }
 }
 
@@ -447,12 +457,13 @@ void rt_run(void)
             return;
         }
         pc = pc + prog[pc + 2];       /* the default next line */
+        cur_line = here;
         loop_back = 0;
         if (from_for) {
             from_for = 0;
-            run_from_for((char *)&prog[here + 3]);
+            run_line((char *)&prog[here + 3], resume_pos);
         } else {
-            run_line((char *)&prog[here + 3]);
+            run_line((char *)&prog[here + 3], 0);
         }
         if (err) { say_error(); return; }
         /* NEXT says so itself rather than being guessed at from pc: a GOTO
@@ -496,9 +507,14 @@ void rt_line(char *text)
     if (lx_is("LIST")) { ed_list(); return; }
     if (lx_is("NEW")) { ed_new(); str_init(); term_puts("READY"); term_nl(); return; }
 
+    /* A loop typed at the prompt lives on that one line, and a FOR a
+     * program left open has no line to go back to now.
+     */
     running = 1;
     pc = 0;
-    run_line(&text[i]);
+    cur_line = 0;
+    nfor = 0;
+    run_line(&text[i], 0);
     running = 0;
     if (err) say_error();
 }

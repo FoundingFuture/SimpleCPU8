@@ -207,6 +207,41 @@ TEST_SUITE("video mode and text mode") {
     CHECK_NE(r.g.displayKey(), before);
   }
 
+  // Text mode used to paint the whole screen in the text background, so a
+  // program that drew and then printed saw only the printing. The VRAM
+  // now shows through wherever a glyph pixel is not lit.
+  TEST_CASE("shows the VRAM under the text") {
+    Rig r;
+    r.withRam();
+    cmd(r.g, CMD_CLEAR, {4});
+    gpu_rig::cmdv(r.g, CMD_PLOT, gpu_rig::cat(gpu_rig::xy(100, 100), 9));
+    (*r.ram)[0] = 'A';
+    cmd(r.g, CMD_TEXT_STYLE, {7, 2, 0});
+    cmd(r.g, CMD_SET_TEXTMODE, {0, 0});
+    const auto out = r.g.composeFrame();
+    CHECK(cellShowsGlyph(out, 0, 0, 'A', 7));
+    CHECK_EQ(gpu_rig::px(out, 100, 100), 9);  // the plotted pixel
+    CHECK_EQ(gpu_rig::px(out, 200, 200), 4);  // the cleared VRAM elsewhere
+    // A cell's unlit pixels show the VRAM too: the background is transparent.
+    CHECK_EQ(gpu_rig::px(out, 5, 0), 4);  // the blank column of the cell
+  }
+
+  TEST_CASE("fills a cell with the text background only when the style says opaque") {
+    // The same rule as the overlay over graphics: the opaque flag is what
+    // asks for a background, and the default is transparent.
+    Rig r;
+    r.withRam();
+    cmd(r.g, CMD_CLEAR, {4});
+    (*r.ram)[0] = 'A';
+    cmd(r.g, CMD_TEXT_STYLE, {7, 2, 1});
+    cmd(r.g, CMD_SET_TEXTMODE, {0, 0});
+    const auto out = r.g.composeFrame();
+    CHECK(cellShowsGlyph(out, 0, 0, 'A', 7));
+    CHECK_EQ(gpu_rig::px(out, 5, 0), 2);  // the cell's blank column, in the background
+    CHECK_EQ(gpu_rig::px(out, 5, 8), 2);  // an empty cell is opaque too
+    CHECK_EQ(gpu_rig::px(out, 200, 200), 2);
+  }
+
   TEST_CASE("returns to graphics on a mode switch") {
     Rig r;
     r.withRam();

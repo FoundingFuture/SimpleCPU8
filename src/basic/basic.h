@@ -56,6 +56,7 @@ unsigned char key_get(void);
 void key_push(unsigned char k);
 unsigned char key_break(void);
 void term_init(void);
+void term_paper(unsigned char c);
 void term_cls(void);
 void term_putc(unsigned char c);
 void term_puts(char *s);
@@ -80,6 +81,7 @@ extern unsigned int lx_str;  /* heap offset, when it is a string */
 #define T_KEY    5
 
 void lx_start(char *text);
+void lx_seek(char *text, unsigned int pos);
 void lx_next(void);
 unsigned char lx_is(char *word);
 

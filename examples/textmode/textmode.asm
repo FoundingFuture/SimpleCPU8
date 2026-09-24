@@ -5,7 +5,7 @@
 ; the very next frame.
 
         OUT GPU_TEXT_COLOR, $1E        ; bright cyan text
-        OUT GPU_TEXT_BG, 1             ; dark blue background
+        OUT GPU_TEXT_BG, 1             ; dark blue, shown only with GPU_TEXT_FLAGS 1
         OUT GPU_CMD, CMD_TEXT_STYLE
 
 ; One command sets the mode and the framebuffer together, so text mode with

@@ -360,6 +360,62 @@ TEST_SUITE("control flow") {
     CHECK(has(text(*s), "0510"));
   }
 
+  // The FOR stack kept only the line to go back to, and that was the line
+  // AFTER the FOR. A body on the FOR's own line ran once, and a FOR at the
+  // start of the next line was skipped as if it were the outer one.
+  TEST_CASE("runs a body that shares the FOR's line") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 FOR I=1 TO 3: PRINT I;: NEXT I");
+    type(*s, "20 PRINT \"END\"");
+    type(*s, "RUN", 20000000);
+    CHECK(has(after(text(*s), "RUN"), "123END"));
+  }
+
+  TEST_CASE("runs a loop typed at the prompt") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "FOR I=1 TO 3: PRINT I;: NEXT I", 20000000);
+    CHECK(has(after(text(*s), "NEXT I"), "123"));
+  }
+
+  TEST_CASE("nests a FOR on the line right after a FOR") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 FOR I=1 TO 2");
+    type(*s, "20 FOR J=1 TO 3");
+    type(*s, "30 PRINT I*10+J;");
+    type(*s, "40 NEXT J");
+    type(*s, "50 NEXT I");
+    type(*s, "RUN", 40000000);
+    const std::string t = after(text(*s), "RUN");
+    CHECK(has(t, "111213212223"));
+    CHECK_FALSE(has(t, "TOO DEEP"));
+  }
+
+  TEST_CASE("nests two loops on one line") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 FOR I=1 TO 2: FOR J=1 TO 2: PRINT I;J;\" \";: NEXT J: NEXT I");
+    type(*s, "RUN", 40000000);
+    CHECK(has(after(text(*s), "RUN"), "11 12 21 22"));
+  }
+
+  TEST_CASE("breaks out of a loop that lives on one line") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 FOR I=1 TO 2 STEP 0: NEXT I");
+    for (char ch : std::string("RUN")) {
+      s->pushKey(ch, false);
+      s->runBudget(120000);
+    }
+    s->pushKey(13, false);
+    s->runBudget(2000000);
+    s->pushKey(27, false);
+    s->runBudget(3000000);
+    CHECK(has(text(*s), "BREAK IN 10"));
+  }
+
   TEST_CASE("branches with IF THEN") {
     auto s = boot();
     settle(*s);
@@ -606,6 +662,19 @@ TEST_SUITE("errors are reported rather than swallowed") {
     CHECK(has(text(*s), "DIVIDE BY ZERO"));
   }
 
+  // PRINT evaluated into the printer, and a failed expression comes back
+  // as 0. So the message came after a stray 0 on the line above it.
+  TEST_CASE("prints nothing before a divide by zero") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PRINT 10/0");
+    const auto scr = screen(*s);
+    size_t row = 0;
+    while (row < scr.size() && scr[row] != ">PRINT 10/0") row++;
+    REQUIRE_LT(row + 1, scr.size());
+    CHECK_EQ(scr[row + 1], "? DIVIDE BY ZERO ERROR");
+  }
+
   TEST_CASE("names a missing line, and which line asked") {
     auto s = boot();
     settle(*s);
@@ -618,15 +687,30 @@ TEST_SUITE("errors are reported rather than swallowed") {
 }
 
 TEST_SUITE("it can draw, which is why the GPU is on the bus") {
-  TEST_CASE("plots a pixel") {
+  TEST_CASE("plots a pixel, and the screen shows it under the text") {
     auto s = boot();
     settle(*s);
     type(*s, "PAPER 0");
     type(*s, "COLOR 255");
     type(*s, "PLOT 10,10");
-    // Graphics mode is off while text mode is up. The proof is the command
-    // reaching the device: the frame the GPU composes has the pixel.
     CHECK(s->m->status == Status::Running);
+    // Text mode shows the VRAM under the characters, so the dot is on the
+    // composed frame rather than only in the device.
+    const auto out = s->gpu.composeFrame();
+    CHECK_EQ(out[10 * 256 + 10], 255);
+  }
+
+  TEST_CASE("CLS clears the picture to the PAPER colour as well as the text") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PAPER 3");
+    type(*s, "COLOR 255");
+    type(*s, "PLOT 10,10");
+    CHECK_EQ(s->gpu.vram[10 * 256 + 10], 255);
+    type(*s, "CLS");
+    CHECK_EQ(s->gpu.vram[10 * 256 + 10], 3);
+    CHECK_EQ(s->gpu.vram[200 * 256 + 200], 3);
+    CHECK_EQ(screen(*s)[0], "READY");  // the text is gone too, only the prompt after CLS
   }
 }
 
@@ -913,6 +997,28 @@ TEST_SUITE("the system page") {
     type(*s, "PRINT PEEK(7)");
     // Enter, code 13, was the last key of the line just typed.
     CHECK(has(after(text(*s), "PEEK(7)"), "13"));
+  }
+
+  // The break check reads a key and pushes it back for INKEY$. The note
+  // at 7 was made only on a read from the device, so a key that came by
+  // the pushback left PEEK(7) at the Enter that started the program.
+  TEST_CASE("box 7 follows the keys a program reads with INKEY$") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 A$=INKEY$");
+    type(*s, "20 IF A$<>\"\" THEN PRINT PEEK(7)");
+    type(*s, "30 GOTO 10");
+    for (char ch : std::string("RUN")) {
+      s->pushKey(ch, false);
+      s->runBudget(120000);
+    }
+    s->pushKey(13, false);
+    s->runBudget(2000000);
+    s->pushKey(90, false);  // Z
+    s->runBudget(3000000);
+    s->pushKey(27, false);
+    s->runBudget(2000000);
+    CHECK(has(after(text(*s), "RUN"), "90"));
   }
 
   TEST_CASE("the program and its length are at 8 and 10") {

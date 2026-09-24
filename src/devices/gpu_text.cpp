@@ -128,7 +128,19 @@ void Gpu::drawOverlay(std::span<uint8_t> out) const {
 }
 
 // Text mode: the whole screen is characters read from the mapped region of
-// data RAM, on the text background. Graphics are ignored.
+// data RAM, drawn over the graphics VRAM. A pixel that is not a glyph pixel
+// shows the VRAM pixel under it, so a program can draw and print at once.
+//
+// DESIGN: the background follows the same rule as the printf overlay. The
+// style's opaque flag fills each cell with the text background first, and
+// without it the cell is transparent. Text mode used to paint the whole
+// screen in the text background, so BASIC's PLOT and CIRCLE drew into a
+// VRAM nobody saw. Black text on black is still the default: VRAM starts
+// black and BASIC clears it to its PAPER colour.
+//
+// The VRAM is shown as it is, without the scroll registers and without the
+// sprites. Those belong to graphics mode, and a mode that reads its screen
+// from RAM has no use for them.
 void Gpu::composeText(std::span<uint8_t> out) const {
   if (!textMapped || !ram_) {
     // Text mode without a mapping: the screen has no buffer to read, so it
@@ -137,13 +149,13 @@ void Gpu::composeText(std::span<uint8_t> out) const {
     fillNoise(out);
     return;
   }
-  std::fill(out.begin(), out.end(), static_cast<uint8_t>(textBg));
+  std::copy(vram.begin(), vram.end(), out.begin());
   for (int row = 0; row < TEXT_ROWS; row++) {
     for (int col = 0; col < TEXT_COLS; col++) {
       // DESIGN: wrap, do not clamp. The CPU wraps at 16 bits, so a screen
       // mapped near the top reads the bottom of RAM rather than zeros.
       const uint8_t code = ramByte(static_cast<uint32_t>(textBase + row * TEXT_COLS + col));
-      drawGlyph(out, col, row, code, static_cast<uint8_t>(textColor), false);
+      drawGlyph(out, col, row, code, static_cast<uint8_t>(textColor), textOpaqueBg);
     }
   }
 }

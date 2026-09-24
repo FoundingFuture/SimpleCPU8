@@ -432,7 +432,7 @@ class Gpu : public ChainedDevice {
   bool textOpaqueBg = false;
 
   // Video mode. Graphics is the power-on mode. Text mode shows a full screen
-  // of characters read from a mapped region of data RAM.
+  // of characters read from a mapped region of data RAM, over the VRAM.
   int videoMode = gpu::MODE_GRAPHICS;
   int textBase = 0;         // data RAM offset of the character buffer
   bool textMapped = false;  // set once CMD_SET_TEXTMODE has run

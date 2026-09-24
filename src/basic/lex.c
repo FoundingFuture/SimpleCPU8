@@ -38,8 +38,16 @@ static unsigned char hexval(unsigned char c)
 
 void lx_start(char *text)
 {
+    lx_seek(text, 0);
+}
+
+/* Start reading part way along a line. NEXT uses it to pick a FOR's body
+ * up again without re-reading the FOR.
+ */
+void lx_seek(char *text, unsigned int pos)
+{
     lx_text = text;
-    lx_pos = 0;
+    lx_pos = pos;
     lx_next();
 }
 

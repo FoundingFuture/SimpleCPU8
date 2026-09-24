@@ -352,7 +352,7 @@ word HERE appears at column 10, row 5.
 `DEEK` and `DOKE` do the same for a pair of boxes at once, so a number up
 to 65535 fits. `DOKE 40000,1000` puts 3 in box 40000 and 232 in box
 40001, because 3 times 256 plus 232 is 1000. `DEEK(40000)` reads it back
-as 1000. You will not need them until the chapter on drawing.
+as 1000. You will not need them for a long while.
 
 ## Making decisions
 
@@ -439,10 +439,35 @@ down. `WAIT 30` pauses for 30 frames, which is half a second.
 50 PRINT "GO"
 ```
 
-Two habits keep `FOR` loops out of trouble on this machine. Put `FOR`
-and `NEXT` on lines of their own. And never start the line after a `FOR`
-with another `FOR`. A loop inside a loop works when a `PRINT` or any
-other instruction sits between the two `FOR` lines.
+A short loop fits on one line. The colon separates the instructions,
+as it did for `POKE`.
+
+```basic
+10 FOR I=1 TO 5: PRINT I;: NEXT I
+```
+
+```text
+12345
+```
+
+A loop can hold another loop. The inner one runs all the way through
+for every step of the outer one. Each `NEXT` closes the loop that was
+opened last.
+
+```basic
+10 FOR I=1 TO 3
+20 FOR J=1 TO 3
+30 PRINT I*J; " ";
+40 NEXT J
+50 PRINT
+60 NEXT I
+```
+
+```text
+1 2 3
+2 4 6
+3 6 9
+```
 
 `GOSUB` jumps to a line and remembers where it came from. `RETURN` goes
 back. That lets a piece of program be used from more than one place.
@@ -520,72 +545,30 @@ by 4, then add the blue. Red and green go from 0 to 7, blue from 0 to
 X runs from 0 on the left to 255 on the right. Y runs from 0 at the top
 to 255 at the bottom.
 
-There is a catch. The screen shows either the text or the picture, never
-both. While BASIC is talking to you it shows the text. The drawing words
-draw the picture behind it, and nothing changes on the screen. Type this
-and see for yourself:
+The picture sits behind the text. Both show at once, so a program can
+draw and print in the same run. Type this and see for yourself:
 
 ```basic
 10 PAPER 3
 20 COLOR 224
 30 MOVE 128,128
 40 CIRCLE 40
-50 PRINT POINT(128,128)
+50 COLOR 255
+60 MOVE 0,0
+70 DRAW 255,255
+80 PRINT POINT(100,128)
 ```
 
 ```text
 224
 ```
 
-The pixel in the middle is red, so the disc was drawn. It stays hidden.
-BASIC has no word to switch the screen over. A project can add one, in
-two lines of C, and call it from BASIC. Make a folder called `paint`
-with a folder `src` inside it, and put two files in `src`.
-
-The first is `src/gfx.c`:
-
-```c
-#include <gpu.h>
-
-void GRAPHICS(void)
-{
-    gpu_set_graphicsmode();
-}
-
-void TEXT(void)
-{
-    gpu_set_textmode(0xFA, 0xC0);
-}
-```
-
-The second is `src/autorun.bas`:
-
-```basic
-10 CALL GRAPHICS
-20 PAPER 3
-30 COLOR 224
-40 MOVE 128,128
-50 CIRCLE 40
-60 COLOR 255
-70 MOVE 0,0
-80 DRAW 255,255
-90 WAIT 300
-100 CALL TEXT
-110 PRINT "BACK"
-```
-
-Build and run it from the folder above `paint`:
-
-```bash
-build/release/src/tools/simplecpu-make paint
-build/release/src/vm/simplecpu --rom paint/build/paint.rom
-```
-
 A red disc on blue appears, with a white line from corner to corner.
-Five seconds later the text comes back and says `BACK`. `CALL` runs a
-piece of machine code by name. The build turns the name into a number
-before the program goes into the machine. The chapter on saving explains
-what the folder and `autorun.bas` mean.
+The listing stays readable on top. The pixel left of the middle is red,
+so `POINT` says 224. The middle itself is under the line, so it is white. The text is white, so a white paper hides it.
+
+`CLS` clears the text and paints the picture in the `PAPER` colour
+again. `PAPER` on its own repaints the picture and leaves the text.
 
 ## Reading keys
 
@@ -678,7 +661,7 @@ machine with the file and it is loaded and run:
 build/release/src/vm/simplecpu --basic hello.bas --run
 ```
 
-The third way is a project folder, which the drawing chapter used. A
+The third way is a project folder. A
 folder with a `src` folder holding `.bas` files is a BASIC project.
 `simplecpu-make` builds it into a cartridge in `build/`. A file called
 `autorun.bas` runs when the cartridge boots, so the cartridge is a
@@ -835,9 +818,9 @@ copy. That is how every game grows, one line at a time.
 BASIC reads every word of every line again each time round a loop,
 which is why the star falls slowly. The machine's C compiler turns a
 program into machine code once, before it runs. C also reaches the whole
-graphics chip, with sprites and sound. The drawing
-chapter used two lines of it. docs/design/c-language.md describes the
-dialect, and the C guide beside this one carries on from here.
+graphics chip, with sprites and sound. docs/design/c-language.md
+describes the dialect, and the C guide beside this one carries on from
+here.
 
 The system page at docs/basic-system-page.md lists every box BASIC keeps
 its own state in, from 0 to 31. Box 5 and box 6 came from there.
@@ -870,7 +853,7 @@ Statements, in a program or at the prompt:
 | `NEXT` | adds the step and goes back while I is in range |
 | `END` or `STOP` | stops the program |
 | `REM text` | a remark, ignored |
-| `CLS` | clears the text screen |
+| `CLS` | clears the text and paints the picture in the `PAPER` colour |
 | `WAIT n` | pauses n frames, 60 to a second |
 | `POKE a,v` | puts byte v in box a |
 | `DOKE a,v` | puts word v in boxes a and a+1, high byte first |

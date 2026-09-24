@@ -13,11 +13,15 @@ void key_push(unsigned char k)
     pushed = k;
 }
 
+/* The last key pressed is noted whichever path the key came by. A key the
+ * break check read and pushed back used to skip the note, so PEEK(7)
+ * stood still while INKEY$ was reading keys.
+ */
 unsigned char key_get(void)
 {
     unsigned char k;
-    if (pushed) { k = pushed; pushed = 0; return k; }
-    k = io_key();
+    if (pushed) { k = pushed; pushed = 0; }
+    else k = io_key();
     if (k && io_key_is_up(k) == 0) last_key = io_key_code(k);
     return k;
 }
@@ -44,6 +48,7 @@ unsigned char key_break(void)
     if (io_key_is_up(k)) return 0;
     c = io_key_code(k);
     if (c == K_BREAK || c == K_CTRL_C) return 1;
+    last_key = c;
     pushed = k;
     return 0;
 }
@@ -65,10 +70,22 @@ void term_init(void)
     while (io_key()) { }
 }
 
+/* The colour PAPER last set. Text mode shows the picture under the text,
+ * so CLS clears both, and the picture goes back to this colour.
+ */
+static unsigned char paper;
+
+void term_paper(unsigned char c)
+{
+    paper = c;
+    gpu_clear(c);
+}
+
 void term_cls(void)
 {
     unsigned int i;
     for (i = 0; i < COLS * ROWS; i++) poke(SCREEN + i, 32);
+    gpu_clear(paper);
     cx = 0;
     cy = 0;
 }
