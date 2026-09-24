@@ -65,6 +65,7 @@ void Ide::newScratchProject() {
   carriedProject_ = false;
   romPath_.clear();
   docs_.clear();
+  filesChanged_ = false;
   addDoc("main.asm", DEFAULT_SOURCE);
   docs_.back().dirty = false;
   activate(0);
@@ -85,6 +86,125 @@ Doc* Ide::activeDoc() { return active_ < docs_.size() ? &docs_[active_] : nullpt
 
 // The manual follows the document: a .bas opens the BASIC guide, a .c
 // the C guide, and so on. The Reference tab stays where the reader put it.
+void Ide::askRemove(const std::string& name, bool asset) {
+  removing_ = name;
+  removingAsset_ = asset;
+}
+
+namespace {
+
+// A file in a flat folder that is an asset rather than the project's
+// own: not a source, not the README, not a built ROM, not hidden.
+bool flatAsset(const fs::path& p) {
+  const std::string name = p.filename().string();
+  if (name.empty() || name[0] == '.') return false;
+  if (docKindOf(name) != DocKind::Other) return false;
+  const std::string ext = p.extension().string();
+  return name != "README.md" && ext != ".rom";
+}
+
+std::optional<std::vector<uint8_t>> readBytes(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  if (!in) return std::nullopt;
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(in), {});
+}
+
+}  // namespace
+
+std::vector<Ide::AssetEntry> Ide::assetList() const {
+  std::vector<AssetEntry> out;
+  if (!projectDir_.empty()) {
+    const project::Layout l = layout();
+    std::error_code ec;
+    for (const auto& e : fs::directory_iterator(l.assets, ec)) {
+      if (!e.is_regular_file(ec)) continue;
+      if (l.nested ? e.path().filename().string().rfind('.', 0) == 0 : !flatAsset(e.path())) continue;
+      out.push_back({e.path().filename().string(), e.file_size(ec)});
+    }
+  } else {
+    for (const auto& [name, bytes] : romFiles_) {
+      if (name.rfind("assets/", 0) == 0) out.push_back({name.substr(7), bytes.size()});
+    }
+  }
+  std::sort(out.begin(), out.end(), [](const AssetEntry& a, const AssetEntry& b) { return a.name < b.name; });
+  return out;
+}
+
+void Ide::addAsset(const std::string& path) {
+  const fs::path from(path);
+  const std::string name = from.filename().string();
+  for (const AssetEntry& a : assetList()) {
+    if (a.name == name) {
+      note(name + " is already an asset of the project: remove it first to replace it");
+      return;
+    }
+  }
+  if (docKindOf(name) != DocKind::Other) {
+    note(name + " is a source file: add it with the field under the file list");
+    return;
+  }
+  std::error_code ec;
+  if (!projectDir_.empty()) {
+    const fs::path dir = layout().assets;
+    fs::create_directories(dir, ec);
+    if (!fs::copy_file(from, dir / name, ec)) {
+      note("cannot copy " + path + (ec ? ": " + ec.message() : ""));
+      return;
+    }
+    note("added " + (dir / name).string());
+    return;
+  }
+  auto bytes = readBytes(from);
+  if (!bytes) {
+    note("cannot read " + path);
+    return;
+  }
+  romFiles_.push_back({"assets/" + name, std::move(*bytes)});
+  filesChanged_ = true;
+  note("added " + name + " to the project; the ROM carries it after the next save");
+}
+
+void Ide::removeAsset(const std::string& name) {
+  if (!projectDir_.empty()) {
+    const fs::path file = layout().assets / name;
+    std::error_code ec;
+    if (!fs::remove(file, ec)) {
+      note("cannot delete " + file.string() + (ec ? ": " + ec.message() : ""));
+      return;
+    }
+    note("deleted " + file.string());
+    return;
+  }
+  const auto it = std::find_if(romFiles_.begin(), romFiles_.end(),
+                               [&](const auto& f) { return f.first == "assets/" + name; });
+  if (it == romFiles_.end()) return;
+  romFiles_.erase(it);
+  filesChanged_ = true;
+  note(name + " left the project");
+}
+
+void Ide::removeDoc(const std::string& name) {
+  const auto it = std::find_if(docs_.begin(), docs_.end(), [&](const Doc& d) { return d.name == name; });
+  if (it == docs_.end()) return;
+  if (!projectDir_.empty()) {
+    const fs::path file = layout().sources / name;
+    std::error_code ec;
+    if (fs::exists(file, ec) && !fs::remove(file, ec)) {
+      note("cannot delete " + file.string() + (ec ? ": " + ec.message() : ""));
+      return;
+    }
+    note("deleted " + file.string());
+  } else {
+    note(name + " left the project");
+    filesChanged_ = true;
+  }
+  const size_t index = static_cast<size_t>(it - docs_.begin());
+  docs_.erase(it);
+  if (syncDoc_ == name) syncDoc_.clear();
+  if (active_ > index || active_ >= docs_.size()) active_ = docs_.empty() ? 0 : active_ - (active_ > 0 ? 1 : 0);
+  if (!docs_.empty()) activate(active_);
+}
+
 void Ide::activate(size_t index) {
   if (index >= docs_.size()) return;
   active_ = index;
@@ -118,6 +238,7 @@ void Ide::openProject(const std::string& dir) {
   carriedProject_ = false;
   romPath_.clear();
   docs_.clear();
+  filesChanged_ = false;
   syncDoc_.clear();
   for (const auto& entry : fs::directory_iterator(l.sources, ec)) {
     if (!entry.is_regular_file()) continue;
@@ -174,6 +295,7 @@ void Ide::openRomAsProject(const std::string& path) {
     if (k == "title" && !v.empty()) projectTitle_ = v;
   }
   docs_.clear();
+  filesChanged_ = false;
   syncDoc_.clear();
   const project::Carried carry = project::carried(*r.cartridge);
   if (!carry.sources.empty()) {
@@ -259,6 +381,7 @@ void Ide::saveProjectAs(const std::string& dir) {
   }
   romBase_.reset();
   carriedProject_ = false;
+  filesChanged_ = false;
   note("project saved in " + projectDir_);
 }
 
@@ -334,6 +457,7 @@ bool Ide::saveIntoRom() {
     return false;
   }
   for (Doc& d : docs_) d.dirty = false;
+  filesChanged_ = false;
   note("saved into " + romPath_ + " (" + std::to_string(bytes.size()) + " bytes)");
   return true;
 }
@@ -357,6 +481,7 @@ void Ide::saveProject() {
 }
 
 bool Ide::anyDirty() const {
+  if (filesChanged_) return true;
   for (const Doc& d : docs_) {
     if (d.dirty) return true;
   }
@@ -394,7 +519,10 @@ project::Built Ide::buildInMemory() {
   // builds the program again; a bare ROM keeps its program.
   Cartridge carrier;
   carrier.sources = romFiles_;
-  Assets assets = carriedProject_ ? project::loadersFrom(carrier, &notes) : project::loaders(layout(), &notes);
+  // A scratch project's assets live in memory too, so they come from the
+  // same list a carried project reads.
+  const bool inMemory = carriedProject_ || !romBase_;
+  Assets assets = inMemory ? project::loadersFrom(carrier, &notes) : project::loaders(layout(), &notes);
   project::Built built = project::buildSources(sources(), assets, project::Options{}, projectTitle_, "",
                                                carriedProject_ ? std::optional<Cartridge>{} : romBase_);
   built.notes.insert(built.notes.begin(), notes.begin(), notes.end());
@@ -610,11 +738,18 @@ void Ide::filesPane(const char* name, bool* open) {
   if (ImGui::SmallButton("Save")) saveProject();
   ImGui::SameLine();
   if (ImGui::SmallButton("Boot BASIC")) bootBasic();
+  ImGui::SameLine();
+  if (activeDoc() && ImGui::SmallButton("Remove")) askRemove(activeDoc()->name);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("remove the selected file from the project; a right click on a file does too");
   ImGui::Separator();
   for (size_t i = 0; i < docs_.size(); i++) {
     const Doc& d = docs_[i];
     const std::string label = d.name + (d.dirty ? " *" : "");
     if (ImGui::Selectable(label.c_str(), i == active_)) activate(i);
+    if (ImGui::BeginPopupContextItem()) {
+      if (ImGui::MenuItem(("Remove " + d.name + "...").c_str())) askRemove(d.name);
+      ImGui::EndPopup();
+    }
   }
   ImGui::Spacing();
   ImGui::SetNextItemWidth(-1.0f);
@@ -639,6 +774,31 @@ void Ide::filesPane(const char* name, bool* open) {
       note(n + ": a source is a .c, .h, .asm or .bas file, or microcode.txt");
     }
   }
+  // The assets: pictures, sounds and any file the sources name.
+  ImGui::Spacing();
+  ImGui::SeparatorText("Assets");
+  const std::vector<AssetEntry> assets = assetList();
+  if (assets.empty()) ImGui::TextDisabled("none yet");
+  for (const AssetEntry& a : assets) {
+    ImGui::PushID(a.name.c_str());
+    ImGui::Selectable(a.name.c_str());
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("%s, %ju bytes. C names it as __sprite(\"%s\", n), __image, __sample or __file; "
+                        "assembly as .image('%s'), .sample or .file.",
+                        a.name.c_str(), a.bytes, a.name.c_str(), a.name.c_str());
+    }
+    if (ImGui::BeginPopupContextItem()) {
+      if (ImGui::MenuItem(("Remove " + a.name + "...").c_str())) askRemove(a.name, true);
+      ImGui::EndPopup();
+    }
+    ImGui::PopID();
+  }
+  if (ImGui::SmallButton("Add asset...")) {
+    dialog_.open(FileDialog::Mode::OpenFile, "Add a file to the project's assets", fs::current_path(), {},
+                 [this](const fs::path& p) { addAsset(p.string()); });
+  }
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("copy a picture, a sound or any file into the project; a right click on an asset removes it");
+
   if (romBase_ && !carriedProject_) {
     ImGui::Spacing();
     ImGui::TextWrapped("The ROM carries no project. Its program is not a document and its listing is a disassembly.");

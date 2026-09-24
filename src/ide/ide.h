@@ -145,6 +145,30 @@ class Ide {
   // from Save and quit. romSaveConfirmed_ is "don't ask again" for the
   // session.
   void romSaveDialog();
+  // Removing a document asks first. In a folder project the file is
+  // deleted from the disk: the folder is the project, so a file left in
+  // src/ would still be built. In a ROM or scratch project the document
+  // leaves the project, and the ROM keeps it until the next save.
+  void askRemove(const std::string& name, bool asset = false);
+  void removeDialog();
+  void removeDoc(const std::string& name);
+  std::string removing_;  // the document the dialog asks about, or empty
+  // A ROM or scratch project gained or lost a file since it was saved.
+  // The documents left are not dirty, but the project is.
+  bool filesChanged_ = false;
+  bool removingAsset_ = false;  // the dialog asks about an asset, not a document
+
+  // Assets: pictures, sounds and any other file the sources name. A folder
+  // project keeps them in assets/, or beside the sources in the flat
+  // layout. A ROM or scratch project keeps them in memory as assets/name,
+  // and the ROM carries them.
+  struct AssetEntry {
+    std::string name;
+    uintmax_t bytes = 0;
+  };
+  std::vector<AssetEntry> assetList() const;
+  void addAsset(const std::string& path);
+  void removeAsset(const std::string& name);
   bool askRomSave_ = false;
   bool romSaveQuits_ = false;
   bool romSaveConfirmed_ = false;

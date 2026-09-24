@@ -87,7 +87,13 @@ window's and the machine's, average, worst second and best second.
 `--seconds N` ends a run by itself.
 
 In the IDE there is always a project. The Files pane lists its
-documents, the Editor shows one, and Build is `simplecpu-make` on the
+documents and, under them, its assets: pictures, sounds and any other file
+the sources name. Add asset copies a file in. Remove, or a right click,
+takes a document or an asset out, after asking. In a folder project that
+deletes the file, because the folder is the project and a file left there
+would still be built. In a ROM or scratch project the file leaves the
+project, and the ROM carries the change from the next save. The Editor
+shows one document, and Build is `simplecpu-make` on the
 folder: the ROM lands in `build/` and in the machine. The assembly the
 build made is in the Assembly pane, read only, so generated code can be
 read next to the C. Opening a `.c`, `.asm` or `.bas` file from the command

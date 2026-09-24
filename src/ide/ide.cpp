@@ -595,6 +595,7 @@ void Ide::frame() {
   if (!askSettings_) dialog_.draw();
   quitDialog();
   romSaveDialog();
+  removeDialog();
   settingsDialog();
 }
 
@@ -707,6 +708,9 @@ void Ide::menuBar() {
     ImGui::Separator();
     const std::string saveLabel = saveTarget();
     if (ImGui::MenuItem(saveLabel.c_str(), "Ctrl+S")) saveProject();
+    if (ImGui::MenuItem("Remove file from project...", nullptr, false, activeDoc() != nullptr)) {
+      askRemove(activeDoc()->name);
+    }
     if (ImGui::MenuItem("Save project as...")) {
       dialog_.open(FileDialog::Mode::OpenFolder, "Save the project as: pick or make its folder", startIn, {},
                    [this](const fs::path& p) { saveProjectAs(p.string()); });
@@ -858,6 +862,9 @@ void Ide::quitDialog() {
     for (const Doc& d : docs_) {
       if (d.dirty) ImGui::BulletText("%s", d.name.c_str());
     }
+    if (filesChanged_) {
+      ImGui::BulletText("files added to or removed from the project");
+    }
     ImGui::Spacing();
     if (ImGui::Button("Save and quit")) {
       if (projectDir_.empty() && !romPath_.empty()) {
@@ -899,6 +906,36 @@ void Ide::quitDialog() {
     }
     ImGui::EndPopup();
   }
+}
+
+void Ide::removeDialog() {
+  if (removing_.empty()) return;
+  ImGui::OpenPopup("Remove a file");
+  if (!ImGui::BeginPopupModal("Remove a file", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
+  if (!projectDir_.empty()) {
+    const fs::path file = (removingAsset_ ? layout().assets : layout().sources) / removing_;
+    ImGui::Text("Remove %s from the project?", removing_.c_str());
+    ImGui::Text("This deletes the file from the disk, and it cannot be undone:");
+    ImGui::TextDisabled("%s", file.string().c_str());
+  } else {
+    ImGui::Text("Remove %s from the project?", removing_.c_str());
+    ImGui::TextDisabled(romPath_.empty() ? "It is not saved anywhere yet, so its text is gone."
+                                         : "The ROM file keeps it until you save the project.");
+  }
+  ImGui::Spacing();
+  if (ImGui::Button(projectDir_.empty() ? "Remove" : "Delete the file")) {
+    const std::string name = removing_;
+    removing_.clear();
+    ImGui::CloseCurrentPopup();
+    if (removingAsset_) removeAsset(name);
+    else removeDoc(name);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel")) {
+    removing_.clear();
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
 }
 
 void Ide::romSaveDialog() {
