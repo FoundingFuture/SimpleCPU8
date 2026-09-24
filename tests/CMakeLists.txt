@@ -14,6 +14,7 @@ add_subdirectory(asm)
 add_subdirectory(assets)
 add_subdirectory(devices)
 add_subdirectory(cc)
+add_subdirectory(project)
 # sc8_vm links raylib, which the headless preset leaves out.
 if(SC8_BUILD_IDE)
   add_subdirectory(vm)

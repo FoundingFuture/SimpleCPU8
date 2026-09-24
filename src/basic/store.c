@@ -129,6 +129,20 @@ static void do_catalog(void)
     term_puts(textbuf);
 }
 
+/* A slot named AUTORUN runs at power on, so a ROM made from a BASIC
+ * project boots straight into its program. Nothing is said when there is
+ * no such slot: that is the plain interpreter starting up.
+ */
+void sto_autorun(void)
+{
+    sto_load(textbuf, "AUTORUN", TEXTMAX);
+    if (sto_status() != STO_OK) return;
+    ed_new();
+    enter_lines();
+    if (err) return;
+    rt_run();
+}
+
 /* Returns 1 when the text was one of the four commands, whether or not it
  * went well. The chain stops at the first link that knows the word.
  */

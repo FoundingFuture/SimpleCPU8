@@ -10,14 +10,21 @@
 //     README.md                  assets/ship.png  assets/song.mid
 //     mygame.rom                 build/mygame.rom
 //
-// Every .c file is compiled together, with every .h beside them reachable
-// by #include. Every .asm file is appended after the generated assembly,
-// in name order, so a driver sits at its .org slot in the same ROM. Every
-// .bas file becomes a slot in the ROM's BAS chunk, named after the file.
+// What the sources hold decides the kind of project. A .c file makes it a
+// C project: every .c is compiled together, with every .h beside them
+// reachable by #include, and every .asm is appended after the generated
+// assembly in name order, so a driver sits at its .org slot in the same
+// ROM. With no .c but a .bas, it is a BASIC project: the ROM is the
+// interpreter, with the .asm files appended as drivers, and every .bas
+// becomes a slot named after the file. A slot named AUTORUN runs at power
+// on. With .asm files alone, it is an assembly project. A microcode.txt
+// among the sources is the ROM's microcode set.
+//
 // An asset name resolves in assets/, then beside the sources. The title is
 // the first line of README.md when there is one, else the folder's name.
 //
-// simplecpu-make and the IDE's Build button both come here.
+// simplecpu-make and the IDE's Build button both come here, and so does
+// simplecpu-make new, which lays a fresh project out.
 #pragma once
 
 #include <filesystem>
@@ -49,11 +56,26 @@ Layout layoutOf(const std::filesystem::path& dir);
 Assets loaders(const Layout& layout, std::vector<std::string>* notes);
 
 struct Options {
-  std::string microcode = "@naive";  // @naive, @optimal or a set's text
+  // @naive, @optimal or a set's text. Empty means microcode.txt among the
+  // sources when there is one, else the kind's own default.
+  std::string microcode;
   std::vector<std::pair<std::string, std::string>> meta;
   std::map<std::string, std::string> defines;
   bool keepAsm = false;  // also write the generated assembly beside the ROM
 };
+
+enum class Kind { C, Basic, Assembly, Microcode };
+
+// Lay out a new project of a kind at dir, which must not exist yet or be
+// empty: the folders, a README, a .gitignore for build/ and a first
+// source that builds and runs. Microcode is an assembly project with the
+// naive set written out as microcode.txt. The files written come back, or
+// an error message.
+struct Created {
+  std::vector<std::filesystem::path> files;
+  std::string error;
+};
+Created create(const std::filesystem::path& dir, Kind kind);
 
 struct Built {
   std::optional<Cartridge> cartridge;  // nothing on an error

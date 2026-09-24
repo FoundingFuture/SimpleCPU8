@@ -183,6 +183,29 @@ void Ide::projectPane() {
   if (ImGui::SmallButton("Build and Run")) buildProject(true);
   ImGui::SameLine();
   ImGui::TextDisabled("every .c, .asm and .bas in the folder goes into one ROM in build/");
+  // A fresh project in the folder named above, of one of the four kinds,
+  // the way simplecpu-make new lays it out. It opens at once.
+  ImGui::TextDisabled("new project in that folder:");
+  const std::pair<const char*, project::Kind> KINDS[] = {
+      {"C", project::Kind::C}, {"BASIC", project::Kind::Basic},
+      {"Assembly", project::Kind::Assembly}, {"Microcode", project::Kind::Microcode}};
+  for (const auto& [label, kind] : KINDS) {
+    ImGui::SameLine();
+    if (ImGui::SmallButton(label)) {
+      if (projectDir_.empty()) {
+        note("type the folder for the new project first");
+      } else {
+        project::Created c = project::create(projectDir_, kind);
+        if (!c.error.empty()) {
+          note(c.error);
+        } else {
+          for (const fs::path& f : c.files) note("wrote " + f.string());
+          openProject(projectDir_);
+          buildProject(false);
+        }
+      }
+    }
+  }
 
   ImGui::BeginChild("##files", ImVec2(150.0f, -1.0f), ImGuiChildFlags_Borders);
   for (const std::string& f : projectFiles_) {

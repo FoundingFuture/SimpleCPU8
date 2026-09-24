@@ -131,3 +131,17 @@ TEST_CASE("the driver example answers !HELLO from a second PROG segment") {
   CHECK_MESSAGE(screen.find("THE DRIVER ANSWERED") != std::string::npos, screen);
 }
 #endif
+
+#if SC8_HAVE_BASIC
+TEST_CASE("a slot named AUTORUN runs at power on") {
+  std::vector<uint8_t> bytes(basicRom().begin(), basicRom().end());
+  CartridgeResult r = decodeCartridge(bytes);
+  REQUIRE(r.cartridge);
+  r.cartridge->basic.emplace_back("AUTORUN", "10 PRINT \"BOOTED INTO ME\"\n20 END\n");
+  Computer c;
+  c.setSeed(1);
+  c.insert(std::move(*r.cartridge));
+  runFrames(c, 60);
+  CHECK_MESSAGE(screenText(c.machine()).find("BOOTED INTO ME") != std::string::npos, screenText(c.machine()));
+}
+#endif

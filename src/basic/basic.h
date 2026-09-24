@@ -192,5 +192,6 @@ void bang_run(char *text);
 #define TEXTMAX  8192
 
 unsigned char sto_bang(char *text);
+void sto_autorun(void);
 
 #endif

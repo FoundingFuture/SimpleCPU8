@@ -49,8 +49,30 @@ writes `mygame/mygame.rom`. The larger one has `src/` for the sources,
 `assets/` for the pictures and sounds, and writes `build/mygame.rom`. A
 folder with a `src/` directory is the larger layout. examples/hello-c is
 the flat case and examples/bounce the larger one. The build makes every
-example that holds C this way. src/project is the code behind both
-`simplecpu-make` and the IDE.
+example that holds C or a `src/` folder this way. src/project is the code
+behind both `simplecpu-make` and the IDE.
+
+What the sources hold decides the kind. A `.c` makes a C project. A
+`.bas` with no `.c` makes a BASIC project: the ROM is the interpreter,
+every `.bas` is a slot named after the file, and a slot named `AUTORUN`
+runs at power on, so the ROM boots into the program. An `.asm` in a BASIC
+project is a driver appended to the interpreter. Only `.asm` files make
+an assembly project. A `microcode.txt` among the sources is the ROM's
+microcode set.
+
+`simplecpu-make new mygame --c` lays a project out, and so do `--basic`,
+`--assembly` and `--microcode`: the folders, a README, a `.gitignore`
+for `build/` and a first program that builds and runs. The IDE's Project
+tab has the same four buttons. The microcode kind starts from the naive
+set written out as `microcode.txt`, and its program shows what every
+instruction costs under that set and under the optimal one, side by side.
+The build counts the rows and writes the table into the ROM, so a changed
+row shows as a changed number at the next run. examples/cycles is that
+project.
+
+`simplecpu --rom game.rom` prints the frame rates when it ends: the
+window's and the machine's, average, worst second and best second.
+`--seconds N` ends a run by itself.
 
 In the IDE, the Edit level has a Project tab beside Source and BASIC. It
 opens a folder, lists its files, edits one at a time and has one Build

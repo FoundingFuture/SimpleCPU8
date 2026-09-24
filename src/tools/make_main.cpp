@@ -6,6 +6,8 @@
 //   simplecpu-make mygame/ -o out.rom
 //   simplecpu-make mygame/ --microcode optimal --title "My Game"
 //   simplecpu-make mygame/ --asm-out       also keep the generated .asm
+//   simplecpu-make new mygame --c          a fresh project: --c, --basic,
+//                                         --assembly or --microcode
 //
 // src/project/project.h says what a project folder holds and how it is
 // read. This file is the command line around it.
@@ -14,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
 
 #include "core/mcparse.h"
@@ -27,8 +30,40 @@ namespace {
 int usage() {
   std::fprintf(stderr,
                "usage: simplecpu-make <directory> [-o out.rom] [--microcode naive|optimal|<file>]\n"
-               "                      [--title T] [--author A] [-D NAME[=VALUE]] [--asm-out] [--listing]\n");
+               "                      [--title T] [--author A] [-D NAME[=VALUE]] [--asm-out] [--listing]\n"
+               "       simplecpu-make new <directory> --c | --basic | --assembly | --microcode\n");
   return 2;
+}
+
+// simplecpu-make new <dir> --kind: lay a project out and say what was made.
+int makeNew(int argc, char** argv) {
+  fs::path dir;
+  std::optional<project::Kind> kind;
+  for (int i = 2; i < argc; i++) {
+    const std::string a = argv[i];
+    if (a == "--c") kind = project::Kind::C;
+    else if (a == "--basic") kind = project::Kind::Basic;
+    else if (a == "--assembly" || a == "--asm") kind = project::Kind::Assembly;
+    else if (a == "--microcode") kind = project::Kind::Microcode;
+    else if (!a.empty() && a[0] == '-') {
+      std::fprintf(stderr, "unknown option %s\n", a.c_str());
+      return usage();
+    } else if (dir.empty()) dir = a;
+    else return usage();
+  }
+  if (dir.empty()) return usage();
+  if (!kind) {
+    std::fprintf(stderr, "say which kind: --c, --basic, --assembly or --microcode\n");
+    return usage();
+  }
+  project::Created c = project::create(dir, *kind);
+  if (!c.error.empty()) {
+    std::fprintf(stderr, "%s\n", c.error.c_str());
+    return 1;
+  }
+  for (const fs::path& f : c.files) std::printf("wrote %s\n", f.string().c_str());
+  std::printf("build it with: simplecpu-make %s\n", dir.string().c_str());
+  return 0;
 }
 
 std::optional<std::string> readText(const fs::path& p) {
@@ -40,6 +75,7 @@ std::optional<std::string> readText(const fs::path& p) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc >= 2 && std::string(argv[1]) == "new") return makeNew(argc, argv);
   fs::path dir;
   fs::path out;
   project::Options opts;

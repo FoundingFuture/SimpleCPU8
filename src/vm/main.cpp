@@ -13,6 +13,8 @@
 //   simplecpu --rom game.rom --no-crt      the plain scaled picture
 //   simplecpu --rom game.rom --scale 3     a window at 3 x 256 instead of the
 //                                          whole screen
+//   simplecpu --rom game.rom --seconds 10   quit after ten seconds, with the
+//                                          frame rates printed as always
 //   simplecpu --rom game.rom --screenshot shot.png
 //                                          save the window after one second and quit
 //
@@ -53,7 +55,7 @@ namespace {
 int usage() {
   std::fprintf(stderr,
                "usage: simplecpu --rom FILE.rom [--fps N | --max] [--microcode naive|optimal]\n"
-               "                 [--crt S | --no-crt] [--scale N] [--window | --fullscreen] [--title T]\n"
+               "                 [--crt S | --no-crt] [--scale N] [--window | --fullscreen] [--title T] [--seconds S]\n"
                "       simplecpu --basic [FILE.bas [--run]]\n"
                "       ... [--type TEXT] [--screenshot FILE.png]\n");
   return 2;
@@ -96,7 +98,8 @@ int main(int argc, char** argv) {
   std::string romPath, basicPath, microcode, title, screenshot, typedExtra;
   bool basic = false, maxSpeed = false, runBasic = false;
   int fps = 60, scale = 3;
-  int fullscreen = -1;  // -1 decides by what runs: a ROM fills the screen
+  int fullscreen = -1;
+  double seconds = 0.0;  // quit after this long, 0 for never  // -1 decides by what runs: a ROM fills the screen
   DisplaySettings display;
 
   for (int i = 1; i < argc; i++) {
@@ -138,6 +141,7 @@ int main(int argc, char** argv) {
     else if (a == "--fullscreen") fullscreen = 1;
     else if (a == "--title") title = next();
     else if (a == "--screenshot") screenshot = next();
+    else if (a == "--seconds") seconds = std::stod(next());
     else return usage();
   }
   if (romPath.empty() && !basic) return usage();
@@ -221,7 +225,30 @@ int main(int argc, char** argv) {
 
     double owed = 0.0;
     float strength = 0.5f;
+    // Frame rates, reported when the run ends. Two of them: the host's,
+    // which is how smoothly the window drew, and GPU_FRAME's, which is
+    // what a program syncing on that port got and says whether the
+    // emulation kept up with the sixty a second it owes.
+    // Counted per wall clock second, so the minimum and the maximum are
+    // the worst and the best second.
+    struct Rate {
+      long total = 0;
+      long thisSecond = 0;
+      long minSecond = -1;
+      long maxSecond = -1;
+      void close() {
+        if (minSecond < 0 || thisSecond < minSecond) minSecond = thisSecond;
+        if (thisSecond > maxSecond) maxSecond = thisSecond;
+        thisSecond = 0;
+      }
+    };
+    Rate hostRate;
+    Rate machineRate;
+    const double started = GetTime();
+    double secondEnds = started + 1.0;
+    const uint64_t firstFrame = computer.frameCounter();
     while (!WindowShouldClose()) {
+      if (seconds > 0.0 && GetTime() - started >= seconds) break;
       // One and a half seconds of wall clock, so the machine has run a
       // while whatever the host's frame rate is.
       if (!screenshot.empty() && GetTime() > 1.5) {
@@ -260,6 +287,16 @@ int main(int argc, char** argv) {
           if (done == 0) break;  // nothing advanced: avoid a busy spin
         }
       }
+      hostRate.total++;
+      hostRate.thisSecond++;
+      const long machineFrames = static_cast<long>(computer.frameCounter() - firstFrame);
+      machineRate.thisSecond += machineFrames - machineRate.total;
+      machineRate.total = machineFrames;
+      if (GetTime() >= secondEnds) {
+        hostRate.close();
+        machineRate.close();
+        secondEnds += 1.0;
+      }
       // The chip renders on its own clock, so a tune plays on while the CPU
       // sits halted.
       computer.pumpAudio(audio);
@@ -277,6 +314,16 @@ int main(int argc, char** argv) {
         DrawText(text.c_str(), 12, GetScreenHeight() - 28, 20, RAYWHITE);
       }
       EndDrawing();
+    }
+    const double ran = GetTime() - started;
+    if (screenshot.empty() && ran > 0.0) {
+      auto line = [&](const char* what, const Rate& r) {
+        std::printf("%s: %.1f fps average", what, static_cast<double>(r.total) / ran);
+        if (r.minSecond >= 0) std::printf(", %ld min, %ld max", r.minSecond, r.maxSecond);
+        std::printf(" (%ld frames in %.1f s)\n", r.total, ran);
+      };
+      line("window", hostRate);
+      line("GPU_FRAME", machineRate);
     }
   }
 

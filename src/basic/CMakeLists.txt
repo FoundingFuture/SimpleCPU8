@@ -42,7 +42,17 @@ add_custom_command(
   DEPENDS "${SC8_BASIC_ROM}" "${CMAKE_SOURCE_DIR}/cmake/EmbedBinary.cmake"
   COMMENT "Embedding basic.rom")
 
-add_library(sc8_basic STATIC basic_rom.cpp program.cpp "${SC8_BASIC_DATA_H}")
+# The assembly is embedded as well, so a project that adds a driver to
+# BASIC can assemble the interpreter and the driver into one ROM.
+set(SC8_BASIC_ASM_H "${CMAKE_CURRENT_BINARY_DIR}/basic_asm_data.h")
+add_custom_command(
+  OUTPUT "${SC8_BASIC_ASM_H}"
+  COMMAND ${CMAKE_COMMAND} -DINPUT="${SC8_BASIC_ASM}" -DOUTPUT="${SC8_BASIC_ASM_H}"
+          -DNAME=BASIC_ASM -P "${CMAKE_SOURCE_DIR}/cmake/EmbedText.cmake"
+  DEPENDS "${SC8_BASIC_ASM}" "${CMAKE_SOURCE_DIR}/cmake/EmbedText.cmake"
+  COMMENT "Embedding basic.asm")
+
+add_library(sc8_basic STATIC basic_rom.cpp program.cpp "${SC8_BASIC_DATA_H}" "${SC8_BASIC_ASM_H}")
 target_include_directories(sc8_basic
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/.."
   PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

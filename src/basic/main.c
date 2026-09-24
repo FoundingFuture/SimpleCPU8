@@ -16,6 +16,7 @@ int main(void)
     term_nl();
     term_puts("READY");
     term_nl();
+    sto_autorun();
 
     for (;;) {
         term_putc(62);
