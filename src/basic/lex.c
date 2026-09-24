@@ -23,6 +23,19 @@ static unsigned char isalpha(unsigned char c)
     return c >= 65 && c <= 90;
 }
 
+static unsigned char ishex(unsigned char c)
+{
+    c = upper(c);
+    return isdig(c) || (c >= 65 && c <= 70);
+}
+
+static unsigned char hexval(unsigned char c)
+{
+    c = upper(c);
+    if (c >= 65) return c - 55;
+    return c - 48;
+}
+
 void lx_start(char *text)
 {
     lx_text = text;
@@ -45,6 +58,22 @@ void lx_next(void)
         lx_num = 0;
         while (isdig(lx_text[lx_pos])) {
             lx_num = lx_num * 10 + (lx_text[lx_pos] - 48);
+            lx_pos = lx_pos + 1;
+        }
+        lx_tok = T_NUM;
+        lx_len = 0;
+        return;
+    }
+
+    /* A hex number, $F000, the way an address is written in a listing. The
+     * dollar after a name belongs to the name and is taken below, so a
+     * dollar seen here starts a number. Sixteen bits wrap, as decimal does.
+     */
+    if (c == 36 && ishex(lx_text[lx_pos + 1])) {
+        lx_num = 0;
+        lx_pos = lx_pos + 1;
+        while (ishex(lx_text[lx_pos])) {
+            lx_num = (lx_num << 4) | hexval(lx_text[lx_pos]);
             lx_pos = lx_pos + 1;
         }
         lx_tok = T_NUM;

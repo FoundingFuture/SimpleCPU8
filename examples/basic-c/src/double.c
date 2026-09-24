@@ -1,4 +1,4 @@
-/* DOUBLE: called from BASIC with JSR DOUBLE. Doubles the variable A.
+/* DOUBLE: called from BASIC with CALL DOUBLE. Doubles the variable A.
  *
  * Named the way BASIC calls it. The count of calls lives in a global, to
  * show that a routine BASIC reaches keeps its state between calls.

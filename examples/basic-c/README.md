@@ -7,14 +7,14 @@ and calls the C and the assembly by name.
 
 ```basic
 20 A = 21
-30 JSR DOUBLE
+30 CALL DOUBLE
 40 PRINT A
-50 JSR ANSWER
+50 CALL ANSWER
 60 PRINT PEEK(4)
 ```
 
-`JSR DOUBLE` calls the C function of that name, which doubles BASIC's
-variable A through `<basicvars.h>`. `JSR ANSWER` calls the assembly
+`CALL DOUBLE` calls the C function of that name, which doubles BASIC's
+variable A through `<basicvars.h>`. `CALL ANSWER` calls the assembly
 routine, and PEEK(4) reads the A register it came back with. The build
 turns each name into the label's instruction slot before the program goes
 into the ROM. LIST shows the numbers.

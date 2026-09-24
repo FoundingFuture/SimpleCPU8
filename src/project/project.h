@@ -19,8 +19,8 @@
 // becomes a slot named after the file. A slot named AUTORUN runs at power
 // on. With .bas and .c together, the ROM is one C program: the
 // interpreter's own sources compiled with the user's, main being the
-// interpreter's, so BASIC boots and calls the C by name with JSR. The
-// builder resolves JSR name and JMP name in a .bas to the label's slot.
+// interpreter's, so BASIC boots and calls the C by name with CALL. The
+// builder resolves CALL name and JMP name in a .bas to the label's slot.
 // With .asm files alone, it is an assembly project. A microcode.txt
 // among the sources is the ROM's microcode set.
 //

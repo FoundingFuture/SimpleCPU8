@@ -234,7 +234,7 @@ Merged merge(const std::vector<SourceFile>& sources, const Resolve& resolve, con
       if (f.body && f.name == "main" && opts.keepAllFrom.count(u.file)) {
         throw CcError(f.pos.file, f.pos.line,
                       "main belongs to the interpreter in a project with BASIC. Give this function another "
-                      "name and call it from BASIC with JSR.");
+                      "name and call it from BASIC with CALL.");
       }
       const std::string name = rename(ui, f.name);
       const FuncDecl* prev = m.funcs.get(name);

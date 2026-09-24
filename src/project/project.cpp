@@ -72,7 +72,7 @@ fs::path assetPath(const Layout& l, std::string_view name) {
   return l.sources / fs::path(name);
 }
 
-// JSR name and JMP name in a BASIC line, name being an identifier rather
+// CALL name, JSR name and JMP name in a BASIC line, name being an identifier rather
 // than a number, resolved to the instruction slot of that code label. The
 // interpreter knows only numbers, so the text that reaches the ROM holds
 // the slot. A one letter name, or a letter and a digit, is a BASIC
@@ -100,7 +100,7 @@ std::string resolveLabels(const std::string& text, const std::map<std::string, L
     std::string line = text.substr(at, nl - at);
     lineNo++;
     at = nl + 1;
-    // Walk the line: skip strings, stop at REM, rewrite after JSR and JMP.
+    // Walk the line: skip strings, stop at REM, rewrite after CALL, JSR and JMP.
     std::string rewritten;
     size_t i = 0;
     bool quoted = false;
@@ -127,7 +127,7 @@ std::string resolveLabels(const std::string& text, const std::map<std::string, L
         rewritten += line.substr(i);
         break;
       }
-      if (upper != "JSR" && upper != "JMP") continue;
+      if (upper != "CALL" && upper != "JSR" && upper != "JMP") continue;
       size_t j = i;
       while (j < line.size() && line[j] == ' ') j++;
       if (j >= line.size() || !(line[j] == '_' || std::isalpha(static_cast<unsigned char>(line[j])))) continue;
@@ -267,7 +267,7 @@ Built build(const Layout& layout, const Options& opts) {
   const bool basicProject = cFiles.empty() && !basFiles.empty();
   // BASIC and C together: one program, the interpreter's sources and the
   // user's compiled as one. The .bas files are slots as in a BASIC
-  // project, and BASIC calls the C by name with JSR.
+  // project, and BASIC calls the C by name with CALL.
   const bool mixedProject = !cFiles.empty() && !basFiles.empty();
   if (cFiles.empty() && asmFiles.empty() && basFiles.empty()) {
     b.errors.push_back(layout.sources.string() + " holds no .c, .asm or .bas file");
@@ -410,7 +410,7 @@ Built build(const Layout& layout, const Options& opts) {
       const std::string resolved = resolveLabels(*t, a.labels, unknown);
       for (const LabelError& e : unknown) {
         b.errors.push_back(p.string() + ":" + std::to_string(e.line) + ": " + e.name +
-                           " is not a label in this project. JSR and JMP take a slot number or the name of a C "
+                           " is not a label in this project. CALL and JMP take a slot number or the name of a C "
                            "function or an assembly label.");
       }
       c.basic.emplace_back(slotNameFor(p), resolved);

@@ -606,7 +606,7 @@ unsigned char catalog(char *buf, unsigned int room) {
 const char* const BASICVARS_H = R"(/* basicvars.h. BASIC's variables, for a C routine that BASIC calls.
  *
  * A project that holds .bas and .c files is one program: the interpreter
- * and the C together. BASIC calls a C function by name, JSR DOUBLE, and
+ * and the C together. BASIC calls a C function by name, CALL DOUBLE, and
  * the function reads and writes the integer variables A to Z here. The
  * letter may be in either case. The digit forms, A0 to A9, stay BASIC's.
  *

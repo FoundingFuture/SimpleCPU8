@@ -46,7 +46,7 @@ struct CcOptions {
   const Assets* assets = nullptr;
   // Files whose public functions are roots of the reachability pass, so
   // they survive when nothing in the program calls them. A host such as
-  // BASIC reaches them by instruction slot, with JSR. main belongs to the
+  // BASIC reaches them by instruction slot, with CALL. main belongs to the
   // host, so a main in one of these files is refused.
   std::set<std::string> keepAllFrom;
 };

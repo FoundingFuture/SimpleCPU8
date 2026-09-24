@@ -304,16 +304,17 @@ static unsigned char statement(void)
             return 1;
         }
     }
-    /* JSR n calls the routine at instruction slot n and parks the A it
+    /* CALL n calls the routine at instruction slot n and parks the A it
      * came back with at SYS_RESULT, the way the bang dispatcher does, so
-     * PEEK(4) reads it. JMP n goes there and never comes back. The slot is
+     * PEEK(4) reads it. JSR is the same word, spelled the way the machine
+     * spells it. JMP n goes there and never comes back. The slot is
      * parked at SYS_CALL first, because inline assembly cannot name a C
      * local. The frame pointer is put back from __sp after the call, as
      * bang.c does. A name in place of the number is what a project build
      * resolves to a slot before the program reaches the ROM. Here it is a
      * syntax error, the way any unknown word in an expression is.
      */
-    if (lx_is("JSR")) {
+    if (lx_is("CALL") || lx_is("JSR")) {
         lx_next();
         {
             int n;

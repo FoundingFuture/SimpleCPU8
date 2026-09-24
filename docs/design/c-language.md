@@ -120,7 +120,7 @@ the arrows and the keyboard: `left`, `fire`, `key`, `waitkey`. `math.h` is
 `sqrt`, `sin`, `cos`, `atan2`, `pow` and the rest on `double`, run by the
 coprocessor. `disk.h` is `save`, `load`, `erase` and `catalog` on the named
 files BASIC uses. `basicvars.h` is `basic_get` and `basic_set` on BASIC's
-integer variables A to Z, for a C function that BASIC calls with `JSR` in
+integer variables A to Z, for a C function that BASIC calls with `CALL` in
 a project that holds both. The interpreter's own header is `"basic.h"`,
 included with quotes, and in such a project a C file may include it too.
 
