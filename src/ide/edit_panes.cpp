@@ -595,43 +595,68 @@ void inputRefPage() {
 
 }  // namespace
 
-// The manual: a filter box, the list of pages on the left and the page on
-// the right. Typing a prefix filters the mnemonics, as the browser did.
+// The manual: a row of tabs, one per guide, then a Reference tab. That
+// tab holds the instruction pages and the device references. It keeps
+// its own filter box, the list of pages on the left and the page on the
+// right. Typing a prefix filters the mnemonics, as the browser did.
+// manualTab_ selects a tab from elsewhere, for the guide of an open
+// file. The tabs stay, so the person can always pick another.
 void Ide::manualPane() {
   ImGui::Begin("Manual");
-  ImGui::SetNextItemWidth(-1.0f);
-  panes::inputLine("##filter", manualFilter_, "filter: type the start of a mnemonic");
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("type the start of a mnemonic to filter the list");
-  const auto& pages = manual::instructionPages();
-  ImGui::BeginChild("list", ImVec2(150, 0), ImGuiChildFlags_Borders);
-  ImGui::TextDisabled("Instructions");
-  for (const manual::InstrPage& p : pages) {
-    if (!manualFilter_.empty() && !prefix(p.mnemonic, manualFilter_)) continue;
-    if (ImGui::Selectable(p.mnemonic.c_str(), manualPage_ == p.mnemonic)) manualPage_ = p.mnemonic;
-  }
-  ImGui::Spacing();
-  ImGui::TextDisabled("Devices");
-  for (const RefPage& r : REF_PAGES) {
-    if (!manualFilter_.empty() && !prefix(r.title, manualFilter_)) continue;
-    if (ImGui::Selectable(r.title, manualPage_ == r.id)) manualPage_ = r.id;
-  }
-  ImGui::EndChild();
-  ImGui::SameLine();
-  ImGui::BeginChild("page", ImVec2(0, 0), ImGuiChildFlags_Borders);
-  bool shown = false;
-  for (const manual::InstrPage& p : pages) {
-    if (p.mnemonic == manualPage_) {
-      instrPage(p, computer_);
-      shown = true;
+  if (ImGui::BeginTabBar("manualtabs")) {
+    static const struct { const char* label; Guide guide; } GUIDE_TABS[] = {
+        {"BASIC", Guide::Basic}, {"C", Guide::C}, {"Assembly", Guide::Assembly}, {"Microcode", Guide::Microcode}};
+    for (int i = 0; i < GUIDE_COUNT; i++) {
+      const ImGuiTabItemFlags flags = manualTab_ == i ? ImGuiTabItemFlags_SetSelected : 0;
+      if (ImGui::BeginTabItem(GUIDE_TABS[i].label, nullptr, flags)) {
+        if (guideView_.guide != GUIDE_TABS[i].guide) {
+          guideView_.guide = GUIDE_TABS[i].guide;
+          guideView_.chapter = -1;
+        }
+        drawGuide(guideView_);
+        ImGui::EndTabItem();
+      }
     }
+    const ImGuiTabItemFlags refFlags = manualTab_ == GUIDE_COUNT ? ImGuiTabItemFlags_SetSelected : 0;
+    if (ImGui::BeginTabItem("Reference", nullptr, refFlags)) {
+      ImGui::SetNextItemWidth(-1.0f);
+      panes::inputLine("##filter", manualFilter_, "filter: type the start of a mnemonic");
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("type the start of a mnemonic to filter the list");
+      const auto& pages = manual::instructionPages();
+      ImGui::BeginChild("list", ImVec2(150, 0), ImGuiChildFlags_Borders);
+      ImGui::TextDisabled("Instructions");
+      for (const manual::InstrPage& p : pages) {
+        if (!manualFilter_.empty() && !prefix(p.mnemonic, manualFilter_)) continue;
+        if (ImGui::Selectable(p.mnemonic.c_str(), manualPage_ == p.mnemonic)) manualPage_ = p.mnemonic;
+      }
+      ImGui::Spacing();
+      ImGui::TextDisabled("Devices");
+      for (const RefPage& r : REF_PAGES) {
+        if (!manualFilter_.empty() && !prefix(r.title, manualFilter_)) continue;
+        if (ImGui::Selectable(r.title, manualPage_ == r.id)) manualPage_ = r.id;
+      }
+      ImGui::EndChild();
+      ImGui::SameLine();
+      ImGui::BeginChild("page", ImVec2(0, 0), ImGuiChildFlags_Borders);
+      bool shown = false;
+      for (const manual::InstrPage& p : pages) {
+        if (p.mnemonic == manualPage_) {
+          instrPage(p, computer_);
+          shown = true;
+        }
+      }
+      if (!shown) {
+        if (manualPage_ == "gpuref") gpuRefPage();
+        else if (manualPage_ == "audio") audioRefPage();
+        else if (manualPage_ == "acpref") acpRefPage();
+        else if (manualPage_ == "input") inputRefPage();
+      }
+      ImGui::EndChild();
+      ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
   }
-  if (!shown) {
-    if (manualPage_ == "gpuref") gpuRefPage();
-    else if (manualPage_ == "audio") audioRefPage();
-    else if (manualPage_ == "acpref") acpRefPage();
-    else if (manualPage_ == "input") inputRefPage();
-  }
-  ImGui::EndChild();
+  manualTab_ = -1;
   ImGui::End();
 }
 

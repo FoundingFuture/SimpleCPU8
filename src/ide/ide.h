@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "asm/asm.h"
+#include "ide/guide.h"
 #include "vm/audio.h"
 #include "project/project.h"
 #include "vm/computer.h"
@@ -214,6 +215,11 @@ class Ide {
   // walks the current instruction's rows, fetch first. On, it browses
   // every section of the set.
   bool mcBrowse_ = false;
+
+  // The Manual pane's guide tab: which guide, its filter and its scroll.
+  // Set guideView_.guide to open a guide from elsewhere.
+  GuideView guideView_;
+  int manualTab_ = -1;  // a tab to select next frame, -1 for none
 };
 
 }  // namespace sc8
