@@ -517,7 +517,10 @@ void Ide::frame() {
       sidePane();
       break;
   }
-  dialog_.draw();
+  // A folder dialog opened from Preferences is drawn inside that popup,
+  // so the two modals stack. Drawn here as well, it would open at the top
+  // level and close Preferences, and the two would close each other.
+  if (!askSettings_) dialog_.draw();
   quitDialog();
   settingsDialog();
 }
@@ -617,7 +620,8 @@ void Ide::menuBar() {
                    {".c", ".h", ".asm", ".bas", ".txt"}, [this](const fs::path& p) { open(p.string()); });
     }
     ImGui::Separator();
-    if (ImGui::MenuItem("Save project", "Ctrl+S")) saveProject();
+    const std::string saveLabel = saveTarget();
+    if (ImGui::MenuItem(saveLabel.c_str(), "Ctrl+S")) saveProject();
     if (ImGui::MenuItem("Save project as...")) {
       dialog_.open(FileDialog::Mode::OpenFolder, "Save the project as: pick or make its folder", startIn, {},
                    [this](const fs::path& p) { saveProjectAs(p.string()); });

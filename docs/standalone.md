@@ -300,7 +300,10 @@ again with the RAM image reloaded. Power off blanks the screen until
 Power on.
 
 Save is the whole project: every changed document into its folder. A
-project with no folder yet is asked for one. Quitting with unsaved
+project opened from a ROM saves into that ROM. The documents are built
+and the file is written again with the project inside. A build error
+leaves the ROM as it was. Save project as writes the project to a folder
+instead. The scratch project is asked for a folder. Quitting with unsaved
 documents asks: save and quit, quit without saving, or stay. Opening and saving go through a file dialog of the IDE's
 own. It walks folders and can make a new folder on the way.
 

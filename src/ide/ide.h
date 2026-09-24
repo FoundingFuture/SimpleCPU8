@@ -117,6 +117,14 @@ class Ide {
   void saveDoc(Doc& doc);
   void saveAll();
   void saveProject();
+  // A project opened from a ROM saves into that ROM: the documents are
+  // built, and the ROM file is written again with the project inside.
+  bool saveIntoRom();
+  // The Save menu item's label: into the folder, the ROM, or a new folder.
+  std::string saveTarget() const;
+  // Build the documents in memory, as a ROM project or the scratch
+  // project does.
+  project::Built buildInMemory();
   bool anyDirty() const;
   void activate(size_t index);
   Doc* activeDoc();

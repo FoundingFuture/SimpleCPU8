@@ -276,7 +276,41 @@ void Ide::saveAll() {
 // Save is the whole project: every changed document into the folder. A
 // project with no folder yet asks for one first, and every document
 // goes there.
+std::string Ide::saveTarget() const {
+  if (!projectDir_.empty()) return "Save project";
+  if (!romPath_.empty()) return "Save into " + fs::path(romPath_).filename().string();
+  return "Save project...";
+}
+
+// The ROM is the project in one file, so saving writes the ROM again from
+// the documents. A build error leaves the file as it was and the
+// documents unsaved. The machine keeps running what it runs: Build puts
+// the new ROM in.
+bool Ide::saveIntoRom() {
+  project::Built built = buildInMemory();
+  for (const std::string& n : built.notes) note(n);
+  for (const std::string& e : built.errors) note(e);
+  if (!built.cartridge) {
+    note("not saved: " + fs::path(romPath_).filename().string() + " is left as it was until the build succeeds");
+    return false;
+  }
+  const std::vector<uint8_t> bytes = encodeCartridge(*built.cartridge);
+  std::ofstream o(romPath_, std::ios::binary);
+  o.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  if (!o) {
+    note("cannot write " + romPath_);
+    return false;
+  }
+  for (Doc& d : docs_) d.dirty = false;
+  note("saved into " + romPath_ + " (" + std::to_string(bytes.size()) + " bytes)");
+  return true;
+}
+
 void Ide::saveProject() {
+  if (projectDir_.empty() && !romPath_.empty()) {
+    saveIntoRom();
+    return;
+  }
   if (projectDir_.empty()) {
     const fs::path startIn = !settings_.projectsDir.empty() && fs::is_directory(settings_.projectsDir)
                                  ? fs::path(settings_.projectsDir)
@@ -312,22 +346,31 @@ void Ide::buildProject(bool run) {
     built = std::move(w.built);
     if (built.cartridge) note("wrote " + w.rom.string());
   } else {
-    std::vector<std::string> notes;
-    // A carried project reads its pictures and sounds from the ROM and
-    // builds the program again; a bare ROM keeps its program.
-    Cartridge carrier;
-    carrier.sources = romFiles_;
-    Assets assets = carriedProject_ ? project::loadersFrom(carrier, &notes) : project::loaders(layout(), &notes);
-    built = project::buildSources(sources(), assets, o, projectTitle_, "",
-                                  carriedProject_ ? std::optional<Cartridge>{} : romBase_);
-    built.notes.insert(built.notes.begin(), notes.begin(), notes.end());
-    if (built.cartridge) project::embed(*built.cartridge, sources(), romFiles_);
+    built = buildInMemory();
   }
   for (const std::string& n : built.notes) note(n);
   for (const std::string& e : built.errors) note(e);
   if (!built.cartridge) return;
   insertBuilt(built, projectTitle_);
   if (run) setRunning(true);
+}
+
+project::Built Ide::buildInMemory() {
+  std::vector<std::string> notes;
+  // A carried project reads its pictures and sounds from the ROM and
+  // builds the program again; a bare ROM keeps its program.
+  Cartridge carrier;
+  carrier.sources = romFiles_;
+  Assets assets = carriedProject_ ? project::loadersFrom(carrier, &notes) : project::loaders(layout(), &notes);
+  project::Built built = project::buildSources(sources(), assets, project::Options{}, projectTitle_, "",
+                                               carriedProject_ ? std::optional<Cartridge>{} : romBase_);
+  built.notes.insert(built.notes.begin(), notes.begin(), notes.end());
+  // A ROM without a project keeps its program, and its slots and
+  // microcode are not a project that builds on its own. Carried in the
+  // SRC chunk, they would open next time as one without the program.
+  const bool bareRom = romBase_.has_value() && !carriedProject_;
+  if (built.cartridge && !bareRom) project::embed(*built.cartridge, sources(), romFiles_);
+  return built;
 }
 
 void Ide::insertBuilt(project::Built& built, const std::string& what) {
@@ -550,7 +593,8 @@ void Ide::filesPane() {
     ImGui::TextWrapped("The ROM carries no project. Its program is not a document and its listing is a disassembly.");
   } else if (carriedProject_) {
     ImGui::Spacing();
-    ImGui::TextWrapped("The project came out of the ROM. Save project as writes it to a folder.");
+    ImGui::TextWrapped("The project came out of the ROM. Save writes it back into the ROM file. "
+                       "Save project as writes it to a folder.");
   }
   ImGui::End();
 }
