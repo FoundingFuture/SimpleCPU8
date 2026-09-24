@@ -669,9 +669,30 @@ TEST_SUITE("the ROM") {
 
   TEST_CASE("refuses what is not a ROM") {
     CHECK(!decodeCartridge({1, 2, 3}).cartridge);
-    std::vector<uint8_t> bytes = encodeCartridge(Cartridge{});
+    std::vector<uint8_t> bytes = encodeCartridge(Cartridge{}, false);
     bytes.pop_back();
     CHECK(!decodeCartridge(bytes).cartridge);
+    // A compressed one cut in half does not unpack.
+    std::vector<uint8_t> packed = encodeCartridge(Cartridge{});
+    packed.resize(packed.size() / 2);
+    CHECK(!decodeCartridge(packed).cartridge);
+  }
+
+  TEST_CASE("a ROM is compressed on disk and comes back the same") {
+    Cartridge c;
+    c.program = {{0x01, 0}};
+    c.microcode = "@naive";
+    c.meta = {{"title", "Packed"}};
+    c.sources = {{"main.asm", std::vector<uint8_t>(4000, 'A')}, {"assets/x.bin", {1, 2, 3}}};
+    const std::vector<uint8_t> packed = encodeCartridge(c);
+    const std::vector<uint8_t> plain = encodeCartridge(c, false);
+    CHECK(packed.size() < plain.size() / 4);
+    CartridgeResult r = decodeCartridge(packed);
+    REQUIRE(r.cartridge);
+    CHECK(*r.cartridge == c);
+    CartridgeResult p = decodeCartridge(plain);
+    REQUIRE(p.cartridge);
+    CHECK(*p.cartridge == c);
   }
 }
 
@@ -709,7 +730,7 @@ TEST_SUITE("program layout by slot") {
   TEST_CASE("the ROM keeps the segments and the gaps between them") {
     Assembled a = ok("        JSR handler\n        HLT\n.org $200\nhandler: RET\n.org $300\nother:   RET");
     Cartridge c = a.cartridge();
-    std::vector<uint8_t> bytes = encodeCartridge(c);
+    std::vector<uint8_t> bytes = encodeCartridge(c, false);
     int progChunks = 0;
     for (size_t i = 0; i + 4 <= bytes.size(); i++) {
       if (bytes[i] == 'P' && bytes[i + 1] == 'R' && bytes[i + 2] == 'O' && bytes[i + 3] == 'G') progChunks++;

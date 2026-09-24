@@ -43,6 +43,21 @@
 
 namespace sc8::project {
 
+// A source as text, named the way its file would be: main.c, game.bas,
+// driver.asm, microcode.txt. The IDE builds from these when a project
+// lives in memory: an opened ROM, or a scratch project not yet saved.
+struct Source {
+  std::string name;
+  std::string text;
+};
+
+// What a command that writes files answers: the files written, or an
+// error message.
+struct Created {
+  std::vector<std::filesystem::path> files;
+  std::string error;
+};
+
 struct Layout {
   std::filesystem::path root;
   std::filesystem::path sources;  // where the .c, .h, .asm and .bas files are
@@ -59,10 +74,36 @@ Layout layoutOf(const std::filesystem::path& dir);
 // conversion note, when one comes back, is appended to notes.
 Assets loaders(const Layout& layout, std::vector<std::string>* notes);
 
+// The same over the files a ROM carries in its SRC chunk: an asset name
+// resolves to assets/<name>, then <name>.
+Assets loadersFrom(const Cartridge& rom, std::vector<std::string>* notes);
+
+// The project a ROM carries, split back into its sources and its other
+// files (assets and README). Empty when the ROM has no SRC chunk.
+struct Carried {
+  std::vector<Source> sources;
+  std::vector<std::pair<std::string, std::vector<uint8_t>>> files;
+};
+Carried carried(const Cartridge& rom);
+
+// Write the project a ROM carries into a folder in the larger layout:
+// src/, assets/, README.md. The folder must not exist yet. The files
+// written come back, or an error message.
+Created unpack(const Cartridge& rom, const std::filesystem::path& dir);
+
+// Put a project into a cartridge's SRC chunk: the sources as text, the
+// other files as bytes.
+void embed(Cartridge& c, const std::vector<Source>& sources,
+           const std::vector<std::pair<std::string, std::vector<uint8_t>>>& files);
+
 struct Options {
   // @naive, @optimal or a set's text. Empty means microcode.txt among the
   // sources when there is one, else the kind's own default.
   std::string microcode;
+  // Carry the project in the ROM's SRC chunk: the sources, the assets and
+  // the README, so the ROM opens as a project again. Off for a ROM burned
+  // to hand out without its source.
+  bool embedSources = true;
   std::vector<std::pair<std::string, std::string>> meta;
   std::map<std::string, std::string> defines;
   bool keepAsm = false;  // also write the generated assembly beside the ROM
@@ -75,19 +116,7 @@ enum class Kind { C, Basic, Assembly, Microcode };
 // source that builds and runs. Microcode is an assembly project with the
 // naive set written out as microcode.txt. The files written come back, or
 // an error message.
-struct Created {
-  std::vector<std::filesystem::path> files;
-  std::string error;
-};
 Created create(const std::filesystem::path& dir, Kind kind);
-
-// A source as text, named the way its file would be: main.c, game.bas,
-// driver.asm, microcode.txt. The IDE builds from these when a project
-// lives in memory: an opened ROM, or a scratch project not yet saved.
-struct Source {
-  std::string name;
-  std::string text;
-};
 
 struct Built {
   std::optional<Cartridge> cartridge;  // nothing on an error

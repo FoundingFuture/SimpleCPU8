@@ -58,6 +58,8 @@ void Ide::newScratchProject() {
   projectDir_.clear();
   projectTitle_ = "scratch";
   romBase_.reset();
+  romFiles_.clear();
+  carriedProject_ = false;
   romPath_.clear();
   docs_.clear();
   addDoc("main.asm", DEFAULT_SOURCE);
@@ -109,6 +111,8 @@ void Ide::openProject(const std::string& dir) {
   projectDir_ = fs::absolute(dir).string();
   projectTitle_ = l.name;
   romBase_.reset();
+  romFiles_.clear();
+  carriedProject_ = false;
   romPath_.clear();
   docs_.clear();
   syncDoc_.clear();
@@ -159,19 +163,41 @@ void Ide::openRomAsProject(const std::string& path) {
   }
   docs_.clear();
   syncDoc_.clear();
-  for (const auto& [name, text] : r.cartridge->basic) {
-    std::string file = name;
-    for (char& c : file) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    addDoc(file + ".bas", text);
+  const project::Carried carry = project::carried(*r.cartridge);
+  if (!carry.sources.empty()) {
+    // The ROM carries its project: every source is a document, the
+    // assets stay in the ROM for the build to read, and the program is
+    // built again from the sources, listing and breakpoints included.
+    for (const project::Source& src : carry.sources) addDoc(src.name, src.text);
+    romFiles_ = carry.files;
+    romBase_ = std::move(*r.cartridge);
+    romBase_->sources.clear();
+    for (Doc& d : docs_) d.dirty = false;
+    size_t first = 0;
+    for (size_t i = 0; i < docs_.size(); i++) {
+      const std::string& n = docs_[i].name;
+      if (n == "main.c" || n == "main.asm" || n == "autorun.bas") first = i;
+    }
+    activate(first);
+    carriedProject_ = true;
+  } else {
+    for (const auto& [name, text] : r.cartridge->basic) {
+      std::string file = name;
+      for (char& c : file) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      addDoc(file + ".bas", text);
+    }
+    const std::string& mc = r.cartridge->microcode;
+    if (mc != "@naive" && mc != "@optimal") addDoc("microcode.txt", mc);
+    romFiles_.clear();
+    romBase_ = std::move(*r.cartridge);
+    carriedProject_ = false;
+    for (Doc& d : docs_) d.dirty = false;
+    if (!docs_.empty()) activate(0);
   }
-  const std::string& mc = r.cartridge->microcode;
-  if (mc != "@naive" && mc != "@optimal") addDoc("microcode.txt", mc);
-  romBase_ = std::move(*r.cartridge);
-  for (Doc& d : docs_) d.dirty = false;
-  if (!docs_.empty()) activate(0);
   focusFiles_ = true;
   buildProject(false);
-  note("opened ROM " + path + " as a project: " + std::to_string(docs_.size()) + " document(s), the program as it is");
+  note("opened ROM " + path + (carriedProject_ ? " with its project: " : " as a project: ") +
+       std::to_string(docs_.size()) + " document(s)" + (carriedProject_ ? "" : ", the program as it is"));
 }
 
 void Ide::createProject(const std::string& dir, project::Kind kind) {
@@ -197,7 +223,16 @@ void Ide::saveProjectAs(const std::string& dir) {
   projectDir_ = root.string();
   projectTitle_ = root.filename().string();
   for (Doc& d : docs_) saveDoc(d);
-  if (romBase_) {
+  for (const auto& [name, bytes] : romFiles_) {
+    if (name.find("..") != std::string::npos) continue;
+    const fs::path at = root / name;
+    fs::create_directories(at.parent_path(), ec);
+    std::ofstream o(at, std::ios::binary);
+    o.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (o) note("wrote " + at.string());
+  }
+  romFiles_.clear();
+  if (romBase_ && !carriedProject_) {
     // The program has no source. The ROM itself goes beside the sources,
     // so the folder holds everything the project was opened from.
     std::vector<uint8_t> bytes = encodeCartridge(*romBase_);
@@ -209,6 +244,8 @@ void Ide::saveProjectAs(const std::string& dir) {
     o.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     note("the ROM's program was written to build/base.rom; the sources are in src/");
   }
+  romBase_.reset();
+  carriedProject_ = false;
   note("project saved in " + projectDir_);
 }
 
@@ -276,9 +313,15 @@ void Ide::buildProject(bool run) {
     if (built.cartridge) note("wrote " + w.rom.string());
   } else {
     std::vector<std::string> notes;
-    Assets assets = project::loaders(layout(), &notes);
-    built = project::buildSources(sources(), assets, o, projectTitle_, "", romBase_);
+    // A carried project reads its pictures and sounds from the ROM and
+    // builds the program again; a bare ROM keeps its program.
+    Cartridge carrier;
+    carrier.sources = romFiles_;
+    Assets assets = carriedProject_ ? project::loadersFrom(carrier, &notes) : project::loaders(layout(), &notes);
+    built = project::buildSources(sources(), assets, o, projectTitle_, "",
+                                  carriedProject_ ? std::optional<Cartridge>{} : romBase_);
     built.notes.insert(built.notes.begin(), notes.begin(), notes.end());
+    if (built.cartridge) project::embed(*built.cartridge, sources(), romFiles_);
   }
   for (const std::string& n : built.notes) note(n);
   for (const std::string& e : built.errors) note(e);
@@ -502,9 +545,12 @@ void Ide::filesPane() {
       note(n + ": a source is a .c, .h, .asm or .bas file, or microcode.txt");
     }
   }
-  if (romBase_) {
+  if (romBase_ && !carriedProject_) {
     ImGui::Spacing();
-    ImGui::TextWrapped("The ROM's program is not a document. Its listing is a disassembly.");
+    ImGui::TextWrapped("The ROM carries no project. Its program is not a document and its listing is a disassembly.");
+  } else if (carriedProject_) {
+    ImGui::Spacing();
+    ImGui::TextWrapped("The project came out of the ROM. Save project as writes it to a folder.");
   }
   ImGui::End();
 }

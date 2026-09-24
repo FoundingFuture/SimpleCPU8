@@ -157,6 +157,15 @@ During development `.file('x.bin')`, `.image('x.png')` and `.sample('x.wav')`
 read from the directory of the source file. Burning copies the bytes into
 the DATA chunk, so a distributed ROM carries every resource.
 
+A ROM is the project in one file. The build puts the sources, the
+assets and the README into a SRC chunk. The IDE then opens any ROM as
+the project it came from, with listing and breakpoints. `simplecpu-make
+unpack game.rom` writes that project to a folder named after the ROM,
+and refuses a folder that exists. `--no-sources` on `simplecpu-make` and
+`simplecpu-asm` leaves the project out of a ROM meant to be handed out
+alone. On disk the chunks are one zlib stream, format version 2. A plain
+version 1 file still reads.
+
 ## Microcode in a ROM
 
 The two built-in sets live in the computer, and a ROM names them:

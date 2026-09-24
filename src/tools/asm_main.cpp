@@ -5,6 +5,7 @@
 //   simplecpu-asm main.asm --microcode optimal
 //   simplecpu-asm main.asm --title "Pac-Man" --author "Eddie"
 //   simplecpu-asm main.asm --listing        prints labels and sizes
+//   simplecpu-asm main.asm --no-sources     a ROM without its sources inside
 //   simplecpu-asm basic.asm driver.asm      several sources, one ROM: each
 //                                           file starts in the code section
 //   simplecpu-asm main.asm --bas DEMO=demo.bas
@@ -42,7 +43,7 @@ std::optional<std::vector<uint8_t>> readBytes(const fs::path& p) {
 int usage() {
   std::fprintf(stderr,
                "usage: simplecpu-asm <source.asm> [-o out.rom] [--microcode naive|optimal|<file>]\n"
-               "                     [--title T] [--author A] [--listing]\n");
+               "                     [--title T] [--author A] [--listing] [--no-sources]\n");
   return 2;
 }
 
@@ -50,6 +51,7 @@ int usage() {
 
 int main(int argc, char** argv) {
   std::vector<fs::path> sources;
+  bool embedSources = true;
   fs::path out;
   std::vector<std::pair<std::string, std::string>> basicSlots;
   std::string microcode = "@naive";
@@ -85,6 +87,7 @@ int main(int argc, char** argv) {
     } else if (a == "--title") meta.emplace_back("title", next());
     else if (a == "--author") meta.emplace_back("author", next());
     else if (a == "--listing") listing = true;
+    else if (a == "--no-sources") embedSources = false;
     else if (a == "--bas") {
       const std::string spec = next();
       const size_t eq = spec.find('=');
@@ -139,8 +142,17 @@ int main(int argc, char** argv) {
   const fs::path source = sources.front();
   const fs::path dir = source.parent_path();
 
+  // Every asset read goes into the ROM's project as well, under assets/,
+  // beside the sources, so the ROM opens in the IDE as it was built.
+  std::vector<std::pair<std::string, std::vector<uint8_t>>> carried;
+  auto carry = [&](std::string_view name) {
+    if (auto raw = readBytes(dir / fs::path(name))) carried.emplace_back("assets/" + std::string(name), *raw);
+  };
   Assets assets;
-  assets.loadFile = [&](std::string_view name) { return readBytes(dir / fs::path(name)); };
+  assets.loadFile = [&](std::string_view name) {
+    carry(name);
+    return readBytes(dir / fs::path(name));
+  };
   auto report = [&](std::string_view name, const std::string& note) {
     if (note.empty()) return;
     std::fprintf(stderr, "%s: %.*s: %s\n", source.string().c_str(), static_cast<int>(name.size()), name.data(),
@@ -149,12 +161,14 @@ int main(int argc, char** argv) {
   assets.loadImage = [&](std::string_view name) {
     std::string note;
     auto img = loadImageFile(dir / fs::path(name), &note);
+    if (img) carry(name);
     report(name, note);
     return img;
   };
   assets.loadSample = [&](std::string_view name) {
     std::string note;
     auto pcm = loadSampleFile(dir / fs::path(name), &note);
+    if (pcm) carry(name);
     report(name, note);
     return pcm;
   };
@@ -181,6 +195,12 @@ int main(int argc, char** argv) {
   c.microcode = microcode;
   c.meta = meta;
   c.basic = basicSlots;
+  if (embedSources) {
+    for (const fs::path& src : sources) {
+      if (auto raw = readBytes(src)) c.sources.emplace_back(src.filename().string(), *raw);
+    }
+    for (auto& f : carried) c.sources.push_back(std::move(f));
+  }
   if (out.empty()) out = fs::path(source).replace_extension(".rom");
   std::vector<uint8_t> bytes = encodeCartridge(c);
   std::ofstream o(out, std::ios::binary);

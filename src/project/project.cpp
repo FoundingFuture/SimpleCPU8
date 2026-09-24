@@ -177,6 +177,99 @@ Assets loaders(const Layout& layout, std::vector<std::string>* notes) {
   return assets;
 }
 
+namespace {
+
+const std::vector<uint8_t>* carriedFile(const Cartridge& rom, std::string_view name) {
+  for (const std::string prefix : {"assets/", ""}) {
+    const std::string want = prefix + std::string(name);
+    for (const auto& [n, bytes] : rom.sources) {
+      if (n == want) return &bytes;
+    }
+  }
+  return nullptr;
+}
+
+}  // namespace
+
+Assets loadersFrom(const Cartridge& rom, std::vector<std::string>* notes) {
+  Assets assets;
+  auto report = [notes](std::string_view name, const std::string& note) {
+    if (notes && !note.empty()) notes->push_back(std::string(name) + ": " + note);
+  };
+  assets.loadFile = [rom](std::string_view name) -> std::optional<std::vector<uint8_t>> {
+    const std::vector<uint8_t>* b = carriedFile(rom, name);
+    if (!b) return std::nullopt;
+    return *b;
+  };
+  assets.loadImage = [rom, report](std::string_view name) -> std::optional<ImageAsset> {
+    const std::vector<uint8_t>* b = carriedFile(rom, name);
+    if (!b) return std::nullopt;
+    std::string note;
+    auto img = loadImageBytes(*b, &note);
+    report(name, note);
+    return img;
+  };
+  assets.loadSample = [rom, report](std::string_view name) -> std::optional<std::vector<uint8_t>> {
+    const std::vector<uint8_t>* b = carriedFile(rom, name);
+    if (!b) return std::nullopt;
+    std::string note;
+    auto pcm = loadSampleBytes(*b, &note);
+    report(name, note);
+    return pcm;
+  };
+  return assets;
+}
+
+Carried carried(const Cartridge& rom) {
+  Carried out;
+  for (const auto& [name, bytes] : rom.sources) {
+    const std::string ext = fs::path(name).extension().string();
+    const bool source = name.find('/') == std::string::npos &&
+                        (ext == ".c" || ext == ".h" || ext == ".asm" || ext == ".bas" || name == "microcode.txt");
+    if (source) out.sources.push_back({name, std::string(bytes.begin(), bytes.end())});
+    else out.files.emplace_back(name, bytes);
+  }
+  return out;
+}
+
+void embed(Cartridge& c, const std::vector<Source>& sources,
+           const std::vector<std::pair<std::string, std::vector<uint8_t>>>& files) {
+  c.sources.clear();
+  for (const Source& src : sources) c.sources.emplace_back(src.name, std::vector<uint8_t>(src.text.begin(), src.text.end()));
+  for (const auto& f : files) c.sources.push_back(f);
+}
+
+Created unpack(const Cartridge& rom, const fs::path& dir) {
+  Created out;
+  std::error_code ec;
+  if (fs::exists(dir, ec)) {
+    out.error = dir.string() + " exists already";
+    return out;
+  }
+  if (rom.sources.empty()) {
+    out.error = "this ROM carries no project";
+    return out;
+  }
+  fs::create_directories(dir / "src", ec);
+  for (const auto& [name, bytes] : rom.sources) {
+    // Names are what embed() wrote: bare sources, assets/x, README.md.
+    // A name that walks out of the folder is refused.
+    if (name.empty() || name.find("..") != std::string::npos || name.front() == '/') continue;
+    const fs::path at = name.find('/') == std::string::npos && name != "README.md" ? dir / "src" / name : dir / name;
+    fs::create_directories(at.parent_path(), ec);
+    std::ofstream o(at, std::ios::binary);
+    o.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    if (!o) {
+      out.error = "cannot write " + at.string();
+      return out;
+    }
+    out.files.push_back(at);
+  }
+  std::ofstream(dir / ".gitignore") << "build/\n";
+  out.files.push_back(dir / ".gitignore");
+  return out;
+}
+
 Layout layoutOf(const fs::path& dir) {
   Layout l;
   l.root = dir;
@@ -462,6 +555,29 @@ Built build(const Layout& layout, const Options& opts) {
   Assets assets = loaders(layout, &notes);
   Built b = buildSources(sources, assets, opts, titleFor(layout), layout.sources.string());
   b.notes.insert(b.notes.begin(), notes.begin(), notes.end());
+  if (b.cartridge && opts.embedSources) {
+    // The ROM carries the project: the README, every file in assets/, and
+    // the sources. A picture beside the sources in a flat project is an
+    // asset too.
+    std::vector<std::pair<std::string, std::vector<uint8_t>>> files;
+    if (auto readme = readBytes(layout.root / "README.md")) files.emplace_back("README.md", *readme);
+    std::error_code ec;
+    if (layout.assets != layout.sources && fs::is_directory(layout.assets, ec)) {
+      for (const auto& entry : fs::directory_iterator(layout.assets, ec)) {
+        if (!entry.is_regular_file()) continue;
+        if (auto bytes = readBytes(entry.path())) files.emplace_back("assets/" + entry.path().filename().string(), *bytes);
+      }
+    }
+    for (const auto& entry : fs::directory_iterator(layout.sources, ec)) {
+      if (!entry.is_regular_file()) continue;
+      const std::string name = entry.path().filename().string();
+      const std::string ext = entry.path().extension().string();
+      const bool source = ext == ".c" || ext == ".h" || ext == ".asm" || ext == ".bas" || name == "microcode.txt";
+      if (source || ext == ".rom" || name == "README.md") continue;
+      if (auto bytes = readBytes(entry.path())) files.emplace_back("assets/" + name, *bytes);
+    }
+    embed(*b.cartridge, sources, files);
+  }
   return b;
 }
 

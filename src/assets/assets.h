@@ -172,10 +172,13 @@ DecodedReport decodeRgba(const std::vector<uint8_t>& rgba, int width, int height
 // the first frame of a GIF. Nothing on a file that is missing or not an
 // image. note, when given, receives the conversion note or stays untouched.
 std::optional<ImageAsset> loadImageFile(const std::filesystem::path& path, std::string* note);
+// The same from the file's bytes, for an image a ROM carries.
+std::optional<ImageAsset> loadImageBytes(const std::vector<uint8_t>& bytes, std::string* note);
 
 // Decode an audio file to unsigned 8 bit mono at AUDIO_RATE, capped at
 // MAX_SAMPLE_BYTES. WAV, MP3 and FLAC. A MIDI file is refused, because the
 // browser version never offered one as a sample.
 std::optional<std::vector<uint8_t>> loadSampleFile(const std::filesystem::path& path, std::string* note);
+std::optional<std::vector<uint8_t>> loadSampleBytes(const std::vector<uint8_t>& bytes, std::string* note);
 
 }  // namespace sc8

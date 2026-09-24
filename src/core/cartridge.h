@@ -7,10 +7,13 @@
 // their cartridge address latches. RAM holds data and memory mapped IO.
 //
 // File layout, little-endian, chunked so a reader can skip what it does
-// not know and the IDE can list what a ROM holds:
+// not know and the IDE can list what a ROM holds. On disk the chunks are
+// one zlib stream behind the header, since a ROM carries its project and
+// its pictures; a reader takes the plain form as well:
 //
 //   "SC8ROM\0\0"   magic, 8 bytes
-//   u32            format version, 1
+//   u32            format version: 1 for plain chunks, 2 for the chunks
+//                  as one zlib stream
 //   chunks         each: tag (4 bytes), length (u32), payload
 //
 // Chunk tags:
@@ -32,6 +35,10 @@
 //          program text, entries separated by a form feed. The storage
 //          device reads and writes this chunk, and the IDE's BASIC editor
 //          saves into it.
+//   SRC    the project the ROM was built from: its sources, its assets
+//          and its README, so the IDE opens a ROM as a project with a
+//          listing and breakpoints. Entries: name (NUL terminated), u32
+//          size, bytes. A ROM burned for distribution alone leaves it out.
 //
 // PROG is the only chunk a ROM must have.
 #pragma once
@@ -67,11 +74,15 @@ struct Cartridge {
   std::vector<std::pair<std::string, std::string>> meta;
   // Saved BASIC programs by slot name.
   std::vector<std::pair<std::string, std::string>> basic;
+  // The project's files by name: sources as text, assets as their bytes.
+  std::vector<std::pair<std::string, std::vector<uint8_t>>> sources;
 
   bool operator==(const Cartridge&) const = default;
 };
 
-std::vector<uint8_t> encodeCartridge(const Cartridge& c);
+// The file bytes. Compressed by default, version 2; plain, version 1,
+// for a test that pins bytes or a reader outside this tree.
+std::vector<uint8_t> encodeCartridge(const Cartridge& c, bool compress = true);
 
 struct CartridgeResult {
   std::optional<Cartridge> cartridge;

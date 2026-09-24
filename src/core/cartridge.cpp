@@ -4,6 +4,7 @@
 #include <string_view>
 
 #include "core/mcparse.h"
+#include "core/zlib.h"
 #include "core/microcode.h"
 
 namespace sc8 {
@@ -12,6 +13,7 @@ namespace {
 
 constexpr char MAGIC[8] = {'S', 'C', '8', 'R', 'O', 'M', 0, 0};
 constexpr uint32_t VERSION = 1;
+constexpr uint32_t VERSION_ZLIB = 2;
 
 void putU32(std::vector<uint8_t>& out, uint32_t v) {
   for (int i = 0; i < 4; i++) out.push_back(static_cast<uint8_t>(v >> (8 * i)));
@@ -44,10 +46,11 @@ std::vector<std::string_view> lines(std::string_view text) {
 
 }  // namespace
 
-std::vector<uint8_t> encodeCartridge(const Cartridge& c) {
+std::vector<uint8_t> encodeCartridge(const Cartridge& c, bool compress) {
   std::vector<uint8_t> out;
   out.insert(out.end(), MAGIC, MAGIC + 8);
-  putU32(out, VERSION);
+  putU32(out, compress ? VERSION_ZLIB : VERSION);
+  const size_t chunksAt = out.size();
 
   // One PROG chunk per run of loaded slots. A program with no gaps is one
   // chunk starting at slot 0. An empty program still writes one, since a
@@ -108,6 +111,22 @@ std::vector<uint8_t> encodeCartridge(const Cartridge& c) {
     }
     chunk(out, "BAS ", bytesOf(text));
   }
+  if (!c.sources.empty()) {
+    std::vector<uint8_t> payload;
+    for (const auto& [name, bytes] : c.sources) {
+      payload.insert(payload.end(), name.begin(), name.end());
+      payload.push_back(0);
+      putU32(payload, static_cast<uint32_t>(bytes.size()));
+      payload.insert(payload.end(), bytes.begin(), bytes.end());
+    }
+    chunk(out, "SRC ", payload);
+  }
+  if (compress) {
+    const std::vector<uint8_t> chunks(out.begin() + static_cast<std::ptrdiff_t>(chunksAt), out.end());
+    std::vector<uint8_t> stream = zlibCompress(chunks);
+    out.resize(chunksAt);
+    out.insert(out.end(), stream.begin(), stream.end());
+  }
   return out;
 }
 
@@ -116,9 +135,17 @@ CartridgeResult decodeCartridge(const std::vector<uint8_t>& bytes) {
     return {std::nullopt, "not a SimpleCPU-8 ROM"};
   }
   const uint32_t version = getU32(bytes.data() + 8);
+  if (version == VERSION_ZLIB) {
+    std::optional<std::vector<uint8_t>> chunks = zlibDecompress(bytes.data() + 12, bytes.size() - 12);
+    if (!chunks) return {std::nullopt, "the ROM's compressed chunks do not unpack"};
+    std::vector<uint8_t> plain(bytes.begin(), bytes.begin() + 8);
+    putU32(plain, VERSION);
+    plain.insert(plain.end(), chunks->begin(), chunks->end());
+    return decodeCartridge(plain);
+  }
   if (version != VERSION) {
     return {std::nullopt, "ROM format version " + std::to_string(version) + " is not the " +
-                              std::to_string(VERSION) + " this build reads"};
+                              std::to_string(VERSION) + " or " + std::to_string(VERSION_ZLIB) + " this build reads"};
   }
   Cartridge c;
   bool sawProg = false;
@@ -177,6 +204,19 @@ CartridgeResult decodeCartridge(const std::vector<uint8_t>& bytes) {
           c.basic.emplace_back(std::string(entry.substr(0, nl)), std::string(entry.substr(nl + 1)));
         }
         start = ff + 1;
+      }
+    } else if (tag == "SRC ") {
+      size_t at = 0;
+      while (at < len) {
+        size_t nul = at;
+        while (nul < len && p[nul] != 0) nul++;
+        if (nul + 5 > len) break;
+        std::string name(reinterpret_cast<const char*>(p + at), nul - at);
+        const uint32_t n = getU32(p + nul + 1);
+        const size_t start = nul + 5;
+        if (start + n > len) break;
+        c.sources.emplace_back(std::move(name), std::vector<uint8_t>(p + start, p + start + n));
+        at = start + n;
       }
     } else if (tag == "META") {
       for (std::string_view line : lines(text)) {

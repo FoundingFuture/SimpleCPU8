@@ -204,6 +204,10 @@ class Ide {
   std::string projectDir_;
   std::string projectTitle_ = "scratch";
   std::optional<Cartridge> romBase_;
+  // The other files a ROM carried (assets, README), kept for the build
+  // and for Save project as. carriedProject_ says the ROM had sources.
+  std::vector<std::pair<std::string, std::vector<uint8_t>>> romFiles_;
+  bool carriedProject_ = false;
   std::string romPath_;  // the ROM file opened, for a burn to the same place
   std::vector<Doc> docs_;
   size_t active_ = 0;

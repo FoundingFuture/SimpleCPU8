@@ -20,5 +20,7 @@ struct Rgba {
 // a narrow path: on Windows a name outside the ANSI code page would need
 // the wide API, which is left for a later port.
 std::optional<Rgba> decodeImageFile(const std::string& path);
+// The same from the file's bytes, for an image a ROM carries.
+std::optional<Rgba> decodeImageBytes(const std::vector<uint8_t>& bytes);
 
 }  // namespace sc8

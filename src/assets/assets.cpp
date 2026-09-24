@@ -463,12 +463,23 @@ DecodedReport decodeRgba(const std::vector<uint8_t>& rgba, int width, int height
   return {{fit.width, fit.height, std::move(q.pixels), machine}, conversionNote({scaled, true, q.opaqueBlack})};
 }
 
+std::optional<ImageAsset> imageAssetOf(const Rgba& rgba, std::string* note);
+
 std::optional<ImageAsset> loadImageFile(const std::filesystem::path& path, std::string* note) {
   const std::optional<Rgba> rgba = decodeImageFile(path.string());
   if (!rgba) return std::nullopt;
+  return imageAssetOf(*rgba, note);
+}
 
+std::optional<ImageAsset> loadImageBytes(const std::vector<uint8_t>& bytes, std::string* note) {
+  const std::optional<Rgba> rgba = decodeImageBytes(bytes);
+  if (!rgba) return std::nullopt;
+  return imageAssetOf(*rgba, note);
+}
+
+std::optional<ImageAsset> imageAssetOf(const Rgba& rgba, std::string* note) {
   const std::vector<uint8_t> machine = machinePalette();
-  DecodedReport decoded = decodeRgba(rgba->bytes, rgba->width, rgba->height, machine);
+  DecodedReport decoded = decodeRgba(rgba.bytes, rgba.width, rgba.height, machine);
   // buildAsset in main.ts: the decode's own note leads, then any black
   // merge the classification found.
   std::vector<SubItem> items = subItemsForImage(decoded.image, machine);
@@ -482,6 +493,10 @@ std::optional<std::vector<uint8_t>> loadSampleFile(const std::filesystem::path& 
   std::ifstream in(path, std::ios::binary);
   if (!in) return std::nullopt;
   const std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
+  return loadSampleBytes(bytes, note);
+}
+
+std::optional<std::vector<uint8_t>> loadSampleBytes(const std::vector<uint8_t>& bytes, std::string* note) {
   // The browser checked the MIDI magic before offering audio decoding, and
   // a MIDI file only ever became a .file asset.
   if (isMidi(bytes)) {

@@ -6,8 +6,11 @@
 //   simplecpu-make mygame/ -o out.rom
 //   simplecpu-make mygame/ --microcode optimal --title "My Game"
 //   simplecpu-make mygame/ --asm-out       also keep the generated .asm
+//   simplecpu-make mygame/ --no-sources    a ROM without its project inside
 //   simplecpu-make new mygame --c          a fresh project: --c, --basic,
 //                                         --assembly or --microcode
+//   simplecpu-make unpack game.rom [dir]   the project a ROM carries, as a
+//                                         folder; dir defaults to "game"
 //
 // src/project/project.h says what a project folder holds and how it is
 // read. This file is the command line around it.
@@ -19,6 +22,7 @@
 #include <optional>
 #include <string>
 
+#include "core/cartridge.h"
 #include "core/mcparse.h"
 #include "project/project.h"
 
@@ -30,8 +34,9 @@ namespace {
 int usage() {
   std::fprintf(stderr,
                "usage: simplecpu-make <directory> [-o out.rom] [--microcode naive|optimal|<file>]\n"
-               "                      [--title T] [--author A] [-D NAME[=VALUE]] [--asm-out] [--listing]\n"
-               "       simplecpu-make new <directory> --c | --basic | --assembly | --microcode\n");
+               "                      [--title T] [--author A] [-D NAME[=VALUE]] [--asm-out] [--listing] [--no-sources]\n"
+               "       simplecpu-make new <directory> --c | --basic | --assembly | --microcode\n"
+               "       simplecpu-make unpack <file.rom> [directory]\n");
   return 2;
 }
 
@@ -66,6 +71,33 @@ int makeNew(int argc, char** argv) {
   return 0;
 }
 
+// simplecpu-make unpack game.rom [dir]: the project inside a ROM as a
+// folder. The folder defaults to the ROM's name and must not exist.
+int unpackRom(int argc, char** argv) {
+  if (argc < 3) return usage();
+  const fs::path rom = argv[2];
+  const fs::path dir = argc >= 4 ? fs::path(argv[3]) : rom.stem();
+  std::ifstream in(rom, std::ios::binary);
+  if (!in) {
+    std::fprintf(stderr, "cannot read %s\n", rom.string().c_str());
+    return 1;
+  }
+  const std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
+  CartridgeResult r = decodeCartridge(bytes);
+  if (!r.cartridge) {
+    std::fprintf(stderr, "%s: %s\n", rom.string().c_str(), r.error.c_str());
+    return 1;
+  }
+  project::Created c = project::unpack(*r.cartridge, dir);
+  if (!c.error.empty()) {
+    std::fprintf(stderr, "%s\n", c.error.c_str());
+    return 1;
+  }
+  for (const fs::path& f : c.files) std::printf("wrote %s\n", f.string().c_str());
+  std::printf("build it with: simplecpu-make %s\n", dir.string().c_str());
+  return 0;
+}
+
 std::optional<std::string> readText(const fs::path& p) {
   std::ifstream in(p);
   if (!in) return std::nullopt;
@@ -76,6 +108,7 @@ std::optional<std::string> readText(const fs::path& p) {
 
 int main(int argc, char** argv) {
   if (argc >= 2 && std::string(argv[1]) == "new") return makeNew(argc, argv);
+  if (argc >= 2 && std::string(argv[1]) == "unpack") return unpackRom(argc, argv);
   fs::path dir;
   fs::path out;
   project::Options opts;
@@ -108,6 +141,7 @@ int main(int argc, char** argv) {
     } else if (a == "--title") opts.meta.emplace_back("title", next());
     else if (a == "--author") opts.meta.emplace_back("author", next());
     else if (a == "--asm-out") opts.keepAsm = true;
+    else if (a == "--no-sources") opts.embedSources = false;
     else if (a == "--listing") listing = true;
     else if (a.rfind("-D", 0) == 0) {
       std::string def = a.size() > 2 ? a.substr(2) : next();
