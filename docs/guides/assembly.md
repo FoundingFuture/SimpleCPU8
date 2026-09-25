@@ -427,10 +427,16 @@ Compares and tests, which set the flags and keep `A`:
 |---|---|---|
 | `CMP A, v` | the flags of `A - v` | `N V Z C` |
 | `TST A, v` | the flags of `A` and `v` | `N Z` |
+| `TST D1`, `TST D2` | `Z` when the whole pointer is zero | `Z` |
 
 `CMP` takes the same `v` as `SUB`. `TST` takes a constant, a zero page
 address or `[D1+n]` and `[D2+n]`. `TST A, BTN_FIRE` asks whether one bit
 is set, and `A` still holds the rest of the byte afterwards.
+
+`TST D1` is a spelling of `LD D1 <- D1+0`, the address add with nothing
+added. It tests a pointer for NULL. The assembler refuses `LD D1 <- D1`
+and names `TST D1` and `NOP` instead. The copy spelling hides what the
+instruction is for, and a copy onto itself would do nothing.
 
 Shifts, one bit at a time, on `A`:
 

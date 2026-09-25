@@ -240,7 +240,17 @@ TEST_SUITE("assembler errors") {
   TEST_CASE("rejects register-to-register moves") {
     CHECK(has(firstError("LD A <- D2"), "register to register"));
     CHECK(has(firstError("LD D1 <- A"), "through RAM"));
-    CHECK(has(firstError("LD D1 <- D1"), "does nothing"));
+    CHECK(has(firstError("LD D1 <- D1"), "only sets Z from D1. Write TST D1"));
+    CHECK(has(firstError("LD D2 <- D2"), "or NOP to do nothing"));
+  }
+
+  TEST_CASE("TST D1 and TST D2 are the address add with nothing added") {
+    Assembled a = ok("TST D1\nTST D2\nLD D1 <- D1+0");
+    REQUIRE_EQ(a.program.size(), 3u);
+    CHECK_EQ(a.program[0].op, opByName("LD D1 <- D1+n")->op);
+    CHECK_EQ(a.program[0].operand, 0);
+    CHECK_EQ(a.program[1].op, opByName("LD D2 <- D2+n")->op);
+    CHECK_EQ(a.program[2].op, a.program[0].op);
   }
 
   TEST_CASE("a D register takes a sum: the address arithmetic") {

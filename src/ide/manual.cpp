@@ -153,7 +153,8 @@ const std::map<std::string, Meta>& meta() {
       {"TST", {"LOGIC", "TST A, value", "A, then an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
                LOGIC_FLAGS, "none",
                "Tests bits: the flags of AND, and A keeps its value. TST A, $80 sets Z when bit 7 is clear. TST "
-               "A, $FF tests A itself, which a port read needs, since IN sets no flags."}},
+               "A, $FF tests A itself, which a port read needs, since IN sets no flags. TST D1 and TST D2 are "
+               "LD D1 <- D1+0 and LD D2 <- D2+0: Z set when the whole pointer is zero, the NULL test."}},
       {"SHL", {"SHIFT", "SHL A", "A", FlagFacts{"N, Z, C", "set when the result is zero", "set to bit 7 of the result", "set to the bit shifted out of bit 7", UNAFFECTED}, "A",
                "Shifts A one bit left, a 0 into bit 0. A doubles. For a 16 bit value, SHL the low byte and ROL "
                "the high byte."}},

@@ -81,7 +81,10 @@ std::string disassemble(const Instr& in) {
     case OperandKind::Imm16: replace("imm16", "$" + hex(in.operand, 4)); break;
     case OperandKind::Off16: {
       const int off = in.operand >= 0x8000 ? in.operand - 0x10000 : in.operand;
-      replace("+n", off < 0 ? std::to_string(off) : "+" + std::to_string(off));
+      // Nothing added reads back the way it is written: a copy, or the
+      // TST of a register against itself.
+      if (off == 0 && text.size() == 13 && text.substr(3, 2) == text.substr(9, 2)) return "TST " + text.substr(3, 2);
+      replace("+n", off == 0 ? std::string() : off < 0 ? std::to_string(off) : "+" + std::to_string(off));
       break;
     }
     case OperandKind::Addr16: replace("addr16", "$" + hex(in.operand, 4)); break;

@@ -822,6 +822,12 @@ class Assembler {
       return err(lineNo, mnem + " takes an immediate, a zero page address, or [D1+n] or [D2+n]");
     }
 
+    // TST D1 and TST D2: the address add with nothing added, which sets Z
+    // from the whole pointer. The NULL test for a register.
+    if (mnem == "TST" && (restUpper == "D1" || restUpper == "D2")) {
+      return pushExpr(lineNo, "LD " + restUpper + " <- " + restUpper + "+n", std::string("0"), ExprKind::Off16);
+    }
+
     if (isTestMnemonic(mnem)) {
       // CMP and TST write no register, so they take no arrow: CMP A, 5.
       const std::string what = mnem == "CMP" ? "subtracts" : "ANDs";
@@ -919,7 +925,10 @@ class Assembler {
         case T::Reg:
           // A copy is the sum with nothing added.
           if (src.r == "D1" || src.r == "D2") {
-            if (src.r == X) return err(lineNo, "LD " + X + " <- " + X + " does nothing");
+            if (src.r == X) {
+              return err(lineNo, "LD " + X + " <- " + X + " only sets Z from " + X + ". Write TST " + X +
+                                     " to test " + X + " for zero, or NOP to do nothing");
+            }
             return push("LD " + X + " <- " + src.r + "+n", std::string("0"), ExprKind::Off16);
           }
           return err(lineNo, "a D register takes a byte from A only through RAM: store A, then load the word");
