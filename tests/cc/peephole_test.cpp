@@ -38,7 +38,8 @@ TEST_SUITE("peephole") {
   }
 
   TEST_CASE("a temp read on one path keeps its store") {
-    const auto in = lines({"LD [__t0+1] <- A", "JZ there", "RET", ":there:", "LD A <- [__t0+1]", "OUTA 1", "RET"});
+    const auto in = lines({"LD [__t0+1] <- A", "JZ there", "RET", ":there:", "LD A <- 5", "ADD A <- [__t0+1]", "OUTA 1",
+                           "RET"});
     CHECK(peephole(in) == in);
   }
 
@@ -74,6 +75,11 @@ TEST_SUITE("peephole") {
   TEST_CASE("a byte store into the word ends what D2 is known to hold") {
     const auto in = lines({"LD D2 <- [p]", "LD [p+1] <- A", "LD D2 <- [p]", "LD [q] <- D2", "RET"});
     CHECK(peephole(in) == in);
+  }
+
+  TEST_CASE("a label only one jump reaches starts with what the jump knew") {
+    CHECK(peephole(lines({"LD A <- [c]", "LD [d] <- A", "JNZ there", "RET", ":there:", "LD A <- [c]", "OUTA 1",
+                          "RET"})) == lines({"LD A <- [c]", "LD [d] <- A", "JNZ there", "RET", ":there:", "OUTA 1", "RET"}));
   }
 
   TEST_CASE("a jump to the next line goes") {

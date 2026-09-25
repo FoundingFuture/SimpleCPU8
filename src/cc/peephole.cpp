@@ -316,6 +316,33 @@ class Pass {
     return changed;
   }
 
+  // A label reached only by one forward jump, with no fall-through into it,
+  // starts with what was known at that jump.
+  std::map<std::string, int> refCounts() const {
+    std::map<std::string, int> refs;
+    for (size_t i = 0; i < lines_.size(); i++) {
+      if (alive_[i] && info_[i].kind == Kind::Ins && info_[i].flow) refs[info_[i].src]++;
+    }
+    return refs;
+  }
+
+  bool fallsInto(size_t label) const {
+    for (size_t j = label; j-- > 0;) {
+      if (!alive_[j]) continue;
+      const Line& l = info_[j];
+      if (l.kind == Kind::Skip && !l.stmt) continue;
+      if (l.kind == Kind::Label || l.stmt) return true;
+      if (l.kind != Kind::Ins) return true;
+      return !(l.flow && (l.mnem == "JMP" || l.mnem == "RET" || l.mnem == "HLT"));
+    }
+    return true;
+  }
+
+  std::string labelName(size_t i) const {
+    const std::string t = trim(lines_[i]);
+    return t.substr(0, t.size() - 1);
+  }
+
   // What A is known to equal: loads that load what A already holds, and
   // stores that store what the byte already holds.
   bool knownValues() {
@@ -326,6 +353,8 @@ class Pass {
     bool flagsMatchA = false;
     auto has = [&](const std::string& k) { return std::find(known.begin(), known.end(), k) != known.end(); };
     auto dropIf = [&](auto pred) { known.erase(std::remove_if(known.begin(), known.end(), pred), known.end()); };
+    const std::map<std::string, int> refs = refCounts();
+    std::map<std::string, std::pair<std::vector<std::string>, bool>> atLabel;
     for (size_t i = 0; i < lines_.size(); i++) {
       if (!alive_[i]) continue;
       const Line& l = info_[i];
@@ -333,10 +362,25 @@ class Pass {
       // relies on that, so what A shares with a temp is forgotten there.
       if (l.stmt) dropIf([](const std::string& k) { return isTempBase(baseOf(k)); });
       if (l.kind == Kind::Skip) continue;
+      if (l.kind == Kind::Label) {
+        const auto carried = atLabel.find(labelName(i));
+        if (carried != atLabel.end() && !fallsInto(i)) {
+          known = carried->second.first;
+          flagsMatchA = carried->second.second;
+        } else {
+          known.clear();
+          flagsMatchA = false;
+        }
+        continue;
+      }
       if (l.kind != Kind::Ins) {
         known.clear();
         flagsMatchA = false;
         continue;
+      }
+      if (l.flow && isJump(l.mnem)) {
+        const auto r = refs.find(l.src);
+        if (r != refs.end() && r->second == 1) atLabel[l.src] = {known, flagsMatchA};
       }
       if (l.mnem == "LD" && l.dst == "A") {
         const std::string k = keyOf(l.src);
@@ -427,14 +471,26 @@ class Pass {
         dropIf([&](const std::string& k) { return baseOf(k) == base; });
       }
     };
+    const std::map<std::string, int> refs = refCounts();
+    std::map<std::string, std::vector<std::string>> atLabel;
     for (size_t i = 0; i < lines_.size(); i++) {
       if (!alive_[i]) continue;
       const Line& l = info_[i];
       if (l.stmt) dropIf([](const std::string& k) { return isTempBase(baseOf(k)); });
       if (l.kind == Kind::Skip) continue;
+      if (l.kind == Kind::Label) {
+        const auto carried = atLabel.find(labelName(i));
+        if (carried != atLabel.end() && !fallsInto(i)) known = carried->second;
+        else known.clear();
+        continue;
+      }
       if (l.kind != Kind::Ins) {
         known.clear();
         continue;
+      }
+      if (l.flow && isJump(l.mnem)) {
+        const auto r = refs.find(l.src);
+        if (r != refs.end() && r->second == 1) atLabel[l.src] = known;
       }
       if (l.mnem == "LD" && l.dst == "D2") {
         const std::string k = wordKey(l.src);
