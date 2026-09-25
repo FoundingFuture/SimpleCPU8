@@ -29,7 +29,7 @@ h2:
         JNZ pass
 h3:
         LD A <- [D1]+
-        SUB A <- 79        ; O
+        CMP A, 79        ; O
         JNZ pass
 h4:
 ; Matched. Row 20 of the 42 column text screen at $FAC0 is $FAC0 + 20 * 42.

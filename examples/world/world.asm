@@ -78,23 +78,18 @@
 ; ---- spin ----
 ;
 ; Two bytes a frame. The GPU transforms, clips, projects, shades and draws
-; the whole world from that.
-loop:   LD D1 <- spin                  ; the yaw of object 0
-        LD A <- [spin+1]               ; low byte first, so a carry can ripple
-        ADD A <- 160
-        LD [spin+1] <- A
-        LD A <- [spin]
-        ADC A <- 0                     ; the carry out of the low byte
-        LD [spin] <- A
+; the whole world from that. A yaw is a 16 bit word, and a D register adds
+; to a whole word at once: load it, step it through the address adder,
+; store it back.
+loop:   LD D1 <- [spin]                ; the yaw of object 0
+        LD D1 <- D1+160
+        LD [spin] <- D1
 
 ; The second pyramid turns the other way, so the pair is obviously two
 ; objects rather than one drawn twice.
-        LD A <- [spin2+1]
-        SUB A <- 96
-        LD [spin2+1] <- A
-        LD A <- [spin2]
-        SBC A <- 0
-        LD [spin2] <- A
+        LD D1 <- [spin2]
+        LD D1 <- D1-96
+        LD [spin2] <- D1
 
         JSR waitframe
         JMP loop

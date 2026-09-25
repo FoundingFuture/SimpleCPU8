@@ -149,34 +149,26 @@ move:   LD D1 <- drift
         LD [mi] <- A
         LD A <- 12
         LD [mc] <- A
-; An ALU operand is an immediate or a zero page address, never a pointer
-; offset, so each delta lands in mdx before it can be added.
-mloop:  LD A <- [D1+2]
-        LD [mdx] <- A
-        LD A <- [D1]
-        ADD A <- [mdx]
-        LD [mt] <- A
+; The ALU reads a byte through a D register and a displacement, so the
+; delta at [D1+2] is added where it lies, with no copy to the zero page.
+mloop:  LD A <- [D1]
+        ADD A <- [D1+2]                ; x + dx, the ALU reading through D1
         CMP A, 249
         JC mxok
         LD A <- 0                      ; off the edge: turn around instead
-        SUB A <- [mdx]
+        SUB A <- [D1+2]
         LD [D1+2] <- A
         JMP mdy
-mxok:   LD A <- [mt]
-        LD [D1] <- A
-mdy:    LD A <- [D1+3]
-        LD [mdx] <- A
-        LD A <- [D1+1]
-        ADD A <- [mdx]
-        LD [mt] <- A
+mxok:   LD [D1] <- A                   ; CMP kept the new x in A
+mdy:    LD A <- [D1+1]
+        ADD A <- [D1+3]
         CMP A, 249
         JC myok
         LD A <- 0
-        SUB A <- [mdx]
+        SUB A <- [D1+3]
         LD [D1+3] <- A
         JMP mput
-myok:   LD A <- [mt]
-        LD [D1+1] <- A
+myok:   LD [D1+1] <- A
 mput:   LD A <- [mi]
         OUTA GPU_SPRITE
         OUT GPU_SPRITE_X_HI, 0
@@ -186,10 +178,7 @@ mput:   LD A <- [mi]
         LD A <- [D1+1]
         OUTA GPU_SPRITE_Y
         OUT GPU_CMD, CMD_SPRITE_MOVE
-        INC D1
-        INC D1
-        INC D1
-        INC D1
+        LD D1 <- D1+4                  ; the next record
         LD A <- [mi]
         ADD A <- 1
         LD [mi] <- A
@@ -211,10 +200,8 @@ light:  OUT GPU_CMD, CMD_COLLIDE_GROUP_ALL
 lloop:  LD A <- [li]
         OUTA GPU_SPRITE
         LD A <- [D1]
-        JZ ldim
+        JZ lset                        ; nothing touched: A is already 0
         LD A <- 1
-        JMP lset
-ldim:   LD A <- 0
 lset:   OUTA GPU_SPRITE_FRAME
         OUT GPU_CMD, CMD_SPRITE_FRAME
         INC D1
@@ -317,8 +304,6 @@ py:     db 124
 pd:     db 0
 mi:     db 0
 mc:     db 0
-mt:     db 0
-mdx:    db 0
 li:     db 0
 lc:     db 0
 dfirst: db 0

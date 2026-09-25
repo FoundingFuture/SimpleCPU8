@@ -70,7 +70,7 @@ nextcol: LD A <- [px]
 ; The grid count is a byte, and 256 does not fit one. It is stored as zero,
 ; which makes this compare read "when px wraps" at the finest level and
 ; "when px reaches the count" at every other.
-        SUB A <- [pn]
+        CMP A, [pn]
         JNZ col
 
 nextrow: LD A <- [py]
@@ -82,7 +82,7 @@ nextrow: LD A <- [py]
 nextlvl: LD A <- [lvl]
         ADD A <- 1
         LD [lvl] <- A
-        SUB A <- 5
+        CMP A, 5
         JNZ level
 done:   HLT
 
@@ -104,22 +104,13 @@ setlevel: LD D1 <- &pntab
         LD [pshift] <- A
 
 ; The step is a float, so it moves eight bytes at a time. lvl times eight is
-; three doublings, which is the only multiply this machine has.
+; three left shifts, and the address adder adds it to the table's base.
         LD A <- [lvl]
         SHL A
-        LD [t2] <- A
-        ADD A <- [t2]
-        LD [t2] <- A
-        ADD A <- [t2]
-        LD [t2] <- A                   ; t2 = lvl * 8
-
+        SHL A
+        SHL A                          ; lvl * 8
         LD D1 <- &steptab
-stwalk: LD A <- [t2]
-        JZ stcopy
-        INC D1
-        SUB A <- 1
-        LD [t2] <- A
-        JMP stwalk
+        LD D1 <- D1+A
 
 stcopy: LD D2 <- &step
         LD A <- 8
@@ -259,19 +250,17 @@ pass:   LD A <- [iter]
 ; sign. Reading it back off the flags costs one IN and one AND, where reading
 ; the float would cost a load and knowing which byte holds the sign bit.
         IN ACP_FLAGS -> A
-        AND A <- ACP_NEGATIVE
+        TST A, ACP_NEGATIVE
         JZ gone                        ; not negative: |z| is 2 or more
 
         JSR backz                      ; znew becomes z and zc for the next pass
         LD A <- [iter]
         CMP A, 24
-        JZ inside
-        JMP pass
+        JNZ pass
 
-gone:   RET
 inside: LD A <- 0                      ; the limit stands for "never escaped"
         LD [iter] <- A
-        RET
+gone:   RET
 
 ; z and its copy both go to zero. The multiply reads its operand at two
 ; addresses, so both slots are cleared.
@@ -309,8 +298,7 @@ cdone:  RET
 
 plot:   LD A <- [iter]
         JZ black
-        LD D1 <- &palette
-        LD A <- [iter]
+        LD D1 <- &palette              ; a D load leaves A alone
         LD A <- [D1+A]
         OUTA GPU_COLOR
         OUT GPU_CMD, CMD_SET_COLOR
@@ -319,18 +307,14 @@ black:  OUT GPU_COLOR, 0
         OUT GPU_CMD, CMD_SET_COLOR
 
 ; The square is block wide, so a point at index px starts at px times block.
-; block is a power of two, so that is a run of doublings and pshift says how
-; many. x + x is x << 1, and this machine has no other shift.
+; block is a power of two, so that is a run of left shifts and pshift says
+; how many.
 box:    LD A <- [px]                   ; the pen goes to the top left corner
-        LD [t0] <- A
         JSR shl
-        LD A <- [t0]
         LD [t4] <- A                   ; keep the left edge for the far corner
         OUTA GPU_X
         LD A <- [py]
-        LD [t0] <- A
         JSR shl
-        LD A <- [t0]
         LD [t1] <- A
         OUTA GPU_Y
         OUT GPU_CMD, CMD_MOVE_TO
@@ -345,20 +329,23 @@ box:    LD A <- [px]                   ; the pen goes to the top left corner
         OUT GPU_CMD, CMD_RECT
         RET
 
-; t0 doubled pshift times. At the finest level pshift is zero and this does
-; nothing at all, which is what a one pixel square wants.
-shl:    LD A <- [pshift]
-        LD [t5] <- A
-shlnext: LD A <- [t5]
-        JZ shldone
-        LD A <- [t0]
+; A shifted left pshift times. The shifts are a run of four SHLs, and the
+; routine jumps into the run so that pshift of them are left. A code label
+; is a slot number, so D1 takes it as a value, the address adder moves it
+; down the run, and JMP D1 goes there. At the finest level pshift is zero
+; and the jump lands on the RET.
+shl:    LD [t0] <- A
+        LD A <- 4
+        SUB A <- [pshift]
+        LD D1 <- shl4
+        LD D1 <- D1+A
+        LD A <- [t0]                   ; a load leaves D1 alone
+        JMP D1
+shl4:   SHL A
         SHL A
-        LD [t0] <- A
-        LD A <- [t5]
-        SUB A <- 1
-        LD [t5] <- A
-        JMP shlnext
-shldone: RET
+        SHL A
+        SHL A
+        RET
 
 .ram
 ; The refinement level, and the shape it gives this pass.
@@ -366,10 +353,8 @@ lvl:    db 0
 pn:     db 0                           ; points across, 0 meaning 256
 pblock: db 0                           ; pixels per square
 pshift: db 0                           ; log2 of pblock
-t2:     db 0
 t3:     db 0
 t4:     db 0
-t5:     db 0
 
 ; Five levels. The grid doubles, the square halves, and 256 is stored as the
 ; zero it becomes in a byte.

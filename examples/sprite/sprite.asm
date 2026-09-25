@@ -44,7 +44,7 @@ defi:   LD A <- [ii]
         LD A <- [ii]
         INC A
         LD [ii] <- A
-        SUB A <- 97
+        CMP A, 97
         JNZ defi
 
 ; --- cannon sprite 19
@@ -128,11 +128,9 @@ nol:    LD A <- [inp]
         JZ nor
         LD A <- [canx]
         ADD A <- 3
-        LD [t0] <- A
         CMP A, 249
         JNC nor
-dor:    LD A <- [t0]
-        LD [canx] <- A
+dor:    LD [canx] <- A
 nor:    OUT GPU_SPRITE, 100
         LD A <- [canx]
         OUTA GPU_SPRITE_X
@@ -204,14 +202,14 @@ noplayer:
         SUB A <- 4
         LD [bx] <- A
         ADD A <- [mincx]     ; the leftmost invader still alive
-        SUB A <- 8
+        CMP A, 8
         JC edge
         JMP stepped
 goright: LD A <- [bx]
         ADD A <- 4
         LD [bx] <- A
         ADD A <- [maxcx]     ; the rightmost invader still alive
-        SUB A <- 248         ; march to the right wall so bombs reach a far-right cannon
+        CMP A, 248         ; march to the right wall so bombs reach a far-right cannon
         JC stepped
 edge:   LD A <- [bdir]
         XOR A <- 1
@@ -226,7 +224,7 @@ nostep:
 ; Three rows put that at by 208, exactly where the line was before.
         LD A <- [by]
         ADD A <- [maxcy]
-        SUB A <- 240
+        CMP A, 240
         JNC youlose
 notfloor:
 
@@ -247,22 +245,12 @@ notfloor:
         OUT GPU_GROUP_B, 1             ; the invader group
         OUT GPU_CMD, CMD_HIT_IN_GROUP
         IN GPU_HIT -> A
-        AND A <- $FF        ; IN sets no flags, so mask before the branch
-        LD [t0] <- A
+        TST A, $FF          ; IN sets no flags, so test before the branch
         JZ nopcol
-pbkill: LD A <- [t0]         ; the invader sprite hit
-        OUTA GPU_SPRITE
+pbkill: OUTA GPU_SPRITE      ; the invader sprite hit
         OUT GPU_CMD, CMD_SPRITE_HIDE
-        LD D1 <- alive       ; alive[hit-1] := 0
-        LD A <- [t0]
-        SUB A <- 1
-        JZ akill
-        LD [t1] <- A
-awalk:  INC D1
-        LD A <- [t1]
-        SUB A <- 1
-        LD [t1] <- A
-        JNZ awalk
+        LD D1 <- alive-1     ; alive[hit-1] := 0, the address adder
+        LD D1 <- D1+A        ; adding the hit to the table's base
 akill:  LD A <- 0
         LD [D1] <- A
         OUT APU_TRACK, 2        ; the explosion, on a track of its own
@@ -286,11 +274,9 @@ nopcol:
         OUT GPU_SPRITE, 100
         OUT GPU_CMD, CMD_SPRITE_HITS
         IN GPU_HIT -> A
-        LD [t0] <- A         ; save it: the AND below destroys A
-        AND A <- 1           ; group 0, an invader reached you
+        TST A, 1             ; group 0, an invader reached you. TST keeps A
         JNZ youlose
-canbomb: LD A <- [t0]
-        AND A <- 8           ; group 3, a bomb
+canbomb: TST A, 8            ; group 3, a bomb
         JZ nocancol
 ; which bomb. The group said what kind, this says which one.
         OUT GPU_SPRITE, 100
@@ -376,22 +362,18 @@ rloop:  LD A <- [ii]
         LD D1 <- cxt
         LD A <- [ii]
         LD A <- [D1+A]
-        LD [t0] <- A
-        LD A <- [bx]
-        ADD A <- [t0]
+        ADD A <- [bx]                  ; column offset plus the block's x
         OUTA GPU_SPRITE_X
         LD D1 <- cyt
         LD A <- [ii]
         LD A <- [D1+A]
-        LD [t0] <- A
-        LD A <- [by]
-        ADD A <- [t0]
+        ADD A <- [by]
         OUTA GPU_SPRITE_Y
         OUT GPU_CMD, CMD_SPRITE_MOVE
         LD A <- [ii]
         INC A
         LD [ii] <- A
-        SUB A <- [ninv]
+        CMP A, [ninv]
         JNZ rloop
 reposx: RET
 
@@ -401,20 +383,17 @@ ibfire: LD A <- [firet]
         SUB A <- 1
         LD [firet] <- A
         RET
-ibready: LD A <- [rng]       ; advance the rng
-        LD [t0] <- A
-        ADD A <- [t0]
-        ADD A <- [t0]
-        ADD A <- [t0]
-        ADD A <- [t0]
+ibready: LD A <- [rng]       ; advance the rng: rng * 5 + 1
+        SHL A
+        SHL A                ; times four
+        ADD A <- [rng]       ; plus itself
         ADD A <- 1
         LD [rng] <- A
 ibmod:  SUB A <- [ninv]    ; reduce it into 0..ninv-1
         JNC ibmod
 ibgot:  ADD A <- [ninv]
         LD [t1] <- A
-        LD D1 <- alive
-        LD A <- [t1]
+        LD D1 <- alive       ; a D load leaves A alone
         LD A <- [D1+A]
         JZ ibno              ; a dead invader: try again next frame
         LD A <- [ib0a]
@@ -453,19 +432,14 @@ ibno:   RET
 ; screen position of the invader whose index is in A: t0 := x+3, t2 := y+10
 ibpos:  LD [t1] <- A
         LD D1 <- cxt
-        LD A <- [t1]
         LD A <- [D1+A]
-        LD [t0] <- A
-        LD A <- [bx]
-        ADD A <- [t0]
+        ADD A <- [bx]
         ADD A <- 3
         LD [t0] <- A
         LD D1 <- cyt
         LD A <- [t1]
         LD A <- [D1+A]
-        LD [t2] <- A
-        LD A <- [by]
-        ADD A <- [t2]
+        ADD A <- [by]
         ADD A <- 10
         LD [t2] <- A
         RET
@@ -559,15 +533,14 @@ drawlives: OUT GPU_COLOR, 0
         LD A <- 4
         LD [t1] <- A
 dllp:   LD A <- [t0]
-        SUB A <- [lives]
+        CMP A, [lives]
         JC dlone
         RET
 dlone:  LD A <- [t1]
         OUTA GPU_X
         OUT GPU_Y, 3
         OUT GPU_CMD, CMD_MOVE_TO
-        LD A <- [t1]
-        ADD A <- 6
+        ADD A <- 6           ; OUT leaves t1 in A
         OUTA GPU_X
         OUT GPU_Y, 8
         OUT GPU_CMD, CMD_RECT
@@ -591,7 +564,7 @@ nextlvl: LD A <- [level]
         LD A <- [ninv]
         ADD A <- 8
         LD [ninv] <- A
-        SUB A <- 97          ; past the last row that fits
+        CMP A, 97          ; past the last row that fits
         JC lvlfit
         LD A <- 96
         LD [ninv] <- A
@@ -632,7 +605,7 @@ slshow: OUT GPU_CMD, CMD_SPRITE_SHOW
 slnext: LD A <- [ii]
         INC A
         LD [ii] <- A
-        SUB A <- 96
+        CMP A, 96
         JNZ slloop
 slx:    JSR edges
         RET

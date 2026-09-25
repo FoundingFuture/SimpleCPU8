@@ -81,18 +81,12 @@
         OUT GPU_TEXT_COL, 2
         OUT GPU_TEXT_ROW, 8
         OUT GPU_CMD, CMD_TEXT_AT
-        LD A <- $12
-        LD [args+0] <- A
-        LD A <- $34
-        LD [args+1] <- A
-        LD A <- $40
-        LD [args+2] <- A
-        LD A <- $48
-        LD [args+3] <- A
-        LD A <- $F5
-        LD [args+4] <- A
-        LD A <- $C3
-        LD [args+5] <- A
+        LD D2 <- $1234                 ; a word goes in whole, high byte first
+        LD [args+0] <- D2
+        LD D2 <- $4048
+        LD [args+2] <- D2
+        LD D2 <- $F5C3
+        LD [args+4] <- D2
         OUT GPU_CART_BANK, get_bankbyte(t5)
         OUT GPU_CART_HI, get_highbyte(t5)
         OUT GPU_CART_LO, get_lowbyte(t5)
@@ -107,14 +101,9 @@
         OUT GPU_TEXT_COL, 2
         OUT GPU_TEXT_ROW, 10
         OUT GPU_CMD, CMD_TEXT_AT
-        LD A <- get_highbyte(name)
-        LD [args+0] <- A
-        LD A <- get_lowbyte(name)
-        LD [args+1] <- A
-        LD A <- get_highbyte(name)
-        LD [args+2] <- A
-        LD A <- get_lowbyte(name)
-        LD [args+3] <- A
+        LD D2 <- name                  ; the string's address, twice
+        LD [args+0] <- D2
+        LD [args+2] <- D2
         OUT GPU_CART_BANK, get_bankbyte(t6)
         OUT GPU_CART_HI, get_highbyte(t6)
         OUT GPU_CART_LO, get_lowbyte(t6)

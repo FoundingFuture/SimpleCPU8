@@ -68,14 +68,11 @@ main:   ; a green voice meter, redrawn each pass
         OUT GPU_X, 8
         OUT GPU_Y, 118
         OUT GPU_CMD, CMD_MOVE_TO
-        LD A <- [nv]
-        SHL A
+        SHL A                 ; OUT leaves A alone, so it still holds nv
         ADD A <- [nv]         ; nv times three
         ADD A <- 8
-        LD [t9] <- A
         OUT GPU_COLOR, $1C    ; green
         OUT GPU_CMD, CMD_SET_COLOR
-        LD A <- [t9]
         OUTA GPU_X
         OUT GPU_Y, 138
         OUT GPU_CMD, CMD_RECT
@@ -93,7 +90,6 @@ replay: OUT APU_CMD, CMD_PLAY
         JMP main
 
 .ram
-t9:     db 0
 nv:     db 0
 
 .data

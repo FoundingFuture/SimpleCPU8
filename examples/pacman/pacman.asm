@@ -217,10 +217,9 @@ main:   JSR vsync
 ; every state has a bed and in three of the four it is silence. See sndbed.
         JSR sndbed
         LD A <- [gstate]
-        SUB A <- 1
+        CMP A, 1
         JZ mainplay
-        LD A <- [gstate]
-        SUB A <- 2
+        CMP A, 2
         JZ maindie
 ; Game over, and nothing leaves state 3 from inside the game. The game over
 ; screen takes over from here. sndbed above has already dropped the bed to
@@ -450,7 +449,7 @@ asloop: JSR actdraw
         LD A <- [acti]
         INC A
         LD [acti] <- A
-        SUB A <- 5
+        CMP A, 5
         JNZ asloop
 asdrawn: OUT GPU_COLOR, 0
         OUT GPU_CMD, CMD_CLEAR
@@ -483,10 +482,8 @@ asdrawn: OUT GPU_COLOR, 0
 atstep: LD A <- [atph]
         CMP A, 5
         JZ atleft
-        LD A <- [atph]
         CMP A, 6
         JZ atright
-        LD A <- [atph]
         CMP A, 7
         JZ atpause
 ; the roster: on the phase's first frame stamp the actor and print its name,
@@ -512,7 +509,6 @@ atnext: LD A <- 0
 atrnew: LD A <- [atph]
         CMP A, 4
         JZ atrpac
-        LD A <- [atph]
         ADD A <- 2
         JMP atrst
 atrpac: LD A <- 1
@@ -640,7 +636,7 @@ aaghost: LD A <- [atx]
         LD [ax] <- A
         JSR actdraw
         LD A <- [atx]
-        SUB A <- [atpx]
+        CMP A, [atpx]
         JC aaeaten           ; the ghost is behind him
         JNZ aashown           ; or exactly under him
 aaeaten: LD A <- [acti]
@@ -707,9 +703,7 @@ lmstep: LD A <- [t1]
         JZ lmgot
         SUB A <- 1
         LD [t1] <- A
-        INC D1
-        INC D1
-        INC D1
+        LD D1 <- D1+3
         JMP lmstep
 lmgot:  LD A <- [D1]
         OUTA GPU_CART_BANK
@@ -747,8 +741,7 @@ mkrows: LD D1 <- work
         LD A <- 0
         LD [t1] <- A
 mrloop: LD [D2] <- D1        ; store the row address, high byte first
-        INC D2
-        INC D2
+        LD D2 <- D2+2
         LD A <- 28
         LD [t2] <- A
 mrstep: INC D1
@@ -938,12 +931,10 @@ dmcol:  LD A <- [D1]
         SUB A <- $23         ; '#'
         JZ dmwall
         LD A <- [dch]
-        SUB A <- $2E         ; '.'
+        CMP A, $2E         ; '.'
         JZ dmdot
-        LD A <- [dch]
-        SUB A <- $6F         ; 'o'
+        CMP A, $6F         ; 'o'
         JZ dmpill
-        LD A <- [dch]
         CMP A, $50         ; 'P'
         JZ dmpac
 ; A tunnel mouth is any digit '1' to '9', not just '1'. Three of the four
@@ -952,16 +943,14 @@ dmcol:  LD A <- [D1]
 ; the corridor that ended on one was a dead end no rule recognised. A range
 ; test, so the digit is also the slot: A holds it zero based by the time
 ; dmtun is reached.
-        LD A <- [dch]
         SUB A <- $31         ; '1', the low end of the tunnel digits
         JC dmdash            ; below '1': not a digit at all
         LD [tund] <- A       ; the digit, zero based: the slot it records into
-        SUB A <- 9
+        CMP A, 9
         JC dmtun             ; '1' to '9'
 dmdash: LD A <- [dch]
         CMP A, $2D         ; '-', one of the two door cells
         JZ dmdoor
-        LD A <- [dch]
         CMP A, $48         ; 'H', the house point
         JZ dmhouse
         JMP dmnext
@@ -1047,7 +1036,7 @@ dmtuna: LD A <- [tunw]
         LD A <- [tund]
         ADD A <- 1
         LD [tunt] <- A
-        SUB A <- [tuncount]
+        CMP A, [tuncount]
         JC dmtunb            ; borrow: the count already covers this slot
         LD A <- [tunt]
         LD [tuncount] <- A
@@ -1388,9 +1377,7 @@ ghstrip: LD [t1] <- A
         SUB A <- 1
         JZ ghsgot            ; ghost 1: D1 is already there
         LD [t2] <- A
-ghswalk: INC D1
-        INC D1
-        INC D1
+ghswalk:LD D1 <- D1+3
         LD A <- [t2]
         SUB A <- 1
         LD [t2] <- A
@@ -1443,13 +1430,7 @@ lvlstep: LD A <- [lvlrem]
         SUB A <- 1
         LD [lvlrem] <- A
         LD D1 <- [lvlptr]
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
+        LD D1 <- D1+7
         LD [lvlptr] <- D1
 lvlsdone: RET
 
@@ -2141,14 +2122,7 @@ aadraw: JSR actdraw
 ; depend on the internals of four routines staying that way (openat destroying
 ; drawmaze's walking pointer is the standing lesson).
         LD D1 <- [acur]
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
+        LD D1 <- D1+8
         JMP aaloop
 ; --- the pass is over, so the reversal it was carrying is spent.
 ; DESIGN: cleared here, at the end of the walk, and not by a counter of the
@@ -2189,7 +2163,7 @@ aaend:  RET
 ; state of his own owes it a value that is not 0.
 actstep: LD A <- [astate]
         JZ ashwait
-        SUB A <- 3
+        CMP A, 3
         JZ aseyes            ; eaten: on the way home, and on its own rules
         JSR modeturn
         JMP asacc
@@ -2241,7 +2215,7 @@ asacc:  LD A <- [acti]
 ; a frame against a frame measured at about 16,400.
         LD A <- [astate]
         JZ asanorm           ; 0: in the house
-        SUB A <- 3
+        CMP A, 3
         JZ asanorm           ; 3: eyes, and they are not slowed
         JSR intunnel
         JZ asanorm
@@ -2458,14 +2432,7 @@ frxblue: LD A <- 2
         LD [D2+5] <- A
         LD A <- [D1+2]       ; the level's frightened speed
         LD [D2+4] <- A
-frxn:   INC D2
-        INC D2
-        INC D2
-        INC D2
-        INC D2
-        INC D2
-        INC D2
-        INC D2
+frxn:   LD D2 <- D2+8
         LD A <- [frg]
         INC A
         LD [frg] <- A
@@ -2502,14 +2469,7 @@ ufback: LD A <- 1
         LD [D2+5] <- A
         LD A <- [ghspd]      ; this level's ghost speed, the one ghcom hands out
         LD [D2+4] <- A
-ufn:    INC D2
-        INC D2
-        INC D2
-        INC D2
-        INC D2
-        INC D2
-        INC D2
-        INC D2
+ufn:    LD D2 <- D2+8
         LD A <- [frg]
         INC A
         LD [frg] <- A
@@ -2614,7 +2574,7 @@ aixdone: RET
 ashwalk: LD A <- [doorx]
         ADD A <- 8
         LD [t3] <- A         ; the column to leave by
-        SUB A <- [ax]
+        CMP A, [ax]
         JZ ashout            ; already on it: head out
         JC ashlf             ; borrow: the column is to the left of here
         LD A <- [ax]
@@ -2786,8 +2746,7 @@ floodhome:
         LD D2 <- hq
         LD [hqhh] <- D2      ; an empty queue is head standing on tail
         LD [D2] <- D1
-        INC D2
-        INC D2
+        LD D2 <- D2+2
         LD [hqth] <- D2
 ; --- the flood. Pop a cell, offer each of its four neighbours one step more
 ; than it, and push the ones that had not been reached. A cell is written on
@@ -2809,50 +2768,31 @@ hdgo:   LD D2 <- [hqhh]
         LD A <- [D1]
         ADD A <- 1
         LD [hdd] <- A        ; what a neighbour of this one is worth
-        LD A <- 1
-        JSR hdfwd            ; right
-        LD A <- 1
-        JSR hdback           ; left
-        LD A <- 30
-        JSR hdfwd            ; down, one field row on
-        LD A <- 30
-        JSR hdback           ; up
+        LD D2 <- D1+1
+        JSR hdvis            ; right
+        LD D2 <- D1-1
+        JSR hdvis            ; left
+        LD D2 <- D1+30
+        JSR hdvis            ; down, one field row on
+        LD D2 <- D1-30
+        JSR hdvis            ; up
         JMP hdloop
 hddone: RET
 
-; --- one neighbour of the cell in hcur. A holds the step in cells: one for a
-; sideways move, one field row for a vertical one.
-; DESIGN: two entries rather than one taking a signed step. There is no sign
-; extension on this machine, so a signed byte would cost a test and a branch
-; on every one of the four neighbours; two entries cost the forward one a JMP.
-; DESIGN: the address is carried as a number in hcur and stepped there, not in
-; a D register. INC D1 exists and nothing takes one back off again, so an
-; address held only in a pointer can be walked forward and never back.
-hdfwd:  ADD A <- [hcurl]
-        LD [hnl] <- A
-        LD A <- 0
-        ADC A <- [hcurh]     ; the carry out of the low byte
-        LD [hnh] <- A
-        JMP hdvis
-hdback: LD [hct] <- A
-        LD A <- [hcurl]
-        SUB A <- [hct]
-        LD [hnl] <- A
-        LD A <- [hcurh]
-        SBC A <- 0           ; and the borrow out of it
-        LD [hnh] <- A
-hdvis:  LD D1 <- [hnh]
-        LD A <- [D1]
-        SUB A <- $FF
+; --- one neighbour of the cell in hcur. D2 holds its address, which the
+; caller stepped off D1 with an address add, forward or back. D1 comes back
+; unchanged, so the next neighbour steps off it again.
+hdvis:  LD A <- [D2]
+        CMP A, $FF
         JZ hdtake            ; open, and not reached yet
         RET
 hdtake: LD A <- [hdd]
-        LD [D1] <- A
-        LD D2 <- [hqth]
-        LD [D2] <- D1
-        INC D2
-        INC D2
-        LD [hqth] <- D2
+        LD [D2] <- A
+        LD D1 <- [hqth]
+        LD [D1] <- D2
+        LD D1 <- D1+2
+        LD [hqth] <- D1
+        LD D1 <- [hcurh]
         RET
 
 ; --- every cell of the field, before the flood: 254 for a wall, 255 for a
@@ -2941,8 +2881,7 @@ hdb1:   LD A <- $FE
         JNZ hdb1
 hdbdn:  RET
 
-; --- D1 := the field cell for tile (dcol, drow), and hnh/hnl the same address
-; as a number, which is what the flood steps off.
+; --- D1 := the field cell for tile (dcol, drow).
 ; DESIGN: the field is 30 wide and 34 tall where the maze is 28 by 31: a one
 ; tile border of wall all round it, and one spare row under the bottom border.
 ; The border is what lets a step off the grid read a wall byte instead of the
@@ -2959,48 +2898,28 @@ hdbdn:  RET
 ; DESIGN: the byte adds wrap on purpose. dcol 255, a step left off column 0,
 ; plus the column shift of one is 0, the sentinel left of the row; dcol 28 is
 ; 29, the sentinel right of it.
-; DESIGN: hct is scratch, live inside this routine and across nothing, so
-; hdback and mkhrows sharing it is safe: no two of the three ever run at once.
 hdcell: LD A <- [drow]
         ADD A <- 1           ; maze row r is field row r + 1
-        LD [hct] <- A
-        ADD A <- [hct]       ; times two: the table holds words
+        SHL A                ; times two: the table holds words
         LD D2 <- hrowtab
         LD D1 <- [D2+A]      ; the field row's first cell
-        LD [hnh] <- D1
         LD A <- [dcol]
         ADD A <- 1           ; past the sentinel
-        LD [hct] <- A
-        LD A <- [hnl]
-        ADD A <- [hct]
-        LD [hnl] <- A
-        LD A <- [hnh]
-        ADC A <- 0
-        LD [hnh] <- A
-        LD D1 <- [hnh]
+        LD D1 <- D1+A
         RET
 
 ; --- the field's row table: 34 addresses, one per field row.
-; DESIGN: built by adding the row width to a running address rather than by
-; walking a pointer that far a row at a time, which is what mkrows does and
-; what mkrows costs. There is nothing to read along the way here.
+; DESIGN: built by adding the row width to a running address in one address
+; add. There is nothing to read along the way here.
 ; DESIGN: once, at startup, not once per level. The shape of the field never
 ; changes; only its contents do, and floodhome rewrites those on every draw.
 mkhrows: LD D1 <- homedist
-        LD [hnh] <- D1
         LD D2 <- hrowtab
         LD A <- 34
         LD [hct] <- A
-mkhr:   LD D1 <- [hnh]
-        LD [D2] <- D1
-        INC D2
-        INC D2
-        LD A <- [hnl]
-        ADD A <- 30
-        LD [hnl] <- A
-        LD A <- [hnh]
-        ADC A <- 0
-        LD [hnh] <- A
+mkhr:   LD [D2] <- D1
+        LD D2 <- D2+2
+        LD D1 <- D1+30
         LD A <- [hct]
         SUB A <- 1
         LD [hct] <- A
@@ -3033,7 +2952,6 @@ pdkeep: RET
 ghdecide: LD A <- [astate]
         CMP A, 2
         JZ frdir             ; frightened: a random turn, with nothing to aim at
-        LD A <- [astate]
         SUB A <- 3
         JZ eyedir            ; eaten: downhill on the field, not aimed at all
         JSR target
@@ -3379,10 +3297,10 @@ canmove: LD [t3] <- A
 ; and never t3, so the split costs the routine nothing: it is the same body
 ; either way in.
 cantile: LD A <- [drow]
-        SUB A <- 31
+        CMP A, 31
         JNC cmedge             ; row 0..30: check the column next
 cmcol:  LD A <- [dcol]
-        SUB A <- 28
+        CMP A, 28
         JC cmtile            ; column 0..27 too: safe to read the tile
 ; NOTE: the cmyes this reaches changes no actor's path in this build, and
 ; saying so is the point of writing it out. wrap runs before canmove now, so
@@ -3447,7 +3365,7 @@ cmtile: LD A <- [doorx]
         ADD A <- [t1]
         LD [t1] <- A
         ADD A <- [t1]        ; drow times 8: the entered row, in pixels
-        SUB A <- [doory]
+        CMP A, [doory]
         JNZ cmwall
 cmdcol: LD A <- [dcol]
         SHL A
@@ -3460,7 +3378,7 @@ cmdcol: LD A <- [dcol]
         JZ cmdoor            ; the left door cell
         LD A <- [t1]
         SUB A <- [doorx]
-        SUB A <- 8
+        CMP A, 8
         JNZ cmwall            ; and the right one
 ; --- the tile being entered IS one of the two door cells.
 ; DESIGN: which side the actor is stepping FROM decides it, not which way it
@@ -3831,12 +3749,8 @@ tfbxy:  LD A <- [D1+3]
         LD A <- [ay]
         CMP A, [tunt]
         JZ tfhitb
-tfnext: INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D2
-        INC D2
+tfnext: LD D1 <- D1+4
+        LD D2 <- D2+2
         LD A <- [tunn]
         SUB A <- 1
         LD [tunn] <- A
@@ -3904,12 +3818,8 @@ itmb:   LD A <- [D1+2]
         JSR itone
         JZ itnext
         RET
-itnext: INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D2
-        INC D2
+itnext: LD D1 <- D1+4
+        LD D2 <- D2+2
         LD A <- [itn]
         SUB A <- 1
         LD [itn] <- A
@@ -4155,7 +4065,6 @@ adstrip: LD A <- [acti]
         LD A <- [astate]
         CMP A, 2
         JZ adskf
-        LD A <- [astate]
         CMP A, 3
         JZ adske
         LD A <- [acti]       ; in the house or hunting: its own colours
@@ -4177,10 +4086,8 @@ adswant: LD [adsk] <- A
         LD A <- [adsk]
         CMP A, 6
         JZ adslf
-        LD A <- [adsk]
         CMP A, 7
         JZ adsle
-        LD A <- [adsk]       ; 1 to 4: its own colours, out of ghsttab
         JMP ghstrip          ; a tail call: it points the latches and defines
 adslp:  LD A <- [aspr]
         OUTA GPU_SPRITE
@@ -4284,7 +4191,7 @@ sfdraw: LD A <- [adir]         ; frame = dir * 3 + phase
 eat:    JSR pactile
         JSR tileat
         LD [dch] <- A
-        SUB A <- $2E         ; '.'
+        CMP A, $2E         ; '.'
         JZ eatdot
         LD A <- [dch]
         SUB A <- $6F         ; 'o'
@@ -4650,14 +4557,7 @@ cttouch: LD A <- [cgs]
         JZ cteat
         JMP ctnext
 ctnext: LD D1 <- [cgp]
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
+        LD D1 <- D1+8
         LD [cgp] <- D1
         LD A <- [cgn]
         SUB A <- 1
@@ -4937,19 +4837,11 @@ sbplay: LD A <- 0
 sbl:    LD A <- [D1+5]
         CMP A, 3
         JZ sbeyes            ; eyes: nothing outranks them, so stop looking
-        LD A <- [D1+5]
         CMP A, 2
         JNZ sbnx
 sbblue: LD A <- 1
         LD [sbb] <- A
-sbnx:   INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
-        INC D1
+sbnx:   LD D1 <- D1+8
         LD A <- [sbn]
         SUB A <- 1
         LD [sbn] <- A
@@ -5020,17 +4912,12 @@ sndstep: LD D1 <- dots
         LD A <- 0
         RET
 sstlo:  LD A <- [D1+1]
-        LD [sstd] <- A
-        LD A <- [sstd]
         CMP A, [srn4]
         JC sst4
-        LD A <- [sstd]
         CMP A, [srn3]
         JC sst3
-        LD A <- [sstd]
         CMP A, [srn2]
         JC sst2
-        LD A <- [sstd]
         CMP A, [srn1]
         JC sst1
         LD A <- 0
@@ -5370,13 +5257,11 @@ pdcand: db 0
 gcol:   db 0
 grow:   db 0
 ; --- the distance field's own scratch. hdd is what a neighbour of the cell
-; being expanded is worth, hcur is that cell's address and hn the neighbour's,
+; being expanded is worth, hcur is that cell's address,
 ; and hqh and hqt are the flood queue's head and tail. Each of those four is a
 ; word, high byte first like every word here, and its two halves must stay
-; adjacent and in that order: LD D1 <- [hcurh] and LD [hnh] <- D1 each carry
-; two bytes. hct is one byte of scratch, live inside hdcell, inside hdback and
-; inside mkhrows, and across nothing: no two of the three are ever running at
-; the same moment. hbest, hbdir and hcand are eyedir's running best and the
+; adjacent and in that order: LD D1 <- [hcurh] and LD [hcurh] <- D1 each carry
+; two bytes. hct is one byte of scratch, the row count inside mkhrows. hbest, hbdir and hcand are eyedir's running best and the
 ; candidate it is trying, pickdir's bstlo/bstdir/pdcand in the shape a one
 ; byte distance needs.
 ; DESIGN: three bytes of their own, and NOT shared with that trio, though the
@@ -5392,8 +5277,6 @@ grow:   db 0
 hdd:    db 0
 hcurh:  db 0
 hcurl:  db 0
-hnh:    db 0
-hnl:    db 0
 hqhh:   db 0
 hqhl:   db 0
 hqth:   db 0
@@ -5472,7 +5355,6 @@ bedw:   db 0
 sbn:    db 0
 sbb:    db 0
 sbk:    db 0
-sstd:   db 0                   ; dots' low byte, while sndstep picks a step
 ; sndlvl's 16 bit remainder, which it counts down by fifths. Live once a level.
 srh:    db 0
 srl:    db 0

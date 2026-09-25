@@ -80,13 +80,12 @@ pad:    IN IO_CONTROLLER -> A
         SUB A <- 2
         LD [ly] <- A
 pnu:    LD A <- [pd]
-        AND A <- BTN_DOWN
+        TST A, BTN_DOWN
         JZ pnd
         LD A <- [ly]
-        SUB A <- 220
+        CMP A, 220
         JNC pnd
-pdok:   LD A <- [ly]
-        ADD A <- 2
+pdok:   ADD A <- 2                     ; CMP kept ly in A
         LD [ly] <- A
 pnd:    RET
 
@@ -97,11 +96,10 @@ ai:     LD A <- [by]
         CMP A, [ry]
         JC aiup
         LD A <- [ry]
-        SUB A <- 220
+        CMP A, 220
         JC aidn
         RET
-aidn:   LD A <- [ry]
-        ADD A <- 1
+aidn:   INC A
         LD [ry] <- A
         RET
 aiup:   LD A <- [ry]
@@ -119,37 +117,33 @@ airet:  RET
 ;   off = ball centre - paddle centre = by + 3 - (paddle + 18)
 ;
 ; A signed byte, so bit 7 is the side of the centre it hit. There is no
-; negate, so the magnitude comes off zero.
+; negate instruction: the magnitude of a negative byte is its bits inverted,
+; plus one.
 angle:  LD A <- [by]
         SUB A <- [pyt]
         SUB A <- 15
-        LD [aoff] <- A
-        TST A, $80
+        TST A, $80                     ; TST keeps the offset in A
         JZ adown
-        LD A <- 0                      ; above the centre: it leaves upward
-        SUB A <- [aoff]
+        XOR A <- $FF                   ; above the centre: it leaves upward,
+        INC A                          ; and the magnitude is the negative
         LD [amag] <- A
         LD A <- 1
         LD [aup] <- A
         JMP azone
-adown:  LD A <- [aoff]
-        LD [amag] <- A
+adown:  LD [amag] <- A
         LD A <- 0
         LD [aup] <- A
 azone:  LD A <- [amag]
         CMP A, 7
         JC amid
-        LD A <- [amag]
-        CMP A, 15
+        CMP A, 15                      ; CMP kept amag in A
         JC aouter
         LD A <- 3                      ; the very end: steepest and fastest
         LD [ady] <- A
-        LD A <- 3
         LD [adx] <- A
         JMP aset
 aouter: LD A <- 2
         LD [ady] <- A
-        LD A <- 2
         LD [adx] <- A
         JMP aset
 amid:   LD A <- 1                      ; the middle, as before
@@ -176,29 +170,24 @@ adxn:   LD A <- 0
 
 ; --- the ball, and the walls. A byte wraps, so a ball that walks off either
 ; end of an axis lands above the court and one test catches both.
-ball:   LD A <- [bdy]
-        LD [bt] <- A
-        LD A <- [by]
-        ADD A <- [bt]
+ball:   LD A <- [by]
+        ADD A <- [bdy]
         LD [by] <- A
         CMP A, 251
         JC bxmove
         LD A <- 0                      ; off the top or the bottom: turn round
-        SUB A <- [bt]
+        SUB A <- [bdy]
         LD [bdy] <- A
-        LD A <- [by]
-        SUB A <- [bt]                  ; and undo the step that left the court
-        SUB A <- [bt]
+        ADD A <- [by]                  ; and undo the step that left the court:
+        ADD A <- [bdy]                 ; twice the new step, the other way
         LD [by] <- A
         OUT APU_TRACK, 1               ; a wall, on its own track so a paddle
         OUT APU_SLOT, 0                ; blip and a wall blip do not cut
         OUT APU_NOTE, 60
         OUT APU_ARG, 100
         OUT APU_CMD, CMD_TRIGGER
-bxmove: LD A <- [bdx]
-        LD [bt] <- A
-        LD A <- [bx]
-        ADD A <- [bt]
+bxmove: LD A <- [bx]
+        ADD A <- [bdx]
         LD [bx] <- A
         RET
 
@@ -242,7 +231,7 @@ bnol:   OUT GPU_SPRITE, 1
 bnor:
 ; Past a paddle is a point. The direction it was travelling says whose.
         LD A <- [bx]
-        SUB A <- 250
+        CMP A, 250
         JC bdone
         LD A <- [bdx]
         TST A, $80                   ; the sign: set means it went left
@@ -313,12 +302,10 @@ bx:     db 124
 by:     db 60
 bdx:    db 2
 bdy:    db 1
-bt:     db 0
 ; The bounce angle's working: the paddle it hit, which way it leaves, and the
 ; offset from that paddle's centre with its sign taken off.
 pyt:    db 0
 xdir:   db 0
-aoff:   db 0
 amag:   db 0
 aup:    db 0
 ady:    db 0

@@ -142,20 +142,17 @@ done:
 toggle: IN IO_CONTROLLER -> A
         AND A <- BTN_FIRE
         LD [now] <- A
-        JZ up
-        LD A <- [was]                  ; held since last frame, do nothing
-        AND A <- BTN_FIRE
-        JZ flip
-        JMP store
-up:
-store:  LD A <- [now]
-        LD [was] <- A
-        RET
+        JZ store
+        LD A <- [was]
+        TST A, BTN_FIRE
+        JNZ store                      ; held since last frame, do nothing
 flip:   LD D1 <- &cflags
         LD A <- [D1]
         XOR A <- CAM_FLAG_PROJ_MATRIX
         LD [D1] <- A
-        JMP store
+store:  LD A <- [now]
+        LD [was] <- A
+        RET
 
 hud:    OUT GPU_CMD, CMD_TEXT_CLEAR
         OUT GPU_CART_BANK, get_bankbyte(msg)
@@ -164,7 +161,7 @@ hud:    OUT GPU_CMD, CMD_TEXT_CLEAR
         OUT GPU_CMD, CMD_PRINTF        ; no conversions, so no arguments
         LD D1 <- &cflags
         LD A <- [D1]
-        AND A <- CAM_FLAG_PROJ_MATRIX
+        TST A, CAM_FLAG_PROJ_MATRIX
         JZ persp
         OUT GPU_CART_BANK, get_bankbyte(orthomsg)
         OUT GPU_CART_HI, get_highbyte(orthomsg)
