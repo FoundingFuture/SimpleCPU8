@@ -31,6 +31,10 @@ struct Sym {
   int addr = 0;    // RAM address, for Global
 };
 
+// The most AST nodes, statements and expressions together, a function may
+// have and still be expanded where it is called.
+constexpr int INLINE_NODES = 40;
+
 [[noreturn]] void fail(const Pos& pos, const std::string& msg) { throw CcError(pos.file, pos.line, msg); }
 
 std::string S(int n) { return std::to_string(n); }
@@ -267,9 +271,29 @@ class Gen {
   std::vector<std::string> romItems_;
   std::map<std::string, RomEntry> romPlan_;
   int saveBytes_ = 0;
+  int ownLocals_ = 0;
+  bool inlineHere_ = false;
   int dSaveBytes_ = 0;
   int dLive_ = 0;
   int frameCursor_ = 0;
+  // The slot a statement's expressions start at. 0 in a function of its
+  // own; the call's slot inside an inlined body, above the caller's live
+  // temps.
+  int sb_ = 0;
+  // An inlined function being expanded: where its returns jump and where
+  // they leave the value.
+  struct Inline {
+    std::string end;
+    int slot;
+    CType ret;
+  };
+  std::vector<Inline> inl_;
+  std::set<std::string> expanding_;
+  // Where the next inlined function's parameters and locals go in the
+  // frame: after the function's own locals, and after each enclosing
+  // expansion's.
+  int inlineBase_ = 0;
+  std::map<std::string, bool> inlinable_;
   int printfBytes_ = 0;
   bool printfUsed_ = false;
   int maxDouble_ = 0;
@@ -589,30 +613,229 @@ class Gen {
     dSaveBytes_ = calls ? maxDouble_ * DSIZE : 0;
     argBytes_ = 0;
     for (const Param& p : f.params) argBytes_ += std::max(sizeOf(p.type), 1);
-    int locals = 0;
-    std::function<void(const StmtPtr&)> walk = [&](const StmtPtr& s) {
-      if (!s) return;
-      switch (s->k) {
-        case StmtKind::Var:
-          // A static local is a global under another label and takes no
-          // frame room.
-          if (s->decl.storage != Storage::Static) locals += sizeOf(s->decl.type);
-          break;
-        case StmtKind::Block: for (const StmtPtr& x : s->body) walk(x); break;
-        case StmtKind::If: walk(s->t); walk(s->f); break;
-        case StmtKind::While: case StmtKind::Do: walk(s->loopBody); break;
-        case StmtKind::For: walk(s->init); walk(s->loopBody); break;
-        case StmtKind::Switch: for (const SwitchCase& c : s->cases) for (const StmtPtr& x : c.body) walk(x); break;
-        default: break;
-      }
-    };
-    walk(f.body);
+    int locals = localsIn(f.body);
+    // The functions inlined here keep their parameters and locals after
+    // this function's own.
+    ownLocals_ = locals;
+    std::set<std::string> seen{f.name};
+    const int area = inlineAreaIn(f.body, seen);
+    // Inlining never makes a frame too big: past the limit, calls stay calls.
+    inlineHere_ = locals + area + saveBytes_ + dSaveBytes_ + argBytes_ <= MAX_FRAME;
+    if (inlineHere_) locals += area;
     localBytes_ = locals;
     frameSize_ = locals + saveBytes_ + dSaveBytes_ + argBytes_;
     if (frameSize_ > MAX_FRAME) {
       fail(f.pos, f.name + " needs a frame of " + S(frameSize_) + " bytes and a frame reaches " + S(MAX_FRAME) +
                       ". A local reaches its frame through [D1+n], and n is one byte. Move the big one to a global.");
     }
+  }
+
+  // The frame bytes a function's own locals take. A static local is a
+  // global under another label and takes none.
+  static int localsIn(const StmtPtr& s) {
+    if (!s) return 0;
+    int n = 0;
+    switch (s->k) {
+      case StmtKind::Var:
+        if (s->decl.storage != Storage::Static) n += sizeOf(s->decl.type);
+        break;
+      case StmtKind::Block: for (const StmtPtr& x : s->body) n += localsIn(x); break;
+      case StmtKind::If: n += localsIn(s->t) + localsIn(s->f); break;
+      case StmtKind::While: case StmtKind::Do: n += localsIn(s->loopBody); break;
+      case StmtKind::For: n += localsIn(s->init) + localsIn(s->loopBody); break;
+      case StmtKind::Switch:
+        for (const SwitchCase& c : s->cases) for (const StmtPtr& x : c.body) n += localsIn(x);
+        break;
+      default: break;
+    }
+    return n;
+  }
+
+  // ---- inlining ---------------------------------------------------------------
+  //
+  // A small static function is expanded where it is called: its arguments
+  // are stored into the caller's frame, its body runs there, and a return
+  // leaves the value in the call's slot. The call, the frame set up and
+  // taken down, and the return are gone. The function stays in the
+  // program for any caller that takes its address or cannot inline it.
+
+  // Small, static, and simple enough: no doubles, no assembly, no address
+  // taken of anything, nothing variadic.
+  bool inlinable(const FuncDecl& f) {
+    auto hit = inlinable_.find(f.name);
+    if (hit != inlinable_.end()) return hit->second;
+    bool ok = f.body && (f.isStatic || f.isInline) && !f.variadic && !isFloat(f.ret) && !isWide(f.ret);
+    for (const Param& p : f.params) {
+      if (isFloat(p.type) || isWide(p.type) || p.name.empty()) ok = false;
+    }
+    int nodes = 0;
+    std::function<void(const ExprPtr&)> ex = [&](const ExprPtr& e) {
+      if (!e || !ok) return;
+      nodes++;
+      if (e->k == ExprKind::Num && isFloat(e->type)) ok = false;
+      if (e->k == ExprKind::Cast && (isFloat(e->type) || isWide(e->type))) ok = false;
+      if (e->k == ExprKind::Un && e->op == "&") ok = false;
+      if (e->k == ExprKind::Call && e->fn && e->fn->k == ExprKind::Id && e->fn->name == "gpu_printf") ok = false;
+      for (const ExprPtr& x : {e->fn, e->e, e->l, e->r, e->a, e->i, e->c, e->t, e->f}) ex(x);
+      for (const ExprPtr& x : e->args) ex(x);
+    };
+    std::function<void(const StmtPtr&)> st = [&](const StmtPtr& x) {
+      if (!x || !ok) return;
+      nodes++;
+      if (x->k == StmtKind::Asm) ok = false;
+      if (x->k == StmtKind::Var) {
+        if (isFloat(x->decl.type) || isWide(x->decl.type) || x->decl.type.arrayLen) ok = false;
+        if (x->decl.init) {
+          ex(x->decl.init->one);
+          for (const ExprPtr& y : x->decl.init->list) ex(y);
+        }
+      }
+      ex(x->e);
+      ex(x->c);
+      ex(x->step);
+      st(x->t);
+      st(x->f);
+      st(x->loopBody);
+      st(x->init);
+      for (const StmtPtr& y : x->body) st(y);
+      for (const SwitchCase& c : x->cases) for (const StmtPtr& y : c.body) st(y);
+    };
+    st(f.body);
+    ok = ok && nodes <= INLINE_NODES;
+    inlinable_[f.name] = ok;
+    return ok;
+  }
+
+  // The frame bytes an expansion of f needs: its parameters, its locals,
+  // and the most any call it inlines in turn needs.
+  int inlineArea(const FuncDecl& f, std::set<std::string>& seen) {
+    int own = localsIn(f.body);
+    for (const Param& p : f.params) own += std::max(sizeOf(p.type), 1);
+    seen.insert(f.name);
+    const int inner = inlineAreaIn(f.body, seen);
+    seen.erase(f.name);
+    return own + inner;
+  }
+
+  // The most any one call in s, expanded inline, needs.
+  int inlineAreaIn(const StmtPtr& s, std::set<std::string>& seen) {
+    if (!s) return 0;
+    int most = 0;
+    std::function<void(const ExprPtr&)> ex = [&](const ExprPtr& e) {
+      if (!e) return;
+      if (e->k == ExprKind::Call && e->fn && e->fn->k == ExprKind::Id) {
+        auto f = funcs_.find(e->fn->name);
+        if (f != funcs_.end() && !seen.count(f->first) && inlinable(f->second)) {
+          most = std::max(most, inlineArea(f->second, seen));
+        }
+      }
+      for (const ExprPtr& x : {e->fn, e->e, e->l, e->r, e->a, e->i, e->c, e->t, e->f}) ex(x);
+      for (const ExprPtr& x : e->args) ex(x);
+    };
+    std::function<void(const StmtPtr&)> st = [&](const StmtPtr& x) {
+      if (!x) return;
+      if (x->k == StmtKind::Var && x->decl.init) {
+        ex(x->decl.init->one);
+        for (const ExprPtr& y : x->decl.init->list) ex(y);
+      }
+      ex(x->e);
+      ex(x->c);
+      ex(x->step);
+      st(x->t);
+      st(x->f);
+      st(x->loopBody);
+      st(x->init);
+      for (const StmtPtr& y : x->body) st(y);
+      for (const SwitchCase& c : x->cases) for (const StmtPtr& y : c.body) st(y);
+    };
+    st(s);
+    return most;
+  }
+
+  // f's body in place of a call to it, with the value left in slot.
+  CType genInline(const Expr& call, const FuncDecl& f, int slot) {
+    use(slot);
+    // The arguments, each into a temp from slot up, then into the
+    // parameters' places. A leaf goes straight to its place.
+    int at = inlineBase_;
+    std::vector<int> offsets;
+    for (const Param& p : f.params) {
+      offsets.push_back(at);
+      at += std::max(sizeOf(p.type), 1);
+    }
+    std::vector<std::optional<Side>> leaves;
+    for (size_t i = 0; i < call.args.size(); i++) {
+      const CType want = f.params[i].type;
+      const int size = want.ptr > 0 ? 2 : std::max(sizeOf(want), 1);
+      const int si = slot + static_cast<int>(i);
+      std::optional<Side> leaf = !romRef(call.args[i]) ? leafSide(call.args[i], size) : std::nullopt;
+      if (!leaf) {
+        if (size == 1 && !romRef(call.args[i])) {
+          genLow(call.args[i], si);
+        } else {
+          const CType t = genExpr(call.args[i], si);
+          convert(si, t, want);
+        }
+      }
+      leaves.push_back(leaf);
+    }
+    for (size_t i = 0; i < call.args.size(); i++) {
+      const CType want = f.params[i].type;
+      const int size = want.ptr > 0 ? 2 : std::max(sizeOf(want), 1);
+      const Side v = leaves[i] ? *leaves[i] : sideOf(slot + static_cast<int>(i));
+      const std::string place = "[D1+" + S(offsets[i]) + "]";
+      if (size == 1) {
+        op("LD A <- " + v.lo);
+        op("LD " + place + " <- A");
+      } else if (!leaves[i]) {
+        op("LD D2 <- " + word(slot + static_cast<int>(i)));
+        op("LD " + place + " <- D2");
+      } else {
+        op("LD A <- " + v.hi);
+        op("LD " + place + " <- A");
+        op("LD A <- " + v.lo);
+        op("LD [D1+" + S(offsets[i] + 1) + "] <- A");
+      }
+    }
+
+    // The callee's world: its own parameters, its own locals after them,
+    // its own loops, and its returns jumping to the end.
+    // Moved, not copied: a caller up the stack may hold a reference into
+    // one of its scopes, and a moved vector keeps its elements in place.
+    auto savedScopes = std::move(scopes_);
+    const int savedCursor = frameCursor_;
+    const int savedBase = inlineBase_;
+    const FuncDecl* savedFn = fn_;
+    const int savedSb = sb_;
+    auto savedBreaks = breaks_;
+    auto savedContinues = continues_;
+    scopes_ = {};
+    scopes_.emplace_back();
+    for (size_t i = 0; i < f.params.size(); i++) {
+      const Param& p = f.params[i];
+      scopes_[0][p.name] = Sym{p.name, p.name, p.type, Sym::Where::Frame, offsets[i], 0};
+    }
+    frameCursor_ = at;
+    inlineBase_ = at + localsIn(f.body);
+    fn_ = &f;
+    sb_ = slot;
+    breaks_.clear();
+    continues_.clear();
+    const std::string end = uniq("inl_" + f.name);
+    inl_.push_back({end, slot, f.ret});
+    expanding_.insert(f.name);
+    genStmt(f.body);
+    expanding_.erase(f.name);
+    inl_.pop_back();
+    lab(end);
+    scopes_ = std::move(savedScopes);
+    frameCursor_ = savedCursor;
+    inlineBase_ = savedBase;
+    fn_ = savedFn;
+    sb_ = savedSb;
+    breaks_ = savedBreaks;
+    continues_ = savedContinues;
+    return f.ret;
   }
 
   static bool callsIn(const ExprPtr& e) {
@@ -658,6 +881,8 @@ class Gen {
     // Locals occupy the bottom of the frame, arguments the top, because the
     // caller wrote the arguments before the callee knew its own local count.
     frameCursor_ = 0;
+    inlineBase_ = ownLocals_;
+    expanding_ = {f.name};
     int argOff = localBytes_ + saveBytes_ + dSaveBytes_;
     for (const Param& p : f.params) {
       if (p.name.empty()) continue;
@@ -711,7 +936,9 @@ class Gen {
 
   void genStmt(const StmtPtr& sp) {
     const Stmt& s = *sp;
-    e(std::string("        ") + STMT_MARK);
+    // Inside an inlined function the caller's temps below sb_ are live, so
+    // the marker that says none is would be a lie there.
+    if (inl_.empty()) e(std::string("        ") + STMT_MARK);
     mark(s.pos);
     switch (s.k) {
       case StmtKind::Empty: return;
@@ -762,8 +989,8 @@ class Gen {
             const CType elem{d.type.base, d.type.ptr, std::nullopt};
             const int w = sizeOf(elem);
             for (size_t i = 0; i < d.init->list.size(); i++) {
-              genExpr(d.init->list[i], 0);
-              storeFrame(sym.offset + static_cast<int>(i) * w, w, 0);
+              genExpr(d.init->list[i], sb_);
+              storeFrame(sym.offset + static_cast<int>(i) * w, w, sb_);
             }
             return;
           }
@@ -776,9 +1003,9 @@ class Gen {
             }
             return;
           }
-          const CType t = genExpr(d.init->one, 0);
-          convert(0, t, d.type);
-          storeFrame(sym.offset, size, 0);
+          const CType t = genExpr(d.init->one, sb_);
+          convert(sb_, t, d.type);
+          storeFrame(sym.offset, size, sb_);
         }
         return;
       }
@@ -786,6 +1013,23 @@ class Gen {
       case StmtKind::Expr: genEffect(s.e); return;
 
       case StmtKind::Return: {
+        if (!inl_.empty()) {
+          // An inlined function's return leaves its value where the call
+          // wants it and jumps to the end of the expansion.
+          const Inline& in = inl_.back();
+          if (s.e && sizeOf(in.ret) > 0) {
+            if (sizeOf(in.ret) == 1 && in.ret.ptr == 0 && !romRef(s.e) && !isFloat(typeOf(s.e))) {
+              genLow(s.e, in.slot);
+            } else {
+              const CType t = genExpr(s.e, in.slot);
+              convert(in.slot, t, in.ret);
+            }
+          } else if (s.e) {
+            genEffect(s.e);
+          }
+          op("JMP " + in.end);
+          return;
+        }
         if (s.e && isFloat(fn_->ret)) {
           genDouble(s.e, 0, 0);
           moveConst(emitter(), DRET, slotAt(0));
@@ -813,7 +1057,7 @@ class Gen {
       case StmtKind::If: {
         const std::string els = uniq("else");
         const std::string end = uniq("endif");
-        branch(s.c, false, els, 0);
+        branch(s.c, false, els, sb_);
         genStmt(s.t);
         if (s.f) {
           op("JMP " + end);
@@ -840,7 +1084,7 @@ class Gen {
         breaks_.pop_back();
         continues_.pop_back();
         lab(test);
-        branch(s.c, true, top, 0);
+        branch(s.c, true, top, sb_);
         lab(end);
         return;
       }
@@ -856,7 +1100,7 @@ class Gen {
         breaks_.pop_back();
         continues_.pop_back();
         lab(cont);
-        branch(s.c, true, top, 0);
+        branch(s.c, true, top, sb_);
         lab(end);
         return;
       }
@@ -880,7 +1124,7 @@ class Gen {
         lab(cont);
         if (s.step) genEffect(s.step);
         lab(test);
-        if (s.c) branch(s.c, true, top, 0);
+        if (s.c) branch(s.c, true, top, sb_);
         else op("JMP " + top);
         lab(end);
         frameCursor_ = save;
@@ -892,7 +1136,7 @@ class Gen {
         // A chain of compares. A jump table wants JMP D2 and a table of
         // slots, and that is worth doing once there is something to measure.
         const std::string end = uniq("swend");
-        const CType t = genExpr(s.e, 0);
+        const CType t = genExpr(s.e, sb_);
         std::vector<std::string> bodies;
         for (size_t i = 0; i < s.cases.size(); i++) bodies.push_back(uniq("case"));
         std::optional<std::string> dflt;
@@ -901,7 +1145,7 @@ class Gen {
           if (!c.value) { dflt = bodies[i]; continue; }
           // A byte switch never matches a case its byte cannot hold.
           if (isByte(t) && !fitsByte(t, *c.value)) continue;
-          compareSides("==", sideOf(0), immSide(toInt32(*c.value)), isByte(t) ? 1 : 2, false, true, bodies[i]);
+          compareSides("==", sideOf(sb_), immSide(toInt32(*c.value)), isByte(t) ? 1 : 2, false, true, bodies[i]);
         }
         op("JMP " + dflt.value_or(end));
         breaks_.push_back(end);
@@ -941,15 +1185,16 @@ class Gen {
       return;
     }
     if (ep->k == ExprKind::Assign) {
-      genAssign(ep, 0, false);
+      genAssign(ep, sb_, false);
       return;
     }
     if (ep->k == ExprKind::Post || (ep->k == ExprKind::Un && (ep->op == "++" || ep->op == "--"))) {
       // The old value is not wanted, so i++ is ++i, which is i += 1.
-      genAssign(mkAssign(ep->e, mkBin(ep->op == "++" ? "+" : "-", ep->e, numOne(ep->pos), ep->pos), ep->pos), 0, false);
+      genAssign(mkAssign(ep->e, mkBin(ep->op == "++" ? "+" : "-", ep->e, numOne(ep->pos), ep->pos), ep->pos), sb_,
+                false);
       return;
     }
-    genExpr(ep, 0);
+    genExpr(ep, sb_);
   }
 
   // ---- conditions ------------------------------------------------------------
@@ -2370,6 +2615,7 @@ class Gen {
                       (f.params.size() == 1 ? "" : "s") + " and " + S(static_cast<int>(e.args.size())) +
                       (e.args.size() == 1 ? " was" : " were") + " given");
     }
+    if (inlineHere_ && inlinable(f) && !expanding_.count(name)) return genInline(e, f, slot);
 
     // Every argument is evaluated BEFORE the stack moves, because an argument
     // may itself contain a call and that call would move it again. A double
