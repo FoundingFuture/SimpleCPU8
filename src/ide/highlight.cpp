@@ -236,10 +236,10 @@ std::vector<Span> lexAssembly(std::string_view s) {
 
 const std::set<std::string, std::less<>>& basicKeywords() {
   static const std::set<std::string, std::less<>> words = {
-      "ABS",  "AND",   "ASC",   "CALL",   "CATALOG", "CHR$",  "CIRCLE", "CLS",  "COLOR", "DEEK",
-      "DELETE", "DOKE", "DRAW", "END",    "FOR",     "GOSUB", "GOTO",   "IF",   "INKEY$", "INPUT",
+      "ABS",  "AND",   "ASC",   "CALL",   "CATALOG", "CHR$",  "CIRCLE", "CLS",  "DEEK",  "DELETE",
+      "DOKE", "DRAW",  "END",   "FOR",    "GOSUB",   "GOTO",  "IF",     "INK",  "INKEY$", "INPUT",
       "JMP",  "JSR",   "KEY",   "LEN",    "LET",     "LIST",  "LOAD",   "MID$", "MOD",   "MOVE",
-      "NEW",  "NEXT",  "NOT",   "OR",     "PAD",     "PAPER", "PEEK",   "PLOT", "POINT", "POKE",
+      "NEW",  "NEXT",  "NOT",   "OR",     "PAD",     "PAPER", "PEEK",   "PIXEL", "PLOT", "POKE",
       "PRINT", "REM",  "RETURN", "RND",   "RUN",     "SAVE",  "STEP",   "STOP", "STR$",  "THEN",
       "TO",   "USR",   "VAL",   "WAIT"};
   return words;

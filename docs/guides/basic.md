@@ -550,9 +550,9 @@ program needs a row of numbers, `POKE` them into a run of boxes and
 ## Drawing
 
 Six words draw on the 256 by 256 screen. `PAPER` fills it with a colour.
-`COLOR` picks the pen. `MOVE` puts the pen at a point without drawing.
+`INK` picks the pen. `MOVE` puts the pen at a point without drawing.
 `DRAW` draws a line from the pen to a point. `CIRCLE` fills a disc
-around the pen. `PLOT` puts one white dot at a point. `POINT(X,Y)` reads
+around the pen. `PLOT` puts one white dot at a point. `PIXEL(X,Y)` reads
 the colour of a pixel back.
 
 A colour is a number from 0 to 255. Multiply the red by 32 and the green
@@ -566,13 +566,13 @@ draw and print in the same run. Type this and see for yourself:
 
 ```basic
 10 PAPER 3
-20 COLOR 224
+20 INK 224
 30 MOVE 128,128
 40 CIRCLE 40
-50 COLOR 255
+50 INK 255
 60 MOVE 0,0
 70 DRAW 255,255
-80 PRINT POINT(100,128)
+80 PRINT PIXEL(100,128)
 ```
 
 ```text
@@ -581,7 +581,7 @@ draw and print in the same run. Type this and see for yourself:
 
 A red disc on blue appears, with a white line from corner to corner.
 The listing stays readable on top. The pixel left of the middle is red,
-so `POINT` says 224. The middle itself is under the line, so it is white. The text is white, so a white paper hides it.
+so `PIXEL` says 224. The middle itself is under the line, so it is white. The text is white, so a white paper hides it.
 
 `CLS` clears the text and paints the picture in the `PAPER` colour
 again. `PAPER` on its own repaints the picture and leaves the text.
@@ -892,7 +892,7 @@ Statements, in a program or at the prompt:
 | `POKE a,v` | puts byte v in box a |
 | `DOKE a,v` | puts word v in boxes a and a+1, high byte first |
 | `PAPER c` | fills the picture with colour c |
-| `COLOR c` | sets the pen colour |
+| `INK c` | sets the pen colour |
 | `MOVE x,y` | puts the pen at x,y |
 | `DRAW x,y` | draws a line from the pen to x,y |
 | `CIRCLE r` | fills a disc of radius r around the pen |
@@ -912,7 +912,7 @@ Functions, used inside an expression:
 | `ABS(n)` | n without its sign |
 | `PEEK(a)` | the byte in box a |
 | `DEEK(a)` | the word in boxes a and a+1 |
-| `POINT(x,y)` | the colour of the pixel at x,y |
+| `PIXEL(x,y)` | the colour of the pixel at x,y |
 | `KEY()` | the code of the key pressed since the last look, or 0 |
 | `PAD()` | the keys held down, added up as bits |
 | `LEN(s$)` | the length of a string |

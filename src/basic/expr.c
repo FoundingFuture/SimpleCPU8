@@ -171,7 +171,7 @@ static int fn_call(void)
         if (lx_is(")")) lx_next();
         return (peek(a) << 8) | peek(a + 1);
     }
-    if (lx_is("POINT")) {
+    if (lx_is("PIXEL")) {
         lx_next();
         if (lx_is("(")) lx_next();
         a = ex_int();

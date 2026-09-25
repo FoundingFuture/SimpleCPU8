@@ -393,7 +393,7 @@ static unsigned char statement(void)
     if (lx_is("LET")) lx_next();
 
     /* Graphics, so a program can draw. Each is one GPU command. */
-    if (lx_is("COLOR")) { lx_next(); gpu_set_color(ex_int()); return 1; }
+    if (lx_is("INK")) { lx_next(); gpu_set_color(ex_int()); return 1; }
     if (lx_is("PLOT")) {
         lx_next();
         {

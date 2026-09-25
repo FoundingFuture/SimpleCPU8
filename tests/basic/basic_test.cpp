@@ -12,6 +12,7 @@
 
 #include <doctest.h>
 
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -731,7 +732,7 @@ TEST_SUITE("it can draw, which is why the GPU is on the bus") {
     auto s = boot();
     settle(*s);
     type(*s, "PAPER 0");
-    type(*s, "COLOR 255");
+    type(*s, "INK 255");
     type(*s, "PLOT 10,10");
     CHECK(s->m->status == Status::Running);
     // Text mode shows the VRAM under the characters, so the dot is on the
@@ -740,11 +741,32 @@ TEST_SUITE("it can draw, which is why the GPU is on the bus") {
     CHECK_EQ(out[10 * 256 + 10], 255);
   }
 
+  TEST_CASE("PIXEL reads back what INK drew, and COLOR and POINT are gone") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PAPER 0");
+    type(*s, "INK 224");
+    type(*s, "MOVE 10,10");
+    type(*s, "DRAW 20,10");
+    type(*s, "PRINT PIXEL(15,10)");
+    const auto lines = screen(*s);
+    // A number prints after a space, where its sign would go.
+    const bool read = std::any_of(lines.begin(), lines.end(), [](const std::string& l) {
+      return l.find_first_not_of(' ') != std::string::npos && l.substr(l.find_first_not_of(' ')) == "224";
+    });
+    CHECK(read);
+    type(*s, "CLS");
+    type(*s, "COLOR 255");
+    type(*s, "PRINT POINT(15,10)");
+    CHECK(has(flat(*s), "UNKNOWN WORD COLOR"));
+    CHECK(has(flat(*s), "POINT IS NOT A VARIABLE"));
+  }
+
   TEST_CASE("CLS clears the picture to the PAPER colour as well as the text") {
     auto s = boot();
     settle(*s);
     type(*s, "PAPER 3");
-    type(*s, "COLOR 255");
+    type(*s, "INK 255");
     type(*s, "PLOT 10,10");
     CHECK_EQ(s->gpu.vram[10 * 256 + 10], 255);
     type(*s, "CLS");
