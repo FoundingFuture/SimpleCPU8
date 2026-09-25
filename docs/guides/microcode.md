@@ -104,9 +104,11 @@ a target, an address, a constant, a word or a port. `RAM` feeds `B`,
 `D1` and `D2`, and `ACC`, `D1` and `D2` feed `RAM`. `STACK` feeds `B`,
 `PC`, `D1` and `D2`. `ACC` feeds `A`, and `A` and `B` feed the `ALU`,
 which feeds `ACC` and `FLAGS`. `STEP` feeds `PC`, `SP`, `D1` and `D2`. The drawing has no wire from
-`STEP` to `ACC`, though `ACC_INC` lights both boxes. There is no wire from `D1` to `D2`, none from `RAM` to `ACC` and none
+`STEP` to `ACC`, though `ACC_INC` lights both boxes. `EA` feeds `D1`
+and `D2`, for an address add. That is also the only way from `D1` to
+`D2`. There is no wire from `RAM` to `ACC` and none
 from `PROG` to anywhere but `IR`. Those absences are the instruction
-set. A register to register move does not exist because no wire
+set. A move between `ACC` and a pointer does not exist because no wire
 carries it.
 
 ## Row semantics
@@ -137,7 +139,7 @@ src/core/signals.h lists every signal in one table. The table gives each
 one the register atoms it writes and the memory it touches. It also
 gives its use of the step unit, its ALU role, its IO role and its
 address role. The conflict rules and the executor both read that table.
-A new signal cannot exist in one and not the other. There are 71 signals. They are
+A new signal cannot exist in one and not the other. There are 83 signals. They are
 grouped here by the unit they drive. `OP16` is the whole operand,
 `OPLO` its low byte and `OPHI` its high byte.
 
@@ -169,11 +171,14 @@ The ALU:
 | `ALU_ADD`, `ALU_SUB`, `ALU_ADC`, `ALU_SBC` | select an arithmetic operation. All four produce `N`, `V`, `Z` and `C` |
 | `ALU_AND`, `ALU_OR`, `ALU_XOR` | select a logic operation. These produce `N` and `Z` and leave `C` and `V` alone |
 | `ALU_PASS_B` | select pass through: the result is `B`. Produces `N` and `Z`. This is the load path |
+| `ALU_SHL`, `ALU_SHR`, `ALU_ROL`, `ALU_ROR`, `ALU_ASR` | select a one bit shift of `A`. `B` is not read. These produce `N`, `Z` and `C`, `C` being the bit shifted out, and leave `V` alone |
 | `ACC_LOAD_ALU` | `ACC <- ALU result` |
 | `FLAGS_LOAD` | `FLAGS <- ALU flags` |
 
 A select alone does nothing. The result exists inside the row and
-vanishes unless `ACC_LOAD_ALU` or `FLAGS_LOAD` captures it. `ALU_ADC`
+vanishes unless `ACC_LOAD_ALU` or `FLAGS_LOAD` captures it. That is how
+`CMP` and `TST` work: a `SUB` or an `AND` select with `FLAGS_LOAD` and
+no `ACC_LOAD_ALU`, so `A` keeps its value. `ALU_ADC`
 adds `C` as it stood at the start of the row, and `ALU_SBC` subtracts it
 as a borrow.
 
@@ -199,19 +204,22 @@ The address stage:
 | `ADDR_A` | base is `ACC`, zero extended |
 | `EA_OFF_OP8` | adds `OPLO` to the base |
 | `EA_OFF_A` | adds `ACC` to the base |
+| `EA_OFF_OP16` | adds `OP16` to the base, for an address add |
 | `EA_CIN` | adds one to the sum |
 
 The effective address is the base plus the offsets, masked to 16 bits.
 `[D1+n]` is `ADDR_D1, EA_OFF_OP8`. `[D1+A]` is `ADDR_D1, EA_OFF_A`.
 `EA_CIN` reaches the second byte of a word without stepping any
 register. These signals carry no action of their own. They shape the
-address the RAM signals in the same row use.
+address the RAM signals in the same row use, or the sum `D1_LOAD_EA`
+and `D2_LOAD_EA` capture.
 
 The pointer registers and the step unit:
 
 | Signal | Does |
 |---|---|
 | `D1_LOAD_OP16`, `D2_LOAD_OP16` | `D1 <- OP16` or `D2 <- OP16`, both halves at once |
+| `D1_LOAD_EA`, `D2_LOAD_EA` | `D1 <- ea` or `D2 <- ea`, the address stage's sum. `LD D2 <- D1+n` is `ADDR_D1, EA_OFF_OP16, D2_LOAD_EA` |
 | `D1_TSTZ`, `D2_TSTZ` | `Z <- (D1 == 0)` or `(D2 == 0)`, from the start of cycle value. The other flags keep their values |
 | `D1_INC`, `D2_INC` | step a pointer by one |
 | `ACC_INC` | step the accumulator by one, wrapping at 256 |
@@ -302,6 +310,8 @@ address base select` and `a data RAM access needs exactly one address
 base select`. The port gateway moves one byte a cycle. The address
 adder takes one base, and a RAM access without a base has no address.
 `RAM_TO_B` alone is refused. `RAM_TO_B, ADDR_D1, ADDR_D2` is refused.
+An address add needs its base as well. `D1_LOAD_EA` without one is
+refused with `D1_LOAD_EA needs exactly one address base select`.
 
 tests/core/conflicts_test.cpp has one case per rule. It also has three
 rows that must pass: the optimal fetch, a post-increment read and the
@@ -768,7 +778,7 @@ branch that never falls through.
 The naive set defines what each instruction means, so the test of any
 other set is agreement with naive. tests/core holds the suite, and
 `build/release/tests/core/sc8_core_tests` runs it. The core tests pass
-56 cases and 8110 assertions in under a second. `-ltc` lists the case
+66 cases and 8899 assertions in under a second. `-ltc` lists the case
 names.
 
 Three layers apply to a set. tests/core/conflicts_test.cpp checks the
@@ -781,7 +791,7 @@ table. A change to either set that moves a number fails the build until
 the table moves with it.
 
 The layer that catches the trap is tests/core/differential_test.cpp. It
-generates 250 random programs of 25 instructions from a list of thirty
+generates 250 random programs of 25 instructions from a list of 42
 shapes, with random operands kept inside RAM. It runs each program on a
 machine with the naive set and on a machine with the optimal set, and
 compares the two at the end. The comparison covers the status, the

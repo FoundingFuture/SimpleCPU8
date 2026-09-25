@@ -163,19 +163,32 @@ The target is harsher than a 6502. Each row here shapes the code generator.
 
 | constraint | consequence |
 |---|---|
-| ALU operands are `imm8` or zero page only | every expression temp lives in `$00` to `$FF`. The zero page is the register file |
+| ALU operands are `imm8`, zero page, or a byte at `[D1+n]` or `[D2+n]` | every expression temp lives in `$00` to `$FF`. The zero page is the register file. A local is an operand in place |
 | one byte register, two pointer registers | accumulator codegen, in the Small-C tradition |
-| no multiply, divide, or shift | a runtime library, on the ACP where it wins. mul8, div8, mul16 and div16 are the pure CPU version, already written as demos |
-| no CMP. A jump on each flag, set and clear | compares are SUB and a jump on its flags, straight from the condition. Signed compare is N xor V. A word load sets Z, so a NULL test is the load |
-| no indexed store, loads only through `[D1+A]` | array stores go through a pointer register |
+| no multiply or divide. Shifts go one bit at a time | a constant multiply, divide or shift is shifts and adds. The rest is a runtime library on the ACP. mul8, div8, mul16 and div16 are the pure CPU version, written as demos |
+| CMP and TST keep A. A jump on each flag, set and clear | a condition is CMP and a jump on its flags, straight from the condition. Signed compare is N xor V. A word load sets Z, so a NULL test is the load |
+| no indexed store, loads only through `[D1+A]` | an array store steps D2 with `LD D2 <- D2+A` first |
+| a 16 bit add only in the address stage, into D1 or D2 | frames, pointer steps and word increments go through `LD Dx <- Dy+n` |
 | the hardware stack is not addressable | C locals cannot live on it |
 | Harvard, program memory read only, 3 byte slots | no self-modifying code. `const` data the CPU reads must be in RAM |
 | JSR takes an immediate, and there is no indirect jump | function pointers and large `switch` need a dispatch table |
 
-Codegen starts naive: evaluate into A, bounce through zero page temps, emit
-what a careful student would write. Quality comes from peephole passes after
-there is something to measure. Every emitted block carries the C it came from
-as a comment, so the assembly is itself a teaching document.
+Codegen evaluates into A and bounces through zero page temps, the way a
+careful student would write it. A leaf operand, a constant or a variable,
+goes to the ALU directly without a temp. Every emitted block carries the C
+it came from as a comment, so the assembly is itself a teaching document.
+
+A peephole pass in src/cc/peephole.cpp then tidies what the generator
+wrote. It drops a jump to the next line. It drops a load of a value A or
+D2 already holds, and a load nothing reads. It drops a store to a temp nobody
+reads. It follows where the flags stop mattering, so a load goes only when
+no jump reads the flags it set.
+Codegen marks every statement boundary with `;@stmt` and fences inline
+assembly with `;@barrier`. Nothing moves across a barrier, and no temp
+is live across a statement mark. A static function of up to 40 nodes is
+expanded at each call, with its parameters in the caller's frame.
+docs/design/instruction-set.md lists the sequences it emits for each
+construct, with their costs.
 
 ## The memory map
 
@@ -321,20 +334,18 @@ The stack POINTER lives in the zero page, at two bytes such as `$FE` and
 word. The ALU can only touch an operand in the zero page:
 
 ```asm
-LD A <- [sp+1]        ; low byte
-SUB A <- 12           ; the frame size
-LD [sp+1] <- A
-LD A <- [sp]          ; high byte
-SBC A <- 0            ; the borrow
-LD [sp] <- A
+LD D1 <- [sp]         ; the caller's stack pointer
+LD D1 <- D1-12        ; the frame size, through the address adder
+LD [sp] <- D1
 ```
 
-Six instructions when `sp` is in the zero page. At `$FFFE` those SUB and SBC
-lines are illegal. The stack DATA lives at the top of RAM. Only the pointer is
-low.
+Three instructions, and D1 is the frame pointer at the end of them. Before
+the address add this was six, a SUB and SBC on the two bytes of `sp`. That
+is why `sp` has to be in the zero page. The stack DATA lives at the top of
+RAM. Only the pointer is low.
 
-D1 is the frame pointer, loaded once per function with `LD D1 <- [sp]`. A
-local is then `[D1+n]`, and that shape exists for both load and store:
+D1 is the frame pointer for the whole function. A local is `[D1+n]`, and
+that shape exists for both load and store:
 
 ```asm
 LD A <- [D1+4]        ; read a local
@@ -346,15 +357,14 @@ The costs, honestly:
 | operation | instructions | why |
 |---|---|---|
 | read or write a local | 1 | `[D1+n]` is a real addressing mode |
-| arithmetic on a local | 3 | the ALU cannot take `[D1+n]`. It bounces through a zero page temp |
-| a call: grow sp, load D1 | about 8 | the six line subtract, then the load |
-| a return: shrink sp | about 6 | the same in reverse |
+| arithmetic on a local | 1 | the ALU takes `[D1+n]` as its operand |
+| a prologue: grow sp, load D1 | 3 | a load, an address add, a store |
+| an epilogue: shrink sp | 3 | an address add, a store, RET |
 | recursion | free | it is a stack |
 
-Static zero page frames would make the middle row 1 instead of 3. That is the
-optimisation for later, for functions that do not recurse, once there is
-something to measure. v1 uses the stack for every function. It is correct, it
-is general, and the compiler stays small.
+Static zero page frames were the optimisation planned for the middle row.
+The `[D1+n]` ALU forms made it unnecessary. The stack serves every
+function. It is correct, it is general, and the compiler stays small.
 
 Return addresses stay on the hardware stack. JSR and RET do not change, and
 they stay one instruction each. The software stack holds data only, so the
@@ -368,10 +378,8 @@ says which stack ran out.
 
 D1 being the frame pointer leaves D2 as the one free pointer register. An
 array load is `D2 = base, A = index, LD A <- [D2+A]`, one instruction. An
-array STORE has no `[D2+A]` form. It is a byte add with carry into a zero
-page word, a load of D2 from it, then the store. About eight instructions.
-Compiled array-heavy code will feel that, and it is the machine, not the
-compiler. `PUSH D1` and `POP D1` on the hardware stack let a function borrow
+array STORE has no `[D2+A]` form. `LD D2 <- D2+A` steps the pointer to the
+element, then the store goes through `[D2]`. `PUSH D1` and `POP D1` on the hardware stack let a function borrow
 D1 for a moment when it must.
 
 ## The calling convention
@@ -548,8 +556,8 @@ if (acp_flags() & ACP_DIVZERO) { ... }
 
 ## Arithmetic and the coprocessor
 
-The CPU has no multiply, divide or shift. The runtime does not have to build
-them out of adds. The ACP is on the bus. The machine's own rule is that heavy
+The CPU has no multiply or divide, and it shifts one bit at a time. The
+runtime does not have to build the rest out of adds. The ACP is on the bus. The machine's own rule is that heavy
 work goes to a peripheral, stated as a cheat. The compiler's runtime uses it
 wherever it wins, and it wins almost everywhere.
 
@@ -561,15 +569,17 @@ instructions. mul8 on the CPU is about a hundred.
 | `int * int` | about 300, mul16's carry chain | about 15 |
 | `int / int` and `%` | about 300, div16 | about 15 |
 | `char * char` | about 100, mul8 | about 15 |
-| `int >> n` | 24 an unrolled bit, or a table per width | about 15, any n |
-| `int << 1` | 6 | about 15 |
+| `int >> 1` | 6, SHR and ROR | about 15 |
+| `int << 1` | 6, SHL and ROL | about 15 |
 | `char << 1` | 3 | about 15 |
 | `&`, `\|`, `^`, `+`, `-` | 1 or 2 | about 15 |
 
-So the CPU keeps what it does natively in one or two instructions. That is
-the logic ops, add and subtract, and shift left by a small constant.
-Multiply, divide, remainder and every right shift go to the coprocessor, at
-every width.
+So the CPU keeps what it does natively in a few instructions. That is the
+logic ops, add and subtract, and a shift by a constant. A multiply by a
+constant with few set bits is shifts and adds. So `x * 10` is three
+shifts and an add. A divide or remainder by a power of two is a shift or an AND.
+A multiply by a variable goes to the coprocessor, at every width. So do
+any other divide and a shift by a variable.
 
 Why the ACP is a flat fifteen. The runtime owns a scratch block, pre-zeroed
 at startup. A 16 bit operand is two stores into an 8 byte slot. The command
@@ -686,7 +696,7 @@ with port names the reader already knows.
 
 ## What the machine gains
 
-Three changes, and none of them is the compiler. Each stands on its own and
+Five changes, and none of them is the compiler. Each stands on its own and
 would improve hand-written assembly too.
 
 ### A wider stack pointer
@@ -816,6 +826,16 @@ because a reader would otherwise have to find out.
 
 Two new names, four reused, one opcode of the fourteen free. A programmer who
 knows `CMD_COPY` knows this one on sight.
+
+### Compares, address adds and shifts
+
+Later, with the compiler's output there to measure, the CPU gained 35
+opcodes. CMP and TST set the flags and keep A. The ALU and CMP take an
+operand at `[D1+n]` or `[D2+n]`. `LD Dx <- Dy+n` and `LD Dx <- Dy+A` put an
+address sum into a D register. SHL, SHR, ROL, ROR and ASR shift A by a bit.
+docs/design/decisions.md records why each one pays its rent. Between them
+and the code generator's work, the BASIC interpreter compiles 12% smaller
+and its loop benchmark runs in a third of the cycles.
 
 ## Separate compilation and the archives
 

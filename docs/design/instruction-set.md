@@ -16,7 +16,7 @@ is the sealed set a ROM runs by default.
 
 ## The opcode map
 
-There are 119 opcodes and 30 mnemonics. The high nibble groups them.
+There are 119 opcodes and 37 mnemonics. The high nibble groups them.
 
 | Range | Family |
 |---|---|
@@ -292,7 +292,8 @@ is a byte move first. A multiply by a constant with few set bits is
 shifts and adds. So x * 10 is three shifts and one add. A divide by a
 power of two is a shift. C rounds towards zero, so a negative signed
 value gets k - 1 added first. A remainder by a power of two is an
-AND.
+AND. A signed char widens without a branch. SHL puts its sign in C, and
+LD A <- 0 then SBC A <- 0 turns C into the high byte.
 
 A frame is made and dropped through the address adder:
 

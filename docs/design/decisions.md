@@ -13,6 +13,7 @@ Eddie decided.
 - [Microcode row cap of 16](#microcode-row-cap-of-16)
 - [Optimal microcode stays sealed](#optimal-microcode-stays-sealed)
 - [Arrows as the data-flow language](#arrows-as-the-data-flow-language)
+- [A random port on the GPU](#a-random-port-on-the-gpu)
 - [Editor parameter column gap](#editor-parameter-column-gap)
 - [Flag display order N V Z C](#flag-display-order-n-v-z-c)
 - [Fast-frame throttling](#fast-frame-throttling)
@@ -23,6 +24,7 @@ Eddie decided.
 - [No shift instructions, no indexed stores](#no-shift-instructions-no-indexed-stores)
 - [The magic box](#the-magic-box)
 - [Input as a bus device](#input-as-a-bus-device)
+- [Audio on a real-time clock](#audio-on-a-real-time-clock)
 - [Wrap instead of crash on RAM overflow](#wrap-instead-of-crash-on-ram-overflow)
 - [High byte first, on every port](#high-byte-first-on-every-port)
 - [Square brackets dereference, round brackets group](#square-brackets-dereference-round-brackets-group)
@@ -31,6 +33,11 @@ Eddie decided.
 - [ACP, and why not FPU, MPU or NPU](#acp-and-why-not-fpu-mpu-or-npu)
 - [The shape belongs in its own ports](#the-shape-belongs-in-its-own-ports)
 - [Generic arithmetic here, the 3D chain in the GPU](#generic-arithmetic-here-the-3d-chain-in-the-gpu)
+- [The GPU's 3D world](#the-gpus-3d-world)
+- [The four world-mode rulings](#the-four-world-mode-rulings)
+- [The camera's two matrices](#the-cameras-two-matrices)
+- [Jumps on a clear flag](#jumps-on-a-clear-flag)
+- [Compares, tests, address adds and shifts](#compares-tests-address-adds-and-shifts)
 - [Deferred instructions](#deferred-instructions)
 
 ## Hex prefix over the 6502 hash
@@ -267,6 +274,11 @@ through INC D1 instead.
 Reason: hardware must pay rent, and additions must beg. The hanoi and circle
 demos show the workarounds stay readable and teach real technique. Shifts and
 indexed addressing have not justified their cost yet.
+
+Later: the shifts paid their rent once a compiler was emitting code. See
+[Compares, tests, address adds and shifts](#compares-tests-address-adds-and-shifts).
+There is still no indexed store. `LD D2 <- D1+A` and a plain store do its
+work in two instructions.
 
 ## The magic box
 
@@ -626,15 +638,45 @@ its subtract. No condition is turned into a 0 or 1 first. The BASIC
 interpreter came out a fifth smaller. A loop benchmark ran in 30% fewer
 cycles.
 
+## Compares, tests, address adds and shifts
+
+The compiler's output showed the same four gaps over and over. A compare
+was a subtract, so A was lost and had to be loaded again. A field of a
+record went through A into a temp before the ALU could use it. A pointer
+could step forward by one and never back. A shift was an add, and a right
+shift did not exist, so every divide went to the coprocessor.
+
+So the machine gained 35 opcodes, for 119 in all:
+
+- CMP and TST set the flags of a SUB or an AND and keep A. The ALU already
+  computed the flags without the write. The rows leave out
+  ACC_LOAD_ALU.
+- The ALU and CMP read their operand through [D1+n] and [D2+n]. The
+  address stage already made that address for loads.
+- `LD Dx <- Dy+n` and `LD Dx <- Dy+A` write the address stage's sum into a
+  D register. The offset is sixteen bits, so a negative one steps back.
+  `LD D2 <- D1` is the same opcode with nothing added. Two signals,
+  D1_LOAD_EA and D2_LOAD_EA, and one new wire from the adder to the
+  pointer registers.
+- SHL, SHR, ROL, ROR and ASR shift A by one bit, through the carry.
+  They need five ALU selects and no new wire.
+
+Each one rides on hardware that was there already.
+The C compiler now builds frames with one address add. It compares
+without reloading, and it multiplies and divides by constants with
+shifts. The BASIC interpreter it compiles came out 12% smaller. Its loop
+benchmark runs in a third of the cycles it took before. That counts the
+opcodes and the compiler work that uses them together.
+
 ## Deferred instructions
 
 Each of these waits behind the same test, must justify its hardware:
 
-- DEC for D registers. Walk pointers forward or reload instead.
-- CMP. Subtract and read flags instead.
-- Indirect ALU operands.
 - A second byte register.
 - D to A transfers.
 - LDS.
+
+A DEC for D registers, CMP and indirect ALU operands were on this list.
+The address add, CMP and the [D1+n] forms answered them.
 
 Spec v2 also carries 12 assumed defaults still open for Eddie to veto.

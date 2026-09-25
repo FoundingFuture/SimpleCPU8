@@ -894,8 +894,8 @@ through the graphics chip, and then `buf[]` reads it.
 
 ## The three chips
 
-The processor is small. It adds, subtracts, moves bytes and jumps. It
-has no multiply, no divide and no shift. Three chips beside it do the
+The processor is small. It adds, subtracts, shifts one bit, moves bytes
+and jumps. It has no multiply and no divide. Three chips beside it do the
 rest, each on its own ports, each answering a command the processor
 writes. The friendly headers are thin covers over those commands. Knowing
 what each chip is makes the headers make sense.
@@ -926,12 +926,14 @@ The ACP owns arithmetic. Its name is short for arithmetic coprocessor. A
 command points it at a block in RAM holding two operands, and it writes
 the result after them. It works on 64 bit integers and on doubles, and
 it does the trigonometry, roots, logs and powers of `math.h`. It also
-does vector and matrix arithmetic. The compiler
-uses it for every multiply, divide and shift on ints, and for every
-operation on a double. A double costs about fifteen instructions
-whatever the operation, which is why this guide can say doubles are
-cheap. An int multiply through the chip is 50 instructions. The same
-multiply as a loop of adds on the processor is 361.
+does vector and matrix arithmetic. The compiler uses it for every
+operation on a double. It also takes an int multiply, divide or shift
+that the processor cannot do in a few lines. A multiply by 10 or a shift by 3
+stays on the processor as shifts and adds. A double costs about fifteen
+instructions whatever the operation, which is why this guide can say
+doubles are cheap. `a * b` on two int variables is 54 instructions
+through the chip. As a shift and add loop on the processor, 123 * 456 is
+172.
 
 The point of the three is the same. The processor is the lesson, and it
 stays small so its every instruction can be understood. The work that

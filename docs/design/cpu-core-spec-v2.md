@@ -105,7 +105,7 @@ The syntax is a readability layer. It does not mirror the encoding.
   the square spelling to use.
 - Constant expressions work anywhere a number works, with C's operators and C's
   precedence. Everything folds before a byte is emitted. The CPU still has no
-  multiply, no divide and no shift.
+  multiply and no divide. It shifts one bit at a time.
 - One mnemonic, LD, covers every load and store. Assumed.
 - `+` after a bracketed register selects the post-increment opcode. Plain and
   post-increment forms are distinct opcodes. The pointer steps by the transfer width.
@@ -767,7 +767,16 @@ The machine moved on. These lines are corrections, not new proposals.
   JP and JNV. Their signals are PC_LOAD_NZ, PC_LOAD_NC, PC_LOAD_NN and PC_LOAD_NV. The
   low nibble is the opcode of the jump each inverts. They cost what the set
   jumps cost. Without them a test that went the other way was a jump over a
-  jump. The machine now has 84 opcodes and 30 mnemonics.
+  jump. That made 84 opcodes and 30 mnemonics.
+- 35 more opcodes make 119, with 37 mnemonics. CMP and TST set the flags
+  and keep A, at 0x47, 0x4F and 0x90 to 0x93. The codes 0x80 to 0x8F run
+  the ALU and CMP on a byte at [D1+n] or [D2+n]. Those at 0x38 to 0x3F write
+  an address sum into a D register. The sum is D1 or D2 plus a sixteen bit
+  offset or A. SHL, SHR, ROL, ROR and
+  ASR at 0x98 to 0x9C shift A one bit through C and leave V. New signals:
+  ALU_SHL, ALU_SHR, ALU_ROL, ALU_ROR, ALU_ASR, EA_OFF_OP16, D1_LOAD_EA and
+  D2_LOAD_EA, 83 in all. docs/design/instruction-set.md has every opcode
+  with its cost.
 - Data RAM is 65536 bytes, not the 2048 this document assumed.
 - The machine keeps four arrays over data RAM that no program can reach.
   `ramReadAt` and `ramWriteAt` hold cycle stamps, `ramReads` and `ramWrites`

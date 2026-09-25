@@ -21,9 +21,17 @@ keyboard or runs forever must not crash.
 
 ## Where the sources come from
 
-`extract-demos.mjs` copies the demo strings out of the browser project's
-TypeScript, so the text here is what its picker loads. Run it again after
-a demo changes there:
+The demos started as the browser project's, and then moved on. The
+sources here use instructions the browser machine lacks. Those are CMP
+and TST, the ALU through `[D1+n]`, address adds and the shifts. Each
+rewrite was checked by running the old and the new ROM side by side. The
+frames match, or the halted state does. mul8, div8 and div16 print their
+answers in a new layout, and audio's notes land a few cycles apart.
+
+The browser originals are kept in tests/asm/golden-src.
+`extract-demos.mjs` copies the demo strings there out of the browser
+project's TypeScript. So the text there is what its picker loads. Run it again
+after a demo changes there:
 
 ```bash
 /opt/node22/bin/node --experimental-strip-types examples/extract-demos.mjs ../SimpleCPU
@@ -32,7 +40,7 @@ a demo changes there:
 No demo names an external file. The MIDI, mazes, sprites and samples were
 generated into db lines by the browser project's scripts.
 tests/asm/golden-bytes holds that project's assembled output per demo, and
-sc8_asm_tests checks the C++ assembler against it.
+sc8_asm_tests assembles golden-src and checks the bytes against it.
 
 ## Memory and the stack
 

@@ -46,7 +46,7 @@ is that nothing is hidden. The cost is that a multiply is a loop, and a
 line of C is ten lines here.
 
 The processor has one byte register for arithmetic, two pointer
-registers, a stack and four flags. It has 84 instructions. Everything
+registers, a stack and four flags. It has 119 instructions. Everything
 else is a chip on the bus, reached through `OUT` and `IN`. The chips are
 the ones the C libraries covered. They are the GPU, the input device,
 the audio chip, the coprocessor and storage. In C a chip was a header. Here
@@ -181,9 +181,11 @@ three instructions are counted. `PC` is 3, the slot of the `HLT`.
 | flags | 4 | `N`, `Z`, `C` and `V`, set by arithmetic and by loads |
 
 `A` is the only register the arithmetic instructions touch. To add two
-bytes in memory, load one into `A`, add the other, store `A`. There is
-no instruction that moves a register to a register. `LD D1 <- D2` is
-refused with `register to register moves do not exist`.
+bytes in memory, load one into `A`, add the other, store `A`. Nothing
+moves `A` to a pointer register or back. `LD A <- D1` is refused with
+`register to register moves do not exist`. The two pointer registers do
+copy into each other: `LD D2 <- D1` is an address add with nothing to
+add.
 
 `D1` and `D2` are the reach into memory beyond the first 256 bytes. A
 byte instruction can name an address only up to 255. Above that, a
@@ -244,9 +246,11 @@ The eight conditional jumps read one flag each, two jumps to a flag.
 `JZ` jumps when `Z` is set and `JNZ` when it is clear. `JC` and `JNC`
 do the same for `C`, `JN` and `JP` for `N`, and `JV` and `JNV` for `V`.
 `JP` is jump if plus: `N` clear means bit 7 is clear, and zero counts as
-plus. To compare `A` with a value, subtract the value. `Z` then means
-equal, `C` means `A` was smaller, and `JNC` jumps when `A` was the same
-or larger.
+plus. To compare `A` with a value, write `CMP A, value`. It sets the
+flags the way `SUB` would and leaves `A` alone. `Z` then means equal,
+`C` means `A` was smaller, and `JNC` jumps when `A` was the same or
+larger. Since `A` survives, a second compare of the same byte needs no
+reload.
 
 Every test has a jump both ways, so a loop never needs a jump over a
 jump. A countdown ends in its own test:
@@ -260,9 +264,10 @@ loop:   SUB A <- 1
 A byte load into `A` sets `Z` and `N` from the byte. A word load into
 `D1` or `D2` sets `Z` from all 16 bits and leaves the other flags. That
 makes the load itself a NULL test: `LD D1 <- [head]` and then `JZ
-empty` or `JNZ follow`. `POPW` and `INW` set `Z` the same way. Stores
-and pointer steps set nothing. A port read into `A` sets nothing
-either, so test the value with `AND A <- $FF` before a `JZ`.
+empty` or `JNZ follow`. `POPW` and `INW` set `Z` the same way, and so
+does an address add such as `LD D1 <- D1+4`. Stores and `INC D1` set
+nothing. A port read into `A` sets nothing either, so test the value
+with `TST A, $FF` before a `JZ`.
 
 ## The memories
 
@@ -306,8 +311,8 @@ moves them.
 
 ## The instructions
 
-The 84 opcodes fall into six families. One mnemonic covers every load
-and store. So the surface is 30 mnemonics, plus four spellings that
+The 119 opcodes fall into eight families. One mnemonic covers every load
+and store. So the surface is 37 mnemonics, plus four spellings that
 map one to one onto them. Each table lists the syntax, what the
 instruction does and the flags it writes. The IDE's manual pane shows
 the same facts. It adds the cycle count of each under both microcode
@@ -372,6 +377,20 @@ Word loads and stores, through `D1` and `D2`:
 | `LD [D2] <- D1` | store where `D2` points | none |
 | `LD [D2+n] <- D1` | store `n` past `D2` | none |
 
+Address arithmetic, a 16 bit add into `D1` or `D2`:
+
+| Syntax | Does | Flags |
+|---|---|---|
+| `LD D1 <- D1+n` | `D1` plus a constant, negative ones too. The sum wraps at 16 bits | `Z` |
+| `LD D1 <- D2-6` | `D2` minus a constant, into the other register | `Z` |
+| `LD D1 <- D2` | a copy, the same opcode with nothing added | `Z` |
+| `LD D1 <- D1+A` | `D1` plus the byte in `A`, from 0 to 255 | `Z` |
+
+Each has a form for every pair of `D1` and `D2`. The adder is the one
+that computes `[D1+n]` for a load, so the sum costs no ALU time and
+leaves `A` and the other flags alone. It steps a pointer back as easily
+as forward, and a record or a row at a time.
+
 A word is two bytes, high byte at the lower address. The register
 outside the brackets decides the width. So `[D1]+` steps by one after
 a byte and by two after a word. A word load into the register that
@@ -394,12 +413,38 @@ Arithmetic and logic, all into `A`:
 | `DEC A` | `SUB A <- 1`, the same opcode | `N V Z C` |
 | `INC D1`, `INC D2` | steps a pointer by one | none |
 
-`v` is a constant or a zero page address in brackets. There is no
-multiply, no divide, no shift and no `DEC D1`. A multiply is a loop of
-adds, or a command to the coprocessor. `ADC` and `SBC` chain bytes into
+`v` is a constant, a zero page address in brackets, or a byte through a
+pointer as `[D1+n]` or `[D2+n]`. So a field of a record is added in
+place: `ADD A <- [D1+3]`. There is no multiply and no divide. A multiply
+is a loop of shifts and adds, or a command to the coprocessor. `ADC` and `SBC` chain bytes into
 wider numbers: add the low bytes with `ADD`, then each higher byte with
 `ADC`. Loads write only `Z` and `N`, so the carry survives the load and
 store between the two.
+
+Compares and tests, which set the flags and keep `A`:
+
+| Syntax | Does | Flags |
+|---|---|---|
+| `CMP A, v` | the flags of `A - v` | `N V Z C` |
+| `TST A, v` | the flags of `A` and `v` | `N Z` |
+
+`CMP` takes the same `v` as `SUB`. `TST` takes a constant, a zero page
+address or `[D1+n]` and `[D2+n]`. `TST A, BTN_FIRE` asks whether one bit
+is set, and `A` still holds the rest of the byte afterwards.
+
+Shifts, one bit at a time, on `A`:
+
+| Syntax | Does | Flags |
+|---|---|---|
+| `SHL A` | shifts left, 0 into bit 0 | `N Z C` |
+| `SHR A` | shifts right, 0 into bit 7 | `N Z C` |
+| `ROL A` | shifts left, `C` into bit 0 | `N Z C` |
+| `ROR A` | shifts right, `C` into bit 7 | `N Z C` |
+| `ASR A` | shifts right, bit 7 kept, a signed halve | `N Z C` |
+
+`C` takes the bit that fell out, and `V` is left alone. So `SHL` on the
+low byte and `ROL` on the high byte double a 16 bit number, and `SHR`
+then `ROR` from the top halve it.
 
 Stack:
 
@@ -541,9 +586,8 @@ loop:   OUT GPU_COLOR, $03            ; blue
         INC A
         LD [x] <- A
 wait:   IN GPU_FRAME
-        SUB A <- [frame]
+        CMP A, [frame]
         JZ wait
-        IN GPU_FRAME
         LD [frame] <- A
         JMP loop
 .ram
@@ -563,9 +607,9 @@ is a signed 16 bit number in two ports, and the high byte reads as zero
 when a program writes only the low one.
 
 The wait loop reads the counter until it differs from the saved copy.
-Then it saves the new value. `SUB A <- [frame]` sets `Z` when the two
-are equal. `JZ wait` then goes round again. Under the naive microcode the
-loop body costs 12 cycles, so the program polls about 5000 times a
+Then it saves the new value. `CMP A, [frame]` sets `Z` when the two
+are equal and keeps the count in `A`, ready to be saved. `JZ wait` goes
+round again. Under the naive microcode the loop body costs 11 cycles, so the program polls about 5000 times a
 frame. A program that draws more does the same wait at the end of its
 frame. Everything it drew then shows at once.
 
@@ -579,31 +623,31 @@ The input device is on ports `$20` to `$22`. `IO_CONTROLLER` is one
 byte of seven buttons, one bit each, and reading it costs nothing. A
 held button stays set. The names `BTN_UP`, `BTN_DOWN`, `BTN_LEFT`,
 `BTN_RIGHT`, `BTN_FIRE`, `BTN_SPACE` and `BTN_ENTER` are the bits, so
-`AND A <- BTN_LEFT` leaves zero unless left is held.
+`TST A, BTN_LEFT` sets `Z` unless left is held.
 
 ```asm
 ; A disc steered with the arrow keys.
 loop:   IN A <- IO_CONTROLLER
         LD [pad] <- A
-        AND A <- BTN_LEFT
+        TST A, BTN_LEFT
         JZ noleft
         LD A <- [x]
         DEC A
         LD [x] <- A
 noleft: LD A <- [pad]
-        AND A <- BTN_RIGHT
+        TST A, BTN_RIGHT
         JZ noright
         LD A <- [x]
         INC A
         LD [x] <- A
 noright: LD A <- [pad]
-        AND A <- BTN_UP
+        TST A, BTN_UP
         JZ noup
         LD A <- [y]
         DEC A
         LD [y] <- A
 noup:   LD A <- [pad]
-        AND A <- BTN_DOWN
+        TST A, BTN_DOWN
         JZ nodown
         LD A <- [y]
         INC A
@@ -611,7 +655,7 @@ noup:   LD A <- [pad]
 nodown: OUT GPU_COLOR, 0
         OUT GPU_CMD, CMD_CLEAR
         LD A <- [pad]
-        AND A <- BTN_FIRE
+        TST A, BTN_FIRE
         JZ calm
         OUT GPU_COLOR, $E0            ; red while fire is held
         JMP paint
@@ -625,9 +669,8 @@ paint:  OUT GPU_CMD, CMD_SET_COLOR
         OUT GPU_RADIUS, 10
         OUT GPU_CMD, CMD_CIRCLE
 wait:   IN GPU_FRAME
-        SUB A <- [frame]
+        CMP A, [frame]
         JZ wait
-        IN GPU_FRAME
         LD [frame] <- A
         JMP loop
 .ram
@@ -637,8 +680,8 @@ pad:    db 0
 frame:  db 0
 ```
 
-The pad byte is read once and kept in `pad`, because each `AND` spoils
-`A`. Each test is the same four lines. Reload the byte and mask one
+The pad byte is read once and kept in `pad`, because a move spoils
+`A`. Each test is the same four lines. Reload the byte and test one
 bit. Skip when zero, or change a coordinate. The arrows and W, A, S, D both
 count. Fire is Z or Ctrl. The disc leaves the screen at one edge and
 comes back at the other. A byte wraps, and the GPU clips.
@@ -904,7 +947,7 @@ still:  OUT GPU_SPRITE, 1
         OUTA GPU_SPRITE_FRAME
         OUT GPU_CMD, CMD_SPRITE_FRAME
 wait:   IN GPU_FRAME
-        SUB A <- [frame]
+        CMP A, [frame]
         JZ wait
         JMP loop
 .ram
@@ -1065,7 +1108,7 @@ done:   HLT
 frame:  IN GPU_FRAME
         LD [fr] <- A
 again:  IN GPU_FRAME
-        SUB A <- [fr]
+        CMP A, [fr]
         JZ again
         RET
 
@@ -1228,35 +1271,29 @@ unsigned char twice(unsigned char n)
 
 ```asm
 twice:
-        LD A <- [__sp+1]
-        ADD A <- 252
-        LD [__sp+1] <- A
-        LD A <- [__sp]
-        ADC A <- 255
-        LD [__sp] <- A
         LD D1 <- [__sp]
-        LD A <- [D1+4]
-        LD [__t0+1] <- A
-        LD A <- 0
-        LD [__t0] <- A
+        LD A <- [D1+0]
+        ADD A <- [D1+0]
+        LD [__ret+1] <- A
+        LD D1 <- D1+1
+        LD [__sp] <- D1
+        RET
 ```
 
-The first six lines subtract 4 from a 16 bit word in the zero page,
-`__sp`, with `ADD` and `ADC` of the two's complement of 4. That word is
-the compiler's stack pointer. C locals live in data RAM on a stack the
-compiler keeps itself, because the hardware stack cannot be read at an
-address. `LD D1 <- [__sp]` makes `D1` the frame pointer, and the
-argument `n` is `[D1+4]`. The compiler widens it to a 16 bit `int` in
-the zero page word `__t0`, because C arithmetic is done in `int`. The
-add follows as `ADD` on the low bytes and `ADC` on the high ones, and
-the answer goes to `__ret`. The function ends by adding the frame back
-to `__sp` and `RET`.
+`__sp` is a word in the zero page, the compiler's stack pointer. C
+locals live in data RAM on a stack the compiler keeps itself, because the
+hardware stack cannot be read at an address. `LD D1 <- [__sp]` makes `D1`
+the frame pointer, and the argument `n` is `[D1+0]`. The add reads it in
+place through the pointer, so nothing is copied first. C does arithmetic
+in `int`, but only the low byte of the sum reaches an `unsigned char`. So
+the compiler works on that byte alone and leaves it in the low byte of
+`__ret`. The last three lines drop the argument with one address add and
+return.
 
-The call site puts 21 in the frame it has computed, writes the new
-`__sp`, and does `JSR twice`. The chapter on the stack wrote the same
-16 bit add by hand in six instructions. The compiler spends about
-thirty, and every one is visible. That is the trade the C guide
-described from the other side.
+The call site steps `__sp` down a byte with `LD D2 <- D1-1`, writes 21
+through `D2`, and does `JSR twice`. The call and the function come to a
+dozen instructions, and every one is visible. That is the trade the C
+guide described from the other side.
 
 The compiler's own names start with two underline characters, as in
 `__sp`, `__ret` and `__t0`. A global named `count` in C is the label `count` in the
@@ -1364,20 +1401,19 @@ Step one draws the basket and steers it. Put it in `catch/src/main.asm`.
 
 loop:   IN A <- IO_CONTROLLER
         LD [pad] <- A
-        AND A <- BTN_LEFT
+        TST A, BTN_LEFT
         JZ noleft
         LD A <- [bx]
         SUB A <- 2
         JC noleft                     ; a borrow: it was already at the edge
         LD [bx] <- A
 noleft: LD A <- [pad]
-        AND A <- BTN_RIGHT
+        TST A, BTN_RIGHT
         JZ noright
         LD A <- [bx]
-        SUB A <- 239                  ; C is set while bx is under 239
+        CMP A, 239                    ; C is set while bx is under 239
         JNC noright
-right:  LD A <- [bx]
-        ADD A <- 2
+right:  ADD A <- 2
         LD [bx] <- A
 noright: OUT GPU_SPRITE, 1
         LD A <- [bx]
@@ -1391,7 +1427,7 @@ noright: OUT GPU_SPRITE, 1
 frame:  IN GPU_FRAME
         LD [fr] <- A
 again:  IN GPU_FRAME
-        SUB A <- [fr]
+        CMP A, [fr]
         JZ again
         RET
 
@@ -1413,11 +1449,11 @@ basket: db 1, 16, 8
 ```
 
 The edge tests use the carry. `SUB A <- 2` borrows when `bx` is 0 or
-1, so `JC` skips the move and the basket stops at the left edge. `SUB
-A <- 239` borrows while `bx` is under 239, so `JC right` allows the
-move and the basket stops at 238, where 16 pixels still fit on the
-screen. The subtract is done to read the flag, and `A` is reloaded
-afterwards.
+1, so `JC` skips the move and the basket stops at the left edge. `CMP
+A, 239` borrows while `bx` is under 239, so `JNC noright` skips the move
+from 239 up. The basket moves two at a time from 120, so it stops at 240,
+where its 16 pixels still just fit on the screen. The compare only reads the flag, so `A` still holds `bx` for the
+add.
 
 Step two adds the star, sprite 2. It starts above the screen at a
 random column and falls two pixels a frame. Below the basket row it
@@ -1479,7 +1515,7 @@ after the basket has moved, the star falls and is redrawn. Past row
         OUTA GPU_SPRITE_Y
         OUT GPU_CMD, CMD_SPRITE_MOVE
         LD A <- [sy]
-        SUB A <- 240                  ; past the basket row: a miss
+        CMP A, 240                    ; past the basket row: a miss
         JC wait
         JSR newstar
 wait:   JSR frame
@@ -1527,20 +1563,19 @@ program, with the pieces in place:
 
 loop:   IN A <- IO_CONTROLLER
         LD [pad] <- A
-        AND A <- BTN_LEFT
+        TST A, BTN_LEFT
         JZ noleft
         LD A <- [bx]
         SUB A <- 2
         JC noleft                     ; a borrow: it was already at the edge
         LD [bx] <- A
 noleft: LD A <- [pad]
-        AND A <- BTN_RIGHT
+        TST A, BTN_RIGHT
         JZ noright
         LD A <- [bx]
-        SUB A <- 239                  ; C is set while bx is under 239
+        CMP A, 239                    ; C is set while bx is under 239
         JNC noright
-right:  LD A <- [bx]
-        ADD A <- 2
+right:  ADD A <- 2
         LD [bx] <- A
 noright: OUT GPU_SPRITE, 1
         LD A <- [bx]
@@ -1564,7 +1599,7 @@ noright: OUT GPU_SPRITE, 1
         OUT GPU_SPRITE_B, 2
         OUT GPU_CMD, CMD_HIT_TEST
         IN A <- GPU_HIT
-        AND A <- $FF                  ; IN sets no flags, so test A
+        TST A, $FF                    ; IN sets no flags, so test A
         JZ nohit
         LD A <- [caught]
         INC A
@@ -1578,7 +1613,7 @@ noright: OUT GPU_SPRITE, 1
         JSR newstar
         JMP tick
 nohit:  LD A <- [sy]
-        SUB A <- 240                  ; past the basket row: a miss
+        CMP A, 240                    ; past the basket row: a miss
         JC tick
         LD A <- [missed]
         INC A
@@ -1627,7 +1662,7 @@ score:  OUT GPU_TEXT_COL, 1
 frame:  IN GPU_FRAME
         LD [fr] <- A
 again:  IN GPU_FRAME
-        SUB A <- [fr]
+        CMP A, [fr]
         JZ again
         RET
 
