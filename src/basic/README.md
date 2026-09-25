@@ -6,9 +6,12 @@ C++. Seven of the files are the browser project's, extracted from
 packages/ui/src/basic/ with extract.mjs. The script writes each TypeScript
 string constant to a file with its exact value. bang.c and store.c are new
 in this tree.
-Two words differ from the browser's BASIC: `INK` replaces `COLOR` in
-run.c, and `PIXEL` replaces `POINT` in expr.c. A refresh from upstream
-brings the old words back, so rename them again after one.
+This BASIC differs from the browser's in its drawing words. `INK`
+replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in expr.c.
+`PLOT` draws in the INK colour, where it drew white. `CIRCLE rx, ry,
+fill` draws a ring in INK with an optional fill, where `CIRCLE r` filled
+a disc. main.c sets INK to white at boot. A refresh from upstream undoes
+all of this, so redo it after one.
 
 ## Files
 
