@@ -37,9 +37,9 @@ add_executable(simplecpu-ide
   sprite_pane.cpp
   "${SC8_GUIDES_H}")
 
-# The window's own full screen is a Cocoa call on macOS.
+# The window's own full screen is a Cocoa call on macOS. The top level
+# CMakeLists.txt enables Objective-C++ for it.
 if(APPLE)
-  enable_language(OBJCXX)
   target_sources(simplecpu-ide PRIVATE native_window.mm)
   target_link_libraries(simplecpu-ide PRIVATE "-framework Cocoa")
 else()
