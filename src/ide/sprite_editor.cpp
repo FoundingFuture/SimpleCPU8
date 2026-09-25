@@ -82,7 +82,8 @@ bool SpriteEditor::open(const std::string& name, const std::string& saveAs) {
   redo_.clear();
   newWidth_ = strip_.width;
   newHeight_ = strip_.height;
-  fit_ = 3;
+  fit_ = keepZoom_ ? 0 : 3;
+  keepZoom_ = false;
   return true;
 }
 
@@ -96,7 +97,8 @@ void SpriteEditor::create(const std::string& name, int width, int height, int fr
   redo_.clear();
   newWidth_ = width;
   newHeight_ = height;
-  fit_ = 3;
+  fit_ = keepZoom_ ? 0 : 3;
+  keepZoom_ = false;
 }
 
 void SpriteEditor::close() {
@@ -115,6 +117,47 @@ bool SpriteEditor::save() {
   }
   dirty_ = false;
   return true;
+}
+
+std::string SpriteEditor::viewText() const {
+  char buf[256];
+  std::snprintf(buf, sizeof buf,
+                "Tool=%d\nZoom=%d\nGrid=%d\nOnion=%d\nFilled=%d\nDither=%d\nColours=%d,%d\n"
+                "PreviewSize=%d\nBackdrop=%d\nPingPong=%d\nOnScreen=%d\n",
+                static_cast<int>(tool_), static_cast<int>(zoom_), grid_ ? 1 : 0, onion_ ? 1 : 0, filled_ ? 1 : 0,
+                dither_ ? 1 : 0, primary_, secondary_, previewScale_, backdrop_, pingPong_ ? 1 : 0, onScreen_ ? 1 : 0);
+  return buf;
+}
+
+void SpriteEditor::setView(const std::string& line) {
+  int a = 0, b = 0;
+  const char* t = line.c_str();
+  if (std::sscanf(t, "Tool=%d", &a) == 1) {
+    tool_ = static_cast<Tool>(std::clamp(a, 0, static_cast<int>(Tool::Roll)));
+  } else if (std::sscanf(t, "Zoom=%d", &a) == 1) {
+    // A saved zoom stands; the fit to the canvas is for a zoom not chosen.
+    zoom_ = static_cast<float>(std::clamp(a, 2, 48));
+    keepZoom_ = true;
+  } else if (std::sscanf(t, "Grid=%d", &a) == 1) {
+    grid_ = a != 0;
+  } else if (std::sscanf(t, "Onion=%d", &a) == 1) {
+    onion_ = a != 0;
+  } else if (std::sscanf(t, "Filled=%d", &a) == 1) {
+    filled_ = a != 0;
+  } else if (std::sscanf(t, "Dither=%d", &a) == 1) {
+    dither_ = a != 0;
+  } else if (std::sscanf(t, "Colours=%d,%d", &a, &b) == 2) {
+    primary_ = static_cast<uint8_t>(std::clamp(a, 0, 255));
+    secondary_ = static_cast<uint8_t>(std::clamp(b, 0, 255));
+  } else if (std::sscanf(t, "PreviewSize=%d", &a) == 1) {
+    previewScale_ = std::clamp(a, 1, 4);
+  } else if (std::sscanf(t, "Backdrop=%d", &a) == 1) {
+    backdrop_ = static_cast<uint8_t>(std::clamp(a, 0, 255));
+  } else if (std::sscanf(t, "PingPong=%d", &a) == 1) {
+    pingPong_ = a != 0;
+  } else if (std::sscanf(t, "OnScreen=%d", &a) == 1) {
+    onScreen_ = a != 0;
+  }
 }
 
 void SpriteEditor::pushUndo() {

@@ -110,6 +110,16 @@ class Ide {
   // at all meanwhile, so the host spends nothing on them. Escape comes
   // back, and it does not reach the machine: Ctrl-C still breaks a BASIC
   // program. The machine runs on and plays on as it did.
+  // Put the window where the layout file had it. Called once after the
+  // layout file is read. A place off every monitor attached now is left
+  // alone, so a window never opens out of sight.
+  void applyWindow();
+  void restoreSprite();
+  // The IDE window itself fills the monitor, borderless. Not the same as
+  // the machine's full screen, which shows the picture alone.
+  void toggleWindowFill();
+  bool windowFilled() const;
+
   void enterScreenOnly();
   void leaveScreenOnly();
   bool screenOnly() const { return screenOnly_; }
@@ -236,6 +246,10 @@ class Ide {
   // The window to go back to: its size and its place.
   int windowedW_ = 0, windowedH_ = 0;
   int windowedX_ = 0, windowedY_ = 0;
+  bool filledBeforeScreen_ = false;  // the IDE window filled the monitor before F12
+  // The window's place before it filled the monitor, which Save layout
+  // keeps, so the next session can go back to it.
+  int unfilledX_ = 0, unfilledY_ = 0, unfilledW_ = 0, unfilledH_ = 0;
   void statusMenu();
   void selectMicrocode(const std::string& name);
   void applyLock();
@@ -313,6 +327,22 @@ class Ide {
   // The section states travel in the layout file, so Save layout keeps
   // them and Reset layout brings the defaults back.
   void registerLayoutHandler();
+  // The IDE window in the layout file: where it was, how big, and whether
+  // it was maximized or filled the monitor. Save layout writes it; the
+  // next start reads it and applyWindow puts the window back.
+  struct WindowPlace {
+    bool known = false;
+    int x = 0, y = 0, w = 0, h = 0;
+    int monitor = 0;
+    bool maximized = false;
+    bool fullscreen = false;
+  };
+  WindowPlace savedWindow_;
+  // The sprite editor in the layout file: shown or not, the sprite it
+  // had open, and its view. restoreSprite reopens that sprite after the
+  // command line opened a project, when the project has it.
+  std::string savedSprite_;
+  WindowPlace windowNow() const;
   void resetSections();  // also the side screen's height
   void runControls();
   void memoryPane(const char* name);

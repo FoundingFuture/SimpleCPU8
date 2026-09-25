@@ -56,6 +56,11 @@ class SpriteEditor {
   void previewPixels(double now, std::vector<uint8_t>& rgba) const;
   // The preview runs on the Screen pane instead of the machine's picture.
   bool previewOnScreen() const { return open_ && onScreen_; }
+  // The editor's view as key=value lines for the layout file: the tool,
+  // the zoom, grid and onion skin, the preview's size, backdrop and
+  // play mode. setView reads one line back; an unknown line is skipped.
+  std::string viewText() const;
+  void setView(const std::string& line);
   // The preview picture is shown in the pane this frame.
   bool previewShown() const { return previewShown_; }
 
@@ -121,6 +126,8 @@ class SpriteEditor {
   // Fit the zoom to the canvas over the next few frames: a freshly
   // docked pane takes a frame or two to reach its size.
   int fit_ = 3;
+  // A zoom read from the layout holds for the first sprite opened after.
+  bool keepZoom_ = false;
 };
 
 }  // namespace sc8

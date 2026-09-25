@@ -314,7 +314,15 @@ size. The size scales every font and
 spacing through Dear ImGui's font scaling, so text stays sharp. Preferences in
 the Settings menu edits both. The pane layout is written only by Save
 layout in that menu, to `layout.ini` beside the settings. It is read at
-the next start. Reset layout puts the built in one back. A change a person
+the next start. The file also keeps the IDE window's place, size and
+monitor, and whether it was maximized or filled the monitor. A place off
+every monitor attached at the next start is ignored. So the window never
+opens out of sight. It keeps the sprite editor
+too: whether it shows and the sprite it had open. The tool, zoom, grid,
+onion skin, both colours and the preview's settings go with it. The sprite opens
+again when the project opened at the start has it. IDE fills the monitor,
+in the Display menu, puts the window over the whole monitor without a
+border. Reset layout puts the built in one back. A change a person
 makes on the way is never saved behind their back.
 
 The CPU level is one view with the run controls on top. Under them sit

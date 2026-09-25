@@ -49,6 +49,7 @@ int main(int argc, char** argv) {
       const std::filesystem::path layout = sc8::Settings::layoutFile();
       if (!layout.empty() && std::filesystem::exists(layout)) ImGui::LoadIniSettingsFromDisk(layout.string().c_str());
     }
+    ide.applyWindow();
     ide.applyScale();
     std::string screenshot;
     bool run = false;
@@ -74,6 +75,7 @@ int main(int argc, char** argv) {
         ide.open(a);
       }
     }
+    ide.restoreSprite();
     if (level) ide.setLevel(*level);
     if (run) ide.run();
 

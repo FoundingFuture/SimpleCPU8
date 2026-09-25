@@ -12,7 +12,7 @@ set(FETCHCONTENT_QUIET OFF)
 if(SC8_BUILD_TESTS)
   FetchContent_Declare(doctest
     GIT_REPOSITORY https://github.com/doctest/doctest.git
-    GIT_TAG v2.4.12
+    GIT_TAG v2.5.3
     GIT_SHALLOW TRUE
     SOURCE_SUBDIR cmake_disabled)
   FetchContent_MakeAvailable(doctest)

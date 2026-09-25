@@ -158,6 +158,144 @@ void Ide::registerLayoutHandler() {
     out->append("\n");
   };
   ImGui::AddSettingsHandler(&h);
+
+  // The window, as one entry:
+  //
+  //   [SC8Window][State]
+  //   Pos=120,80
+  //   Size=1440,900
+  //   Monitor=0
+  //   Maximized=0
+  //   Fullscreen=0
+  ImGuiSettingsHandler w;
+  w.TypeName = "SC8Window";
+  w.TypeHash = ImHashStr("SC8Window");
+  w.UserData = this;
+  w.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler* handler, const char*) -> void* { return handler->UserData; };
+  w.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void* entry, const char* text) {
+    WindowPlace& p = static_cast<Ide*>(entry)->savedWindow_;
+    int a = 0, b = 0;
+    if (std::sscanf(text, "Pos=%d,%d", &a, &b) == 2) {
+      p.x = a;
+      p.y = b;
+    } else if (std::sscanf(text, "Size=%d,%d", &a, &b) == 2) {
+      p.w = a;
+      p.h = b;
+      p.known = a > 0 && b > 0;
+    } else if (std::sscanf(text, "Monitor=%d", &a) == 1) {
+      p.monitor = a;
+    } else if (std::sscanf(text, "Maximized=%d", &a) == 1) {
+      p.maximized = a != 0;
+    } else if (std::sscanf(text, "Fullscreen=%d", &a) == 1) {
+      p.fullscreen = a != 0;
+    }
+  };
+  w.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* handler, ImGuiTextBuffer* out) {
+    const WindowPlace p = static_cast<const Ide*>(handler->UserData)->windowNow();
+    out->appendf("[%s][State]\n", handler->TypeName);
+    out->appendf("Pos=%d,%d\nSize=%d,%d\nMonitor=%d\n", p.x, p.y, p.w, p.h, p.monitor);
+    out->appendf("Maximized=%d\nFullscreen=%d\n\n", p.maximized ? 1 : 0, p.fullscreen ? 1 : 0);
+  };
+  ImGui::AddSettingsHandler(&w);
+
+  // The sprite editor, as one entry: Visible and Open, then the editor's
+  // own view lines.
+  ImGuiSettingsHandler sp;
+  sp.TypeName = "SC8Sprite";
+  sp.TypeHash = ImHashStr("SC8Sprite");
+  sp.UserData = this;
+  sp.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler* handler, const char*) -> void* { return handler->UserData; };
+  sp.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void* entry, const char* text) {
+    Ide* ide = static_cast<Ide*>(entry);
+    const std::string line = text;
+    if (line.rfind("Visible=", 0) == 0) ide->spriteVisible_ = line.size() > 8 && line[8] == '1';
+    else if (line.rfind("Open=", 0) == 0) ide->savedSprite_ = line.substr(5);
+    else ide->sprite_.setView(line);
+  };
+  sp.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* handler, ImGuiTextBuffer* out) {
+    const Ide* ide = static_cast<const Ide*>(handler->UserData);
+    out->appendf("[%s][State]\n", handler->TypeName);
+    out->appendf("Visible=%d\n", ide->spriteVisible_ ? 1 : 0);
+    if (ide->sprite_.isOpen()) out->appendf("Open=%s\n", ide->sprite_.name().c_str());
+    out->append(ide->sprite_.viewText().c_str());
+    out->append("\n");
+  };
+  ImGui::AddSettingsHandler(&sp);
+}
+
+void Ide::restoreSprite() {
+  if (!spriteVisible_ || savedSprite_.empty() || sprite_.isOpen()) return;
+  for (const AssetEntry& a : assetList()) {
+    if (a.name == savedSprite_) {
+      openSprite(savedSprite_);
+      return;
+    }
+  }
+}
+
+Ide::WindowPlace Ide::windowNow() const {
+  WindowPlace p;
+  p.known = true;
+  // Full screen for the machine is a state of the moment, so the window
+  // it came from is what is kept.
+  if (screenOnly_) {
+    p.x = windowedX_;
+    p.y = windowedY_;
+    p.w = windowedW_;
+    p.h = windowedH_;
+    p.fullscreen = filledBeforeScreen_;
+  } else {
+    const Vector2 at = GetWindowPosition();
+    p.x = static_cast<int>(at.x);
+    p.y = static_cast<int>(at.y);
+    p.w = GetScreenWidth();
+    p.h = GetScreenHeight();
+    p.maximized = IsWindowMaximized();
+    p.fullscreen = windowFilled();
+    if (p.fullscreen && unfilledW_ > 0) {
+      p.x = unfilledX_;
+      p.y = unfilledY_;
+      p.w = unfilledW_;
+      p.h = unfilledH_;
+    }
+  }
+  p.monitor = GetCurrentMonitor();
+  return p;
+}
+
+bool Ide::windowFilled() const { return IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE); }
+
+void Ide::toggleWindowFill() {
+  if (!windowFilled()) {
+    const Vector2 at = GetWindowPosition();
+    unfilledX_ = static_cast<int>(at.x);
+    unfilledY_ = static_cast<int>(at.y);
+    unfilledW_ = GetScreenWidth();
+    unfilledH_ = GetScreenHeight();
+  }
+  ToggleBorderlessWindowed();
+}
+
+void Ide::applyWindow() {
+  const WindowPlace& p = savedWindow_;
+  if (!p.known) return;
+  // The monitor it was on may be gone. Keep the place only when a good
+  // part of the title bar lands on a monitor attached now.
+  bool visible = false;
+  for (int m = 0; m < GetMonitorCount(); m++) {
+    const Vector2 o = GetMonitorPosition(m);
+    const int mx = static_cast<int>(o.x), my = static_cast<int>(o.y);
+    const int mw = GetMonitorWidth(m), mh = GetMonitorHeight(m);
+    if (p.x + 80 > mx && p.x + 80 < mx + mw && p.y + 10 > my && p.y + 10 < my + mh) visible = true;
+  }
+  if (visible) {
+    SetWindowSize(std::max(p.w, 640), std::max(p.h, 400));
+    SetWindowPosition(p.x, p.y);
+  } else if (p.monitor >= 0 && p.monitor < GetMonitorCount()) {
+    SetWindowMonitor(p.monitor);
+  }
+  if (p.fullscreen && !windowFilled()) toggleWindowFill();
+  else if (p.maximized) MaximizeWindow();
 }
 
 void Ide::resetSections() {
@@ -485,6 +623,10 @@ void Ide::pushBreakpoints() {
 void Ide::enterScreenOnly() {
   if (screenOnly_) return;
   screenOnly_ = true;
+  // A window that fills the monitor goes back to a plain window first,
+  // so the machine's full screen and the way back start from one state.
+  filledBeforeScreen_ = windowFilled();
+  if (filledBeforeScreen_) toggleWindowFill();
   windowedW_ = GetScreenWidth();
   windowedH_ = GetScreenHeight();
   const Vector2 at = GetWindowPosition();
@@ -504,6 +646,7 @@ void Ide::leaveScreenOnly() {
   if (IsWindowFullscreen()) ToggleFullscreen();
   SetWindowSize(windowedW_, windowedH_);
   SetWindowPosition(windowedX_, windowedY_);
+  if (filledBeforeScreen_) toggleWindowFill();
   // Dear ImGui saw no frames while the screen was full, so it still holds
   // the keys as they were when it went: F12 down, which would read as held
   // and repeat straight back into full screen.
@@ -842,7 +985,10 @@ void Ide::menuBar() {
         note("layout saved to " + f.string());
       }
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("the panes as they are now, for every level, kept for the next start");
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("the panes as they are now, for every level, and the window's place and size, kept for "
+                        "the next start");
+    }
     if (ImGui::MenuItem("Reset layout")) {
       std::error_code ec;
       fs::remove(Settings::layoutFile(), ec);
@@ -883,6 +1029,10 @@ void Ide::menuBar() {
     if (touched) saveDisplay();
     ImGui::Separator();
     if (ImGui::MenuItem("Full screen (Esc returns)", "F12")) enterScreenOnly();
+    if (ImGui::MenuItem("IDE fills the monitor", nullptr, windowFilled())) toggleWindowFill();
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("the IDE window without a border over the whole monitor; Save layout keeps it");
+    }
     ImGui::EndMenu();
   }
   if (lockedMicrocode_) {
