@@ -267,14 +267,31 @@ class Pass {
   // Would the Z and N a removed line set be read before something else
   // sets them? Only a line that sets both, reached in straight line, says
   // no.
-  bool flagsDead(size_t i) const {
+  bool flagsDead(size_t i) const { return flagsDeadFrom(next(i), 4); }
+
+  bool flagsDeadFrom(size_t from, int hops) const {
     bool z = true, n = true;
-    for (size_t j = next(i); j < lines_.size(); j = next(j)) {
+    for (size_t j = from; j < lines_.size(); j = next(j)) {
       const Line& l = info_[j];
       // A statement's code sets every flag it tests, so none is live where
       // one starts.
       if (l.stmt) return true;
-      if (l.kind != Kind::Ins || l.flow) return false;
+      // The code generator's labels do not read the flags, except the one a
+      // signed compare jumps to on overflow, where N is still to be read.
+      if (l.kind == Kind::Label) {
+        if (lines_[j].find("_ovf") != std::string::npos) return false;
+        continue;
+      }
+      if (l.kind != Kind::Ins) return false;
+      if (l.flow) {
+        // A compiled function tests nothing it did not set, so a call or a
+        // return leaves no flag live. A JMP goes on at its target.
+        if (l.mnem == "JSR" || l.mnem == "RET") return true;
+        if (l.mnem != "JMP" || hops == 0) return false;
+        const auto target = labels_.find(l.src);
+        if (target == labels_.end()) return false;
+        return flagsDeadFrom(target->second, hops - 1);
+      }
       if (l.setsZ) z = false;
       if (l.setsN) n = false;
       if (!z && !n) return true;
@@ -303,6 +320,9 @@ class Pass {
   bool knownValues() {
     bool changed = false;
     std::vector<std::string> known;
+    // Z and N describe the value in A: set by the last load into A or the
+    // last ALU result. A reload then changes nothing, flags included.
+    bool flagsMatchA = false;
     auto has = [&](const std::string& k) { return std::find(known.begin(), known.end(), k) != known.end(); };
     auto dropIf = [&](auto pred) { known.erase(std::remove_if(known.begin(), known.end(), pred), known.end()); };
     for (size_t i = 0; i < lines_.size(); i++) {
@@ -314,17 +334,19 @@ class Pass {
       if (l.kind == Kind::Skip) continue;
       if (l.kind != Kind::Ins) {
         known.clear();
+        flagsMatchA = false;
         continue;
       }
       if (l.mnem == "LD" && l.dst == "A") {
         const std::string k = keyOf(l.src);
-        if (!k.empty() && has(k) && flagsDead(i)) {
+        if (!k.empty() && has(k) && (flagsMatchA || flagsDead(i))) {
           alive_[i] = false;
           changed = true;
           continue;
         }
         known.clear();
         if (!k.empty()) known.push_back(k);
+        flagsMatchA = true;
       } else if (!l.byteStore.empty()) {
         const std::string k = keyOf(l.byteStore);
         if (!k.empty() && has(k)) {
@@ -334,7 +356,15 @@ class Pass {
         }
         if (!k.empty()) known.push_back(k);
       } else {
-        if (l.writesA || l.flow) known.clear();
+        // A conditional jump not taken changes nothing. Any other change of
+        // flow leaves nothing known.
+        const bool conditional = l.flow && isJump(l.mnem) && l.mnem != "JMP";
+        if (l.flow && !conditional) {
+          known.clear();
+          flagsMatchA = false;
+        }
+        if (l.writesA) known.clear();
+        if (l.writesA || l.setsZ || l.setsN) flagsMatchA = l.writesA && l.setsZ && l.setsN;
         if (!l.wordStore.empty()) {
           const std::string base = baseOf(l.wordStore);
           if (isTempBase(base) || (keyOf(l.wordStore) == l.wordStore && base.rfind("D1", 0) != 0)) {
@@ -388,7 +418,10 @@ class Pass {
       if (x.kind != Kind::Ins || x.devices) return false;
       if (x.flow) {
         if (x.mnem == "RET") return true;
-        if (x.mnem == "JSR" || x.mnem == "HLT") return false;
+        if (x.mnem == "HLT") return false;
+        // A callee writes temps before it reads them, and a caller's live
+        // temps are saved in its frame before the call, which reads them.
+        if (x.mnem == "JSR") continue;
         const auto target = labels_.find(x.src);
         if (target == labels_.end() || !unread(target->second, base, pending, budget)) return false;
         if (x.mnem == "JMP") return true;

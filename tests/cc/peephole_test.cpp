@@ -55,16 +55,15 @@ TEST_SUITE("peephole") {
   }
 
   TEST_CASE("what A holds in a temp is forgotten at a statement") {
-    // The second statement reloads its own copy. Keeping the old one would
-    // read a temp across the statement boundary.
-    std::vector<std::string> in = lines({"LD A <- [c]", "LD [__t0+1] <- A", "LD [d] <- A"});
+    // The first statement's store is dead at the boundary and goes. The
+    // second statement's store of the same value must then stay, or its
+    // read of the temp finds nothing written.
+    std::vector<std::string> in = lines({"LD A <- [c]", "LD [__t0+1] <- A"});
     in.emplace_back(STMT_MARK);
-    const auto tail = lines({"LD A <- [d]", "LD [__t0+1] <- A", "LD A <- [__t0+1]", "JNZ out", "RET", ":out:", "RET"});
+    const auto tail = lines({"LD A <- [c]", "LD [__t0+1] <- A", "LD A <- 1", "OUTA 2", "LD A <- [__t0+1]", "OUTA 3"});
     in.insert(in.end(), tail.begin(), tail.end());
-    const auto out = peephole(in);
-    const std::vector<std::string> want = lines({"LD A <- [c]", "LD [d] <- A", "LD [__t0+1] <- A",
-                                                 "LD A <- [__t0+1]", "JNZ out", "RET", ":out:", "RET"});
-    CHECK(out == want);
+    CHECK(peephole(in) ==
+          lines({"LD A <- [c]", "LD [__t0+1] <- A", "LD A <- 1", "OUTA 2", "LD A <- [__t0+1]", "OUTA 3"}));
   }
 
   TEST_CASE("a jump to the next line goes") {

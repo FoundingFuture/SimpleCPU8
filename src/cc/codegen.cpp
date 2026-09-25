@@ -649,14 +649,19 @@ class Gen {
     genStmt(f.body);
 
     lab(f.name + "__end");
-    // D1 is still the frame base here: every call puts it back. The frame
-    // and the arguments the caller wrote below it go in one step.
+    epilogue();
+    fn_ = nullptr;
+  }
+
+  // D1 is still the frame base here: every call puts it back. The frame
+  // and the arguments the caller wrote below it go in one step. A return
+  // writes this in place, which costs two lines and saves a jump.
+  void epilogue() {
     if (frameSize_ > 0) {
       op("LD D1 <- D1+" + S(frameSize_));
       op("LD [" + S(ZP_SP) + "] <- D1");
     }
     op("RET");
-    fn_ = nullptr;
   }
 
   // ---- statements ------------------------------------------------------------
@@ -748,18 +753,24 @@ class Gen {
         if (s.e && isFloat(fn_->ret)) {
           genDouble(s.e, 0, 0);
           moveConst(emitter(), DRET, slotAt(0));
-          op("JMP " + fn_->name + "__end");
+          epilogue();
           return;
         }
         if (s.e) {
-          const CType t = genExpr(s.e, 0);
-          convert(0, t, fn_->ret);
-          op("LD A <- " + hi(0));
-          op("LD [" + S(ZP_RET) + "] <- A");
-          op("LD A <- " + lo(0));
-          op("LD [" + S(ZP_RET) + "+1] <- A");
+          // A byte function answers in the low byte of __ret, which is the
+          // byte a caller reads. A word goes through D2.
+          if (sizeOf(fn_->ret) == 1 && fn_->ret.ptr == 0 && !romRef(s.e) && !isFloat(typeOf(s.e))) {
+            genLow(s.e, 0);
+            op("LD A <- " + lo(0));
+            op("LD [" + S(ZP_RET) + "+1] <- A");
+          } else {
+            const CType t = genExpr(s.e, 0);
+            convert(0, t, fn_->ret);
+            op("LD D2 <- " + word(0));
+            op("LD [" + S(ZP_RET) + "] <- D2");
+          }
         }
-        op("JMP " + fn_->name + "__end");
+        epilogue();
         return;
       }
 
@@ -893,11 +904,13 @@ class Gen {
       genDouble(ep, 0, 0);
       return;
     }
-    if (ep->k == ExprKind::Post) {
-      // The old value is not wanted, so i++ is ++i.
-      auto pre = std::make_shared<Expr>(*ep);
-      pre->k = ExprKind::Un;
-      genExpr(pre, 0);
+    if (ep->k == ExprKind::Assign) {
+      genAssign(ep, 0, false);
+      return;
+    }
+    if (ep->k == ExprKind::Post || (ep->k == ExprKind::Un && (ep->op == "++" || ep->op == "--"))) {
+      // The old value is not wanted, so i++ is ++i, which is i += 1.
+      genAssign(mkAssign(ep->e, mkBin(ep->op == "++" ? "+" : "-", ep->e, numOne(ep->pos), ep->pos), ep->pos), 0, false);
       return;
     }
     genExpr(ep, 0);
@@ -1036,11 +1049,19 @@ class Gen {
       if (width == 2) convert(at, got, rtype);
       return sideOf(at);
     };
-    // The left side goes to slot, the right to slot + 1 when both need
-    // evaluating. A leaf takes no slot.
+    // A leaf takes no slot. When both sides need evaluating, the right one
+    // goes first, so the left is the value A still holds for the compare.
     const bool leftLeaf = leafSide(e.l, width).has_value();
-    const Side a = side(e.l, slot);
-    const Side b = side(e.r, leftLeaf ? slot : slot + 1);
+    const bool rightLeaf = leafSide(e.r, width).has_value();
+    Side a;
+    Side b;
+    if (!leftLeaf && !rightLeaf) {
+      b = side(e.r, slot);
+      a = side(e.l, slot + 1);
+    } else {
+      a = side(e.l, slot);
+      b = side(e.r, slot);
+    }
     compareSides(e.op, a, b, width, sgn, when, label);
     return true;
   }
@@ -1191,16 +1212,15 @@ class Gen {
     op("LD " + word(slot) + " <- D2");
   }
 
+  // A word goes through D2, which moves both bytes in one instruction.
   void storeFrame(int offset, int size, int slot) {
     if (size == 1) {
       op("LD A <- " + lo(slot));
       op("LD [D1+" + S(offset) + "] <- A");
       return;
     }
-    op("LD A <- " + hi(slot));
-    op("LD [D1+" + S(offset) + "] <- A");
-    op("LD A <- " + lo(slot));
-    op("LD [D1+" + S(offset + 1) + "] <- A");
+    op("LD D2 <- " + word(slot));
+    op("LD [D1+" + S(offset) + "] <- D2");
   }
 
   void loadFrame(int offset, int size, int slot) {
@@ -1210,10 +1230,8 @@ class Gen {
       op("LD " + lo(slot) + " <- A");
       return;
     }
-    op("LD A <- [D1+" + S(offset) + "]");
-    op("LD " + hi(slot) + " <- A");
-    op("LD A <- [D1+" + S(offset + 1) + "]");
-    op("LD " + lo(slot) + " <- A");
+    op("LD D2 <- [D1+" + S(offset) + "]");
+    op("LD " + word(slot) + " <- D2");
   }
 
   bool inZeroPage(const Sym& sym) { return sym.addr + sizeOf(sym.type) <= ZERO_PAGE_SIZE; }
@@ -1427,8 +1445,7 @@ class Gen {
                           e.a->name + "_SIZE) copies it into RAM, and then dst[...] reads it.");
         }
         const CType t = typeOf(ep);
-        genAddress(ep, slot);
-        loadThrough(slot, sizeOf(t));
+        loadPlace(placeOf(ep, slot, sizeOf(t) == 1), sizeOf(t), slot);
         return t;
       }
       case ExprKind::Call: return genCall(ep, slot);
@@ -1460,15 +1477,132 @@ class Gen {
       op("LD " + word(slot) + " <- D2");
       return;
     }
-    // A frame address is D1 plus the offset, and D1 can be stored as a word.
-    op("LD " + word(slot) + " <- D1");
-    if (s.offset == 0) return;
-    op("LD A <- " + lo(slot));
-    op("ADD A <- " + S(s.offset));
-    op("LD " + lo(slot) + " <- A");
-    op("LD A <- " + hi(slot));
-    op("ADC A <- 0");
+    // A frame address is D1 plus the offset, which the address adder makes.
+    op("LD D2 <- D1+" + S(s.offset));
+    op("LD " + word(slot) + " <- D2");
+  }
+
+  // ---- addresses in D2 --------------------------------------------------------
+  //
+  // An element or a pointer's target is reached through D2. The address is
+  // built there with the address adder rather than in a temp: D2 plus an
+  // offset, D2 plus A, and a displacement left for the load or store to
+  // add, [D2+n].
+
+  // A pointer or array value that loads into D2 in one instruction and
+  // leaves A alone: an array, a pointer variable, a string. The line, or
+  // empty.
+  std::string baseLoad(const ExprPtr& ep) {
+    const Expr& e = *ep;
+    if (e.k == ExprKind::Str) return "LD D2 <- " + stringLabel(e.bytes);
+    if (e.k != ExprKind::Id || constantNamed(e.name)) return "";
+    const Sym* s = find(e.name);
+    if (!s || romSyms_.count(e.name)) return "";
+    if (s->type.arrayLen) {
+      if (s->where == Sym::Where::Frame) return "LD D2 <- D1+" + S(s->offset);
+      return "LD D2 <- " + s->label;
+    }
+    if (s->type.ptr == 0 && sizeOf(s->type) != 2) return "";
+    if (s->where == Sym::Where::Frame) return "LD D2 <- [D1+" + S(s->offset) + "]";
+    return "LD D2 <- [" + s->label + "]";
+  }
+
+  // Where an element or a target is: D2 plus disp, or with viaA the byte
+  // at D2+A, which only a byte load can use.
+  struct Place {
+    int disp = 0;
+    bool viaA = false;
+  };
+
+  // The address of a[i] or *p into D2. byteLoad says the caller will load
+  // one byte and can take [D2+A]. Slots from slot up are free to use.
+  Place placeOf(const ExprPtr& ep, int slot, bool byteLoad) {
+    const Expr& e = *ep;
+    if (e.k == ExprKind::Un && e.op == "*") {
+      // *(p + k) is p's target k elements on.
+      const Expr& in = *e.e;
+      if (in.k == ExprKind::Bin && (in.op == "+" || in.op == "-") && typeOf(in.l).ptr > 0 && typeOf(in.r).ptr == 0) {
+        if (const auto k = foldConst(in.r)) {
+          const CType pt = typeOf(in.l);
+          const int w = sizeOf(CType{pt.base, pt.ptr - 1, std::nullopt});
+          return constPlace(in.l, (in.op == "+" ? 1 : -1) * toInt32(*k) * w, w, slot);
+        }
+      }
+      const CType pt = typeOf(e.e);
+      return constPlace(e.e, 0, sizeOf(CType{pt.base, pt.ptr - 1, std::nullopt}), slot);
+    }
+    // a[i]
+    const CType at = typeOf(e.a);
+    if (at.ptr == 0) fail(e.pos, typeName(at) + " cannot be indexed");
+    const int w = sizeOf(CType{at.base, at.ptr - 1, std::nullopt});
+    if (const auto k = foldConst(e.i)) return constPlace(e.a, toInt32(*k) * w, w, slot);
+    const CType it = typeOf(e.i);
+    if (isByte(it) && !isSigned(it) && w <= 2) {
+      // An unsigned byte index goes in A, and D2 steps by it once per byte
+      // of the element. The base loads last, since loading it leaves A.
+      const std::string base = baseLoad(e.a);
+      if (base.empty()) genExpr(e.a, slot);
+      const std::optional<Side> leaf = leafSide(e.i, 1);
+      if (!leaf) genLow(e.i, slot + 1);
+      op("LD A <- " + (leaf ? leaf->lo : lo(slot + 1)));
+      op(base.empty() ? "LD D2 <- " + word(slot) : base);
+      if (w == 1 && byteLoad) return {0, true};
+      for (int k = 0; k < w; k++) op("LD D2 <- D2+A");
+      return {};
+    }
+    // A word index: the element's address as a 16 bit sum, through A.
+    genAddress(ep, slot);
+    op("LD D2 <- " + word(slot));
+    return {};
+  }
+
+  // base + a constant byte offset into D2. An offset that fits the
+  // displacement stays for the access to add.
+  Place constPlace(const ExprPtr& baseExpr, int offset, int width, int slot) {
+    const std::string base = baseLoad(baseExpr);
+    if (base.empty()) {
+      genExpr(baseExpr, slot);
+      op("LD D2 <- " + word(slot));
+    } else {
+      op(base);
+    }
+    if (offset >= 0 && offset + width - 1 <= 255) return {offset, false};
+    op("LD D2 <- D2+" + S(offset & 0xffff));
+    return {};
+  }
+
+  // Loads the element at place into slot, as size bytes.
+  void loadPlace(const Place& p, int size, int slot) {
+    use(slot);
+    if (p.viaA) {
+      op("LD A <- [D2+A]");
+      op("LD " + lo(slot) + " <- A");
+      return;
+    }
+    auto at = [&](int k) { return p.disp + k == 0 ? std::string("[D2]") : "[D2+" + S(p.disp + k) + "]"; };
+    if (size == 1) {
+      op("LD A <- " + at(0));
+      op("LD " + lo(slot) + " <- A");
+      return;
+    }
+    // Big-endian: the high byte first.
+    op("LD A <- " + at(0));
     op("LD " + hi(slot) + " <- A");
+    op("LD A <- " + at(1));
+    op("LD " + lo(slot) + " <- A");
+  }
+
+  void storePlace(const Place& p, int size, const Side& v) {
+    auto at = [&](int k) { return p.disp + k == 0 ? std::string("[D2]") : "[D2+" + S(p.disp + k) + "]"; };
+    if (size == 1) {
+      op("LD A <- " + v.lo);
+      op("LD " + at(0) + " <- A");
+      return;
+    }
+    op("LD A <- " + v.hi);
+    op("LD " + at(0) + " <- A");
+    op("LD A <- " + v.lo);
+    op("LD " + at(1) + " <- A");
   }
 
   // The ADDRESS of an lvalue, into slot.
@@ -1485,7 +1619,56 @@ class Gen {
         if (e.op == "*") return genExpr(e.e, slot);
         break;
       case ExprKind::Index: {
-        // base + index * elementSize, as 16 bit arithmetic.
+        // A constant or byte index: the address adder, through placeOf.
+        const CType idx = typeOf(e.i);
+        if (foldConst(e.i) || (isByte(idx) && !isSigned(idx))) {
+          const CType pt = typeOf(e.a);
+          const CType elem{pt.base, pt.ptr - 1, std::nullopt};
+          if (foldConst(e.i) || sizeOf(elem) <= 2) {
+            const Place p = placeOf(ep, slot, false);
+            if (p.disp != 0) op("LD D2 <- D2+" + S(p.disp));
+            op("LD " + word(slot) + " <- D2");
+            return CType{elem.base, elem.ptr + 1, std::nullopt};
+          }
+        }
+        // base + index * elementSize, as 16 bit arithmetic. For bytes the
+        // base and the index can be named in the instructions: a pointer
+        // variable, a global array's address as an immediate, an index
+        // variable.
+        {
+          const CType pt = typeOf(e.a);
+          if (pt.ptr > 0 && sizeOf(CType{pt.base, pt.ptr - 1, std::nullopt}) == 1 && !romRef(e.a)) {
+            std::optional<Side> base = leafSide(e.a, 2);
+            if (!base && e.a->k == ExprKind::Id) {
+              const Sym* sym = find(e.a->name);
+              if (sym && sym->type.arrayLen && sym->where == Sym::Where::Global) {
+                base = Side{sym->label + " & $FF", sym->label + " >> 8", std::nullopt};
+              }
+            }
+            const std::optional<Side> index = leafSide(e.i, 2);
+            if (base || index) {
+              Side b = base ? *base : Side{};
+              Side i = index ? *index : Side{};
+              if (!base) {
+                genExpr(e.a, slot);
+                b = sideOf(slot);
+              }
+              if (!index) {
+                const CType it = genExpr(e.i, base ? slot : slot + 1);
+                convert(base ? slot : slot + 1, it, T(BaseType::UInt));
+                i = sideOf(base ? slot : slot + 1);
+              }
+              use(slot);
+              op("LD A <- " + b.lo);
+              op("ADD A <- " + i.lo);
+              op("LD " + lo(slot) + " <- A");
+              op("LD A <- " + b.hi);
+              op("ADC A <- " + i.hi);
+              op("LD " + hi(slot) + " <- A");
+              return CType{pt.base, pt.ptr, std::nullopt};
+            }
+          }
+        }
         const CType at = genExpr(e.a, slot);
         if (at.ptr == 0) fail(e.pos, typeName(at) + " cannot be indexed");
         const CType elem{at.base, at.ptr - 1, std::nullopt};
@@ -1554,12 +1737,14 @@ class Gen {
     op("LD [D2] <- A");
   }
 
-  CType genAssign(const ExprPtr& ep, int slot) {
+  // want says the assignment's value is used, so it has to be left in
+  // slot. A statement's assignment leaves it out.
+  CType genAssign(const ExprPtr& ep, int slot, bool want = true) {
     const Expr& e = *ep;
     const CType target = typeOf(e.l);
     if (e.op != "=") {
       const std::string op2 = e.op.substr(0, e.op.size() - 1);
-      return genAssign(mkAssign(e.l, mkBin(op2, e.l, e.r, e.pos), e.pos), slot);
+      return genAssign(mkAssign(e.l, mkBin(op2, e.l, e.r, e.pos), e.pos), slot, want);
     }
     // A byte target keeps only the low byte, so only the low byte is
     // worked out.
@@ -1568,6 +1753,35 @@ class Gen {
     if (e.l->k == ExprKind::Id) {
       const Sym& s = lookup(e.l->name, e.l->pos);
       if (s.type.arrayLen) fail(e.pos, s.name + " is an array and cannot be assigned");
+      const bool frame = s.where == Sym::Where::Frame;
+      auto destAt = [&](int k) {
+        if (frame) return "[D1+" + S(s.offset + k) + "]";
+        return k ? "[" + s.label + "+" + S(k) + "]" : "[" + s.label + "]";
+      };
+      const int size = target.ptr > 0 ? 2 : sizeOf(target);
+      if (!isFloat(target) && !isWide(target) && !romRef(e.r)) {
+        // A word plus a constant is one instruction of the address adder.
+        if (size == 2) {
+          if (const auto plan = leaPlan(e.r)) {
+            leaAdd(plan->first, plan->second, slot);
+            op("LD " + destAt(0) + " <- D2");
+            if (want) op("LD " + word(slot) + " <- D2");
+            return target;
+          }
+        }
+        // The arithmetic writes the variable itself, byte by byte.
+        const Expr& r = *e.r;
+        if (!want && (frame || inZeroPage(s)) && r.k == ExprKind::Bin &&
+            (r.op == "+" || r.op == "-" || r.op == "&" || r.op == "|" || r.op == "^")) {
+          const CType lt0 = typeOf(r.l);
+          const CType rt0 = typeOf(r.r);
+          if (lt0.ptr == 0 && rt0.ptr == 0 && !isFloat(lt0) && !isFloat(rt0) && !isWide(lt0) && !isWide(rt0)) {
+            const Side dest = size == 1 ? Side{destAt(0), "", std::nullopt} : Side{destAt(1), destAt(0), std::nullopt};
+            aluBinary(e.r, slot, size == 1 ? T(BaseType::UChar) : common(lt0, rt0), size, dest);
+            return target;
+          }
+        }
+      }
       if (low) {
         genLow(e.r, slot);
       } else {
@@ -1576,6 +1790,35 @@ class Gen {
       }
       if (s.where == Sym::Where::Frame) storeFrame(s.offset, sizeOf(s.type), slot);
       else storeGlobal(s, slot);
+      return target;
+    }
+    // Through an address: a[i] = v or *p = v. A leaf value is read after
+    // the address is in D2, and the address is built first. Anything else
+    // is worked out first and kept in slot while the address is built.
+    const int size = sizeOf(target);
+    if (e.l->k == ExprKind::Index || (e.l->k == ExprKind::Un && e.l->op == "*")) {
+      const std::optional<Side> leaf =
+          !isFloat(target) && !isWide(target) && !romRef(e.r) ? leafSide(e.r, size) : std::nullopt;
+      if (leaf) {
+        const Place p = placeOf(e.l, slot, false);
+        storePlace(p, size, *leaf);
+        // The value of the assignment, for a caller that wants it.
+        op("LD A <- " + leaf->lo);
+        op("LD " + lo(slot) + " <- A");
+        if (size == 2) {
+          op("LD A <- " + leaf->hi);
+          op("LD " + hi(slot) + " <- A");
+        }
+        return target;
+      }
+      if (low) {
+        genLow(e.r, slot);
+      } else {
+        const CType vt = genExpr(e.r, slot);
+        convert(slot, vt, target);
+      }
+      const Place p = placeOf(e.l, slot + 1, false);
+      storePlace(p, size, sideOf(slot));
       return target;
     }
     if (low) {
@@ -1629,10 +1872,10 @@ class Gen {
     if (e.op == "&") return genAddress(e.e, slot);
 
     if (e.op == "*") {
-      const CType pt = genExpr(e.e, slot);
+      const CType pt = typeOf(e.e);
       if (pt.ptr == 0) fail(e.pos, "cannot take * of " + typeName(pt));
       const CType t{pt.base, pt.ptr - 1, std::nullopt};
-      loadThrough(slot, sizeOf(t));
+      loadPlace(placeOf(ep, slot, sizeOf(t) == 1), sizeOf(t), slot);
       return t;
     }
 
@@ -1685,6 +1928,13 @@ class Gen {
 
     const CType lt0 = typeOf(e.l);
     const CType rt0 = typeOf(e.r);
+
+    if (const auto plan = leaPlan(ep)) {
+      leaAdd(plan->first, plan->second, slot);
+      op("LD " + word(slot) + " <- D2");
+      use(slot);
+      return lt0.ptr > 0 ? lt0 : common(lt0, rt0);
+    }
 
     // Pointer arithmetic: p + n scales n by what p points at.
     if ((bop == "+" || bop == "-") && lt0.ptr > 0 && rt0.ptr == 0) {
@@ -1750,7 +2000,8 @@ class Gen {
   // in the instruction, not copied to a temp first. For the commutative
   // four, a leaf on the left swaps over, so only one side is ever
   // evaluated when one is a leaf.
-  void aluBinary(const ExprPtr& ep, int slot, const CType& rtype, int width) {
+  void aluBinary(const ExprPtr& ep, int slot, const CType& rtype, int width,
+                 const std::optional<Side>& dest = std::nullopt) {
     const Expr& e = *ep;
     const std::string& bop = e.op;
     auto evaluate = [&](const ExprPtr& x, int at) {
@@ -1773,16 +2024,20 @@ class Gen {
       a = evaluate(e.r, slot);
       b = *ls;
     } else {
-      a = evaluate(e.l, slot);
-      b = evaluate(e.r, slot + 1);
+      // The right side first, so the left one is the last thing stored and
+      // the load that follows is a reload the peephole pass removes.
+      b = evaluate(e.r, slot);
+      a = evaluate(e.l, slot + 1);
     }
     use(slot);
+    const std::string outLo = dest ? dest->lo : lo(slot);
+    const std::string outHi = dest ? dest->hi : hi(slot);
     const std::string m1 = bop == "+" ? "ADD" : bop == "-" ? "SUB" : bop == "&" ? "AND" : bop == "|" ? "OR" : "XOR";
     const std::string m2 = bop == "+" ? "ADC" : bop == "-" ? "SBC" : m1;
     op("LD A <- " + a.lo);
     if (!(b.imm && (*b.imm & 0xff) == 0 && m1 != "AND")) op(m1 + " A <- " + b.lo);
     else if (m1 == "ADD" || m1 == "SUB") op(m1 + " A <- 0");
-    op("LD " + lo(slot) + " <- A");
+    op("LD " + outLo + " <- A");
     if (width == 1) return;
     const bool hiZero = b.hi == "0";
     if (hiZero && m1 == "AND") {
@@ -1791,7 +2046,35 @@ class Gen {
       op("LD A <- " + a.hi);
       if (!(hiZero && (m1 == "OR" || m1 == "XOR"))) op(m2 + " A <- " + b.hi);
     }
-    op("LD " + hi(slot) + " <- A");
+    op("LD " + outHi + " <- A");
+  }
+
+  // A word plus or minus a constant: the word and the constant, the
+  // constant already scaled for a pointer. Nothing when e is not that.
+  std::optional<std::pair<ExprPtr, int>> leaPlan(const ExprPtr& ep) {
+    const Expr& e = *ep;
+    if (e.k != ExprKind::Bin || (e.op != "+" && e.op != "-")) return std::nullopt;
+    const auto k = foldConst(e.r);
+    if (!k || romRef(e.l)) return std::nullopt;
+    const CType lt = typeOf(e.l);
+    if (isFloat(lt) || isWide(lt) || isFloat(typeOf(e.r))) return std::nullopt;
+    int scale = 1;
+    if (lt.ptr > 0) scale = sizeOf(CType{lt.base, lt.ptr - 1, std::nullopt});
+    else if (sizeOf(lt) != 2) return std::nullopt;
+    const int v = toInt32(*k) * scale * (e.op == "-" ? -1 : 1);
+    return std::make_pair(e.l, v);
+  }
+
+  // base + k into D2.
+  void leaAdd(const ExprPtr& base, int k, int slot) {
+    const std::string load = baseLoad(base);
+    if (load.empty()) {
+      genExpr(base, slot);
+      op("LD D2 <- " + word(slot));
+    } else {
+      op(load);
+    }
+    if ((k & 0xffff) != 0) op("LD D2 <- D2+" + S(k & 0xffff));
   }
 
   // A __ROM name, or one indexed. typeOf cannot answer for it, and genExpr
@@ -1982,11 +2265,12 @@ class Gen {
     op("LD D1 <- [" + S(ZP_SP) + "]");
     for (int i = 0; i < slot; i++) spill(i, false);
     for (int i = 0; i < dLive_; i++) spillDouble(i, false);
-    if (sizeOf(f.ret) > 0) {
-      op("LD A <- [" + S(ZP_RET) + "]");
-      op("LD " + hi(slot) + " <- A");
+    if (sizeOf(f.ret) == 1 && f.ret.ptr == 0) {
       op("LD A <- [" + S(ZP_RET) + "+1]");
       op("LD " + lo(slot) + " <- A");
+    } else if (sizeOf(f.ret) > 0) {
+      op("LD D2 <- [" + S(ZP_RET) + "]");
+      op("LD " + word(slot) + " <- D2");
     }
     return f.ret;
   }
