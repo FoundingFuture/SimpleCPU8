@@ -575,7 +575,8 @@ TEST_SUITE("breaking out of a running program") {
     CHECK_FALSE(has(text(*s), "BREAK"));
     s->pushKey(27, false);
     s->runBudget(3000000);
-    const std::string t = text(*s);
+    // Rows run together: the message can wrap at the screen's edge.
+    const std::string t = flat(*s);
     CHECK(has(t, "BREAK"));
     CHECK((has(t, "BREAK IN LINE 10") || has(t, "BREAK IN LINE 20")));
   }
@@ -586,7 +587,7 @@ TEST_SUITE("breaking out of a running program") {
     runaway(*s);
     s->pushKey(3, false);
     s->runBudget(3000000);
-    CHECK(has(text(*s), "BREAK"));
+    CHECK(has(flat(*s), "BREAK"));
   }
 
   // The jam this had: the check pushed a key back. On the next poll it
