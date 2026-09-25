@@ -582,8 +582,11 @@ class Gen {
   // the operator that will consume them has not run yet. A call at slot 0,
   // which is a statement call and the common case, saves nothing.
   void layoutFrame(const FuncDecl& f) {
-    saveBytes_ = 2 * maxSlot_;
-    dSaveBytes_ = maxDouble_ * DSIZE;
+    // Temps are saved only around a call, so a function that calls nothing
+    // needs no room for them.
+    const bool calls = callsIn(f.body);
+    saveBytes_ = calls ? 2 * maxSlot_ : 0;
+    dSaveBytes_ = calls ? maxDouble_ * DSIZE : 0;
     argBytes_ = 0;
     for (const Param& p : f.params) argBytes_ += std::max(sizeOf(p.type), 1);
     int locals = 0;
@@ -610,6 +613,39 @@ class Gen {
       fail(f.pos, f.name + " needs a frame of " + S(frameSize_) + " bytes and a frame reaches " + S(MAX_FRAME) +
                       ". A local reaches its frame through [D1+n], and n is one byte. Move the big one to a global.");
     }
+  }
+
+  static bool callsIn(const ExprPtr& e) {
+    if (!e) return false;
+    if (e->k == ExprKind::Call) return true;
+    for (const ExprPtr& x : {e->fn, e->e, e->l, e->r, e->a, e->i, e->c, e->t, e->f}) {
+      if (callsIn(x)) return true;
+    }
+    for (const ExprPtr& x : e->args) {
+      if (callsIn(x)) return true;
+    }
+    return false;
+  }
+
+  static bool callsIn(const StmtPtr& s) {
+    if (!s) return false;
+    if (callsIn(s->e) || callsIn(s->c) || callsIn(s->step)) return true;
+    if (callsIn(s->t) || callsIn(s->f) || callsIn(s->loopBody) || callsIn(s->init)) return true;
+    for (const StmtPtr& x : s->body) {
+      if (callsIn(x)) return true;
+    }
+    for (const SwitchCase& c : s->cases) {
+      for (const StmtPtr& x : c.body) {
+        if (callsIn(x)) return true;
+      }
+    }
+    if (s->k == StmtKind::Var && s->decl.init) {
+      if (callsIn(s->decl.init->one)) return true;
+      for (const ExprPtr& x : s->decl.init->list) {
+        if (callsIn(x)) return true;
+      }
+    }
+    return false;
   }
 
   void genFunc(const FuncDecl& f) {
@@ -1961,17 +1997,46 @@ class Gen {
 
     const CType lt = genExpr(e.l, slot);
     convert(slot, lt, rtype);
-    if (bop == ">>" && !isSigned(rtype) && width == 2) {
-      // An unsigned shift by eight is the high byte moved down, four
-      // instructions where the coprocessor costs fifty. Every port write of
-      // a 16 bit value does it, so the library wrappers ride on this.
-      const auto n = foldConst(e.r);
-      if (n && *n == 8) {
-        op("LD A <- " + hi(slot));
-        op("LD " + lo(slot) + " <- A");
-        op("LD A <- 0");
-        op("LD " + hi(slot) + " <- A");
+    // A constant right side: shifts, and the multiplies, divides and
+    // remainders a shift can do, run on the CPU's own shift instructions
+    // rather than going to the coprocessor.
+    if (const auto kc = foldConst(e.r); kc && width == 2) {
+      const int k = toInt32(*kc);
+      const bool sgn = isSigned(rtype) && rtype.ptr == 0;
+      if ((bop == "<<" || bop == ">>") && k >= 0 && k < 16) {
+        shiftConst(slot, bop == "<<", sgn, k);
         return rtype;
+      }
+      if (bop == "*" && mulConst(slot, k & 0xffff)) return rtype;
+      if ((bop == "/" || bop == "%") && k > 0 && k <= 0x4000 && (k & (k - 1)) == 0) {
+        int sh = 0;
+        while ((1 << sh) < k) sh++;
+        if (bop == "/") {
+          if (sgn && sh > 0) {
+            // C divides towards zero and a shift rounds down, so a negative
+            // value gets k - 1 added first.
+            const std::string pos = uniq("divpos");
+            op("LD A <- " + hi(slot));
+            op("JP " + pos);
+            op("LD D2 <- " + word(slot));
+            op("LD D2 <- D2+" + S(k - 1));
+            op("LD " + word(slot) + " <- D2");
+            lab(pos);
+          }
+          shiftConst(slot, false, sgn, sh);
+          return rtype;
+        }
+        if (!sgn) {
+          // An unsigned remainder by a power of two is a mask.
+          const int mask = k - 1;
+          op("LD A <- " + lo(slot));
+          op("AND A <- " + S(mask & 0xff));
+          op("LD " + lo(slot) + " <- A");
+          op("LD A <- " + hi(slot));
+          op("AND A <- " + S(mask >> 8));
+          op("LD " + hi(slot) + " <- A");
+          return rtype;
+        }
       }
     }
     const CType rt = genExpr(e.r, slot + 1);
@@ -2111,6 +2176,20 @@ class Gen {
           return;
         }
       }
+      if (e.k == ExprKind::Bin && (e.op == "<<" || e.op == ">>")) {
+        const auto kc = foldConst(e.r);
+        const CType lt0 = typeOf(e.l);
+        // A left shift's low byte needs only the low byte. A right shift's
+        // needs the bits above, which an unsigned byte does not have.
+        const bool ok = e.op == "<<" || (isByte(lt0) && !isSigned(lt0));
+        if (kc && *kc >= 0 && *kc < 8 && ok && lt0.ptr == 0 && !isFloat(lt0) && !isWide(lt0)) {
+          genLow(e.l, slot);
+          op("LD A <- " + lo(slot));
+          for (int i = 0; i < static_cast<int>(*kc); i++) op(e.op == "<<" ? "SHL A" : "SHR A");
+          op("LD " + lo(slot) + " <- A");
+          return;
+        }
+      }
       if (e.k == ExprKind::Un && e.op == "~" && !isFloat(typeOf(e.e))) {
         genLow(e.e, slot);
         op("LD A <- " + lo(slot));
@@ -2125,6 +2204,81 @@ class Gen {
       }
     }
     genExpr(ep, slot);
+  }
+
+  // The word in slot shifted by k bits, k below 16. One bit is a shift of
+  // one byte and a rotate of the other through C. Eight bits and more is a
+  // byte move first.
+  void shiftConst(int slot, bool left, bool sgn, int k) {
+    if (k == 0) return;
+    const std::string down = sgn ? "ASR A" : "SHR A";
+    if (k >= 8) {
+      if (left) {
+        op("LD A <- " + lo(slot));
+        for (int i = 8; i < k; i++) op("SHL A");
+        op("LD " + hi(slot) + " <- A");
+        op("LD A <- 0");
+        op("LD " + lo(slot) + " <- A");
+        return;
+      }
+      op("LD A <- " + hi(slot));
+      for (int i = 8; i < k; i++) op(down);
+      op("LD " + lo(slot) + " <- A");
+      if (sgn) {
+        // Seven arithmetic shifts leave the sign in every bit.
+        op("LD A <- " + hi(slot));
+        for (int i = 0; i < 7; i++) op("ASR A");
+      } else {
+        op("LD A <- 0");
+      }
+      op("LD " + hi(slot) + " <- A");
+      return;
+    }
+    for (int i = 0; i < k; i++) {
+      if (left) {
+        op("LD A <- " + lo(slot));
+        op("SHL A");
+        op("LD " + lo(slot) + " <- A");
+        op("LD A <- " + hi(slot));
+        op("ROL A");
+        op("LD " + hi(slot) + " <- A");
+      } else {
+        op("LD A <- " + hi(slot));
+        op(down);
+        op("LD " + hi(slot) + " <- A");
+        op("LD A <- " + lo(slot));
+        op("ROR A");
+        op("LD " + lo(slot) + " <- A");
+      }
+    }
+  }
+
+  // slot times a constant, as shifts and adds, when that is short: the
+  // bits of c from the top, doubling and adding the value at each set bit.
+  // False when the coprocessor is cheaper.
+  bool mulConst(int slot, int c) {
+    if (c == 0) {
+      op("LD D2 <- 0");
+      op("LD " + word(slot) + " <- D2");
+      return true;
+    }
+    int top = 15;
+    while (!(c & (1 << top))) top--;
+    int adds = 0;
+    for (int b = 0; b < top; b++) adds += (c >> b) & 1;
+    if (adds == 0) {
+      shiftConst(slot, true, false, top);
+      return true;
+    }
+    if (top + adds > 6) return false;
+    use(slot + 1);
+    op("LD D2 <- " + word(slot));
+    op("LD " + word(slot + 1) + " <- D2");
+    for (int b = top - 1; b >= 0; b--) {
+      shiftConst(slot, true, false, 1);
+      if ((c >> b) & 1) addWord(slot, slot + 1);
+    }
+    return true;
   }
 
   // A shift left by a small constant is adds, which the CPU does in one or
@@ -2181,6 +2335,16 @@ class Gen {
 
   // ---- calls -----------------------------------------------------------------
 
+  // The label of a string literal or a global array, whose address is a
+  // constant the assembler fills in. Empty for anything else.
+  std::string constAddress(const ExprPtr& ep) {
+    if (ep->k == ExprKind::Str) return stringLabel(ep->bytes);
+    if (ep->k != ExprKind::Id || constantNamed(ep->name) || romSyms_.count(ep->name)) return "";
+    const Sym* s = find(ep->name);
+    if (!s || !s->type.arrayLen || s->where != Sym::Where::Global) return "";
+    return s->label;
+  }
+
   CType genCall(const ExprPtr& ep, int slot) {
     const Expr& e = *ep;
     if (e.fn->k != ExprKind::Id) fail(e.pos, "only a plain function name can be called yet");
@@ -2206,17 +2370,38 @@ class Gen {
     int bytes = 0;
     int dslot = 0;
     std::vector<std::optional<int>> dOf;
+    // An argument that is a constant or a variable the instructions can
+    // name is not evaluated into a temp: it is read as it is stored.
+    std::vector<std::optional<Side>> leafOf;
+    // A string or a global array is an address the assembler knows.
+    std::vector<std::string> addrOf;
     for (size_t i = 0; i < e.args.size(); i++) {
+      addrOf.push_back(constAddress(e.args[i]));
       const CType want = i < f.params.size() ? f.params[i].type : T(BaseType::Int);
       const int si = slot + static_cast<int>(i);
+      const int size = want.ptr > 0 ? 2 : std::max(sizeOf(want), 1);
       if (isFloat(want)) {
         genDouble(e.args[i], dslot, si);
         dOf.push_back(dslot);
+        leafOf.push_back(std::nullopt);
         dslot += 3;  // a double operation needs the two slots after its own
-      } else {
-        const CType t = genExpr(e.args[i], si);
-        convert(si, t, want);
+      } else if (!addrOf.back().empty()) {
         dOf.push_back(std::nullopt);
+        leafOf.push_back(std::nullopt);
+      } else if (auto leaf = !romRef(e.args[i]) && !isFloat(typeOf(e.args[i])) && !isWide(want)
+                                 ? leafSide(e.args[i], size)
+                                 : std::nullopt) {
+        dOf.push_back(std::nullopt);
+        leafOf.push_back(leaf);
+      } else {
+        if (size == 1 && !romRef(e.args[i]) && !isFloat(typeOf(e.args[i]))) {
+          genLow(e.args[i], si);
+        } else {
+          const CType t = genExpr(e.args[i], si);
+          convert(si, t, want);
+        }
+        dOf.push_back(std::nullopt);
+        leafOf.push_back(std::nullopt);
       }
       offsets.push_back(bytes);
       bytes += std::max(sizeOf(want), 1);
@@ -2229,6 +2414,10 @@ class Gen {
       // __sp is D1 between calls, so the arguments' space starts below it.
       op("LD D2 <- D1-" + S(bytes));
       op("LD [" + S(ZP_SP) + "] <- D2");
+      // Bytes and frame words go through A first, while D1 is still the
+      // frame. A word from a temp or a constant then goes through D1, whole:
+      // the call is next, and D1 is loaded again after it.
+      std::vector<size_t> viaD1;
       for (size_t i = 0; i < e.args.size(); i++) {
         const CType pt = i < f.params.size() ? f.params[i].type : T(BaseType::Int);
         const int size = std::max(sizeOf(pt), 1);
@@ -2236,29 +2425,42 @@ class Gen {
         const int si = slot + static_cast<int>(i);
         if (dOf[i]) {
           // D2 holds the new frame base, so the destination is worked out
-          // from it. Adding the offset costs less than reloading a pointer.
+          // from it.
+          op("LD D2 <- D2+" + S(at));
           op("LD " + word(slot) + " <- D2");
-          if (at != 0) {
-            op("LD A <- " + lo(slot));
-            op("ADD A <- " + S(at));
-            op("LD " + lo(slot) + " <- A");
-            op("LD A <- " + hi(slot));
-            op("ADC A <- 0");
-            op("LD " + hi(slot) + " <- A");
-          }
           moveDyn(emitter(), Where::zp(tempLabel(slot)), Where::at(slotAt(*dOf[i])));
           op("LD D2 <- [" + S(ZP_SP) + "]");
           continue;
         }
-        if (size == 1) {
-          op("LD A <- " + lo(si));
+        const Side v = leafOf[i] ? *leafOf[i] : sideOf(si);
+        if (!addrOf[i].empty()) {
+          viaD1.push_back(i);
+        } else if (size == 1) {
+          op("LD A <- " + v.lo);
           op("LD [D2+" + S(at) + "] <- A");
-        } else {
-          op("LD A <- " + hi(si));
+        } else if (leafOf[i] && !leafOf[i]->imm && (v.lo.find("D1") != std::string::npos || v.hi == "0")) {
+          // A frame word, or an unsigned byte passed as a word.
+          op("LD A <- " + v.hi);
           op("LD [D2+" + S(at) + "] <- A");
-          op("LD A <- " + lo(si));
+          op("LD A <- " + v.lo);
           op("LD [D2+" + S(at + 1) + "] <- A");
+        } else {
+          viaD1.push_back(i);
         }
+      }
+      for (size_t i : viaD1) {
+        const int at = offsets[i];
+        const int si = slot + static_cast<int>(i);
+        if (!addrOf[i].empty()) {
+          op("LD D1 <- " + addrOf[i]);
+        } else if (!leafOf[i]) {
+          op("LD D1 <- " + word(si));
+        } else if (leafOf[i]->imm) {
+          op("LD D1 <- " + S(*leafOf[i]->imm));
+        } else {
+          op("LD D1 <- " + leafOf[i]->hi);
+        }
+        op("LD [D2+" + S(at) + "] <- D1");
       }
     }
     op("JSR " + name);
@@ -2300,15 +2502,11 @@ class Gen {
   void spill(int i, bool out) {
     const int at = localBytes_ + i * 2;
     if (out) {
-      op("LD A <- " + hi(i));
-      op("LD [D1+" + S(at) + "] <- A");
-      op("LD A <- " + lo(i));
-      op("LD [D1+" + S(at + 1) + "] <- A");
+      op("LD D2 <- " + word(i));
+      op("LD [D1+" + S(at) + "] <- D2");
     } else {
-      op("LD A <- [D1+" + S(at) + "]");
-      op("LD " + hi(i) + " <- A");
-      op("LD A <- [D1+" + S(at + 1) + "]");
-      op("LD " + lo(i) + " <- A");
+      op("LD D2 <- [D1+" + S(at) + "]");
+      op("LD " + word(i) + " <- D2");
     }
   }
 

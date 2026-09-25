@@ -228,7 +228,7 @@ TEST_SUITE("dead code costs nothing") {
   }
 
   TEST_CASE("brings in only the routine that is used") {
-    const std::string a = compile("int a, b; int main(void) { a = b * 3; return 0; }");
+    const std::string a = compile("int a, b, c; int main(void) { a = b * c; return 0; }");
     CHECK(has(a, "__mul16:"));
     CHECK(!has(a, "__udiv16:"));
   }

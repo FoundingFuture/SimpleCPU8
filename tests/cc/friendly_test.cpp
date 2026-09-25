@@ -179,8 +179,17 @@ TEST_SUITE("the shift by eight") {
     const Ran r = run("unsigned int v; unsigned char h; int main(void) { v = 0x1234; h = v >> 8; return 0; }");
     CHECK_EQ(r.u8("h"), 0x12);
   }
-  TEST_CASE("a signed shift still goes to the coprocessor, which keeps the sign") {
+  TEST_CASE("a signed shift by a constant keeps the sign with ASR") {
     const std::string text = compile("int v; int h; int main(void) { h = v >> 8; return h; }");
+    CHECK_FALSE(has(text, "__sshr16"));
+    CHECK(has(text, "ASR A"));
+    const Ran r = run("int v; int h; int g; int main(void) { v = -4660; h = v >> 8; g = v >> 3; return 0; }");
+    CHECK_EQ(r.i16("h"), -4660 >> 8);
+    CHECK_EQ(r.i16("g"), -4660 >> 3);
+  }
+
+  TEST_CASE("a shift by a variable still goes to the coprocessor") {
+    const std::string text = compile("int v; int n; int h; int main(void) { h = v >> n; return h; }");
     CHECK(has(text, "__sshr16"));
   }
 }

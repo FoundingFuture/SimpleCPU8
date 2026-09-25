@@ -50,23 +50,30 @@ std::string prog(const std::string& type, const std::string& expr) {
   return type + " r; int main(void) { r = " + expr + "; return 0; }";
 }
 
+// The operands in variables. A constant multiplier or a power of two
+// divisor is shifts and adds on the CPU, and never reaches the runtime.
+std::string viaVars(const std::string& type, int a, const std::string& op, int b) {
+  return type + " r; " + type + " x = " + std::to_string(a) + "; " + type + " y = " + std::to_string(b) +
+         "; int main(void) { r = x " + op + " y; return 0; }";
+}
+
 }  // namespace
 
 TEST_SUITE("the switch reaches the runtime") {
   TEST_CASE("leaves the coprocessor out entirely") {
-    const cc::Program p = build(prog("unsigned int", "300 * 4"), true);
+    const cc::Program p = build(viaVars("unsigned int", 300, "*", 4), true);
     CHECK(!has(p.text, "OUT ACP_CMD"));
     CHECK(!has(p.text, "__acp:"));
   }
 
   TEST_CASE("still uses it when the switch is off") {
-    const cc::Program p = build(prog("unsigned int", "300 * 4"), false);
+    const cc::Program p = build(viaVars("unsigned int", 300, "*", 4), false);
     CHECK(has(p.text, "OUT ACP_CMD, ACP_MUL"));
   }
 
   TEST_CASE("comes on from a build line, which is where a flag belongs") {
     const cc::Program p = cc::compileProgram({{
-        "main.c", "// build: cc -o m main.c -msoft-mul\n" + prog("unsigned int", "6 * 7")}});
+        "main.c", "// build: cc -o m main.c -msoft-mul\n" + viaVars("unsigned int", 6, "*", 7)}});
     CHECK(p.plan.softMul);
     CHECK(!has(p.text, "OUT ACP_CMD"));
   }
@@ -75,17 +82,17 @@ TEST_SUITE("the switch reaches the runtime") {
   // coprocessor runtime is more lines of setup and one command; the software
   // one is a loop that goes round sixteen times.
   TEST_CASE("runs far more instructions, which is the lesson") {
-    runOne(prog("unsigned int", "300 * 4"), false);
+    runOne(viaVars("unsigned int", 300, "*", 4), false);
     const uint64_t acp = lastInstructions;
-    runOne(prog("unsigned int", "300 * 4"), true);
+    runOne(viaVars("unsigned int", 300, "*", 4), true);
     const uint64_t soft = lastInstructions;
     CHECK_MESSAGE(soft > acp * 3, "soft ", soft, " acp ", acp);
   }
 
   TEST_CASE("is the divide that costs the most, because there is no shift at all") {
-    runOne(prog("unsigned int", "60000 / 7"), false);
+    runOne(viaVars("unsigned int", 60000, "/", 7), false);
     const uint64_t acp = lastInstructions;
-    runOne(prog("unsigned int", "60000 / 7"), true);
+    runOne(viaVars("unsigned int", 60000, "/", 7), true);
     CHECK(lastInstructions > acp * 3);
   }
 }
