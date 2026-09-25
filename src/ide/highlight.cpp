@@ -182,7 +182,7 @@ bool isDataWord(std::string_view w) {
 
 bool isRegister(std::string_view w) {
   const std::string u = upper(w);
-  return u == "A" || u == "B" || u == "D1" || u == "D2" || u == "SP" || u == "PC";
+  return u == "A" || u == "B" || u == "D1" || u == "D2" || u == "D3" || u == "SP" || u == "PC";
 }
 
 std::vector<Span> lexAssembly(std::string_view s) {

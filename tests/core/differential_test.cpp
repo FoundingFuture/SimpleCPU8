@@ -69,6 +69,16 @@ const char* GEN_OPS[] = {
     "ASR A",
     "LD D1 <- D2+n",
     "LD D2 <- D1+A",
+    "LD D3 <- D1+n",
+    "LD D3 <- D3+n",
+    "LD D2 <- D3+n",
+    "LD A <- [D3+n]",
+    "LD [D3+n] <- A",
+    "LD [D3+n] <- D1",
+    "LD D2 <- [D3+n]",
+    "ADC A <- [D3+n]",
+    "CMP A, [D3+n]",
+    "LD [addr16] <- D3",
 };
 
 std::vector<Instr> randomProgram(Rand& rand, int length) {
@@ -101,17 +111,17 @@ struct Snapshot {
   Status status;
   std::optional<CrashKind> crash;
   uint8_t acc;
-  uint16_t d1, d2, sp;
+  uint16_t d1, d2, d3, sp;
   Flags flags;
   std::array<uint8_t, RAM_SIZE> ram;
-  std::array<uint8_t, STACK_SIZE> stack;
+  std::vector<uint8_t> stack;
   std::vector<LogIoBus::Entry> io;
   bool operator==(const Snapshot&) const = default;
 };
 
 Snapshot snapshot(const Machine& m, const LogIoBus& io) {
   return {m.status, m.crash ? std::optional(m.crash->kind) : std::nullopt,
-          m.acc, m.d1, m.d2, m.sp, m.flags, m.ram, m.stack, io.log};
+          m.acc, m.d1, m.d2, m.d3, m.sp, m.flags, m.ram, m.stack, io.log};
 }
 
 }  // namespace

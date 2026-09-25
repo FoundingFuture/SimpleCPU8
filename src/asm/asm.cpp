@@ -200,6 +200,8 @@ std::optional<Operand> parseDeref(const std::string& s, char open, char close) {
   if (body.size() < 3 || body.back() != close) return std::nullopt;
   const std::string inner = body.substr(1, body.size() - 2);
   const bool dReg = inner == "D1" || inner == "D2";
+  // D3 has only the displacement form, so [D3] is [D3+0].
+  if (inner == "D3" && !suffixed) return Operand{.t = Operand::T::DispD, .x = 3, .expr = "0"};
   if (suffixed) {
     if (last == '+' && inner == "A") return Operand{.t = Operand::T::IndA, .inc = true};
     if (last == '+' && dReg) return Operand{.t = Operand::T::IndD, .x = inner[1] - '0', .inc = true};
@@ -208,8 +210,8 @@ std::optional<Operand> parseDeref(const std::string& s, char open, char close) {
   }
   if (inner == "A") return Operand{.t = Operand::T::IndA};
   if (dReg) return Operand{.t = Operand::T::IndD, .x = inner[1] - '0'};
-  if (inner == "D1+A" || inner == "D2+A") return Operand{.t = Operand::T::IdxD, .x = inner[1] - '0'};
-  if ((startsWith(inner, "D1+") || startsWith(inner, "D2+")) && inner.size() > 3) {
+  if (inner == "D1+A" || inner == "D2+A" || inner == "D3+A") return Operand{.t = Operand::T::IdxD, .x = inner[1] - '0'};
+  if ((startsWith(inner, "D1+") || startsWith(inner, "D2+") || startsWith(inner, "D3+")) && inner.size() > 3) {
     return Operand{.t = Operand::T::DispD, .x = inner[1] - '0', .expr = inner.substr(3)};
   }
   if (inner.empty()) return std::nullopt;
@@ -232,11 +234,11 @@ std::string squareSpelling(const std::string& s) {
 
 std::optional<Operand> parseOperand(std::string_view raw) {
   const std::string s = stripSpaces(raw);
-  if (s == "A" || s == "D1" || s == "D2") return Operand{.t = Operand::T::Reg, .r = s};
+  if (s == "A" || s == "D1" || s == "D2" || s == "D3") return Operand{.t = Operand::T::Reg, .r = s};
   if (auto d = parseDeref(s, '[', ']')) return d;
   // A register plus an offset with no brackets is the sum itself, the
   // address arithmetic: D1+8, D1-8, D2+A.
-  if (s.size() > 3 && (startsWith(s, "D1") || startsWith(s, "D2")) && (s[2] == '+' || s[2] == '-')) {
+  if (s.size() > 3 && (startsWith(s, "D1") || startsWith(s, "D2") || startsWith(s, "D3")) && (s[2] == '+' || s[2] == '-')) {
     const std::string off = s.substr(3);
     if (s[2] == '+' && off == "A") return Operand{.t = Operand::T::Sum, .x = s[1] - '0', .plusA = true};
     return Operand{.t = Operand::T::Sum, .x = s[1] - '0', .expr = s[2] == '+' ? off : "0-(" + off + ")"};
@@ -752,6 +754,9 @@ class Assembler {
       if (mnem == "INC" && (restUpper == "D1" || restUpper == "D2")) {
         return pushLiteral(lineNo, "INC " + restUpper);
       }
+      if (restUpper == "D3") {
+        return err(lineNo, mnem + " D3 does not exist; step it with LD D3 <- D3" + (mnem == "INC" ? "+1" : "-1"));
+      }
       return err(lineNo, mnem + " " + rest + " is not an instruction");
     }
 
@@ -819,12 +824,12 @@ class Assembler {
       if (src && src->t == T::DispD) {
         return pushExpr(lineNo, mnem + " A <- [D" + std::to_string(src->x) + "+n]", src->expr, ExprKind::Disp8);
       }
-      return err(lineNo, mnem + " takes an immediate, a zero page address, or [D1+n] or [D2+n]");
+      return err(lineNo, mnem + " takes an immediate, a zero page address, or [D1+n], [D2+n] or [D3+n]");
     }
 
-    // TST D1 and TST D2: the address add with nothing added, which sets Z
-    // from the whole pointer. The NULL test for a register.
-    if (mnem == "TST" && (restUpper == "D1" || restUpper == "D2")) {
+    // TST D1, TST D2 and TST D3: the address add with nothing added, which
+    // sets Z from the whole pointer. The NULL test for a register.
+    if (mnem == "TST" && (restUpper == "D1" || restUpper == "D2" || restUpper == "D3")) {
       return pushExpr(lineNo, "LD " + restUpper + " <- " + restUpper + "+n", std::string("0"), ExprKind::Off16);
     }
 
@@ -843,7 +848,7 @@ class Assembler {
       if (src && src->t == T::DispD) {
         return pushExpr(lineNo, mnem + " A, [D" + std::to_string(src->x) + "+n]", src->expr, ExprKind::Disp8);
       }
-      return err(lineNo, mnem + " takes an immediate, a zero page address, or [D1+n] or [D2+n]");
+      return err(lineNo, mnem + " takes an immediate, a zero page address, or [D1+n], [D2+n] or [D3+n]");
     }
 
     if (isShiftMnemonic(mnem)) {
@@ -865,6 +870,9 @@ class Assembler {
     err(lineNo, "unknown mnemonic: " + mnem);
   }
 
+  static constexpr const char* D3_INDEX =
+      "[D3+A] does not exist; point D2 at the array with LD D2 <- D3+n, then use [D2+A]";
+
   void ldInstruction(int lineNo, const Operand& dst, const Operand& src) {
     auto push = [&](const std::string& opName, std::optional<std::string> expr = std::nullopt,
                     ExprKind kind = ExprKind::Imm8) {
@@ -877,12 +885,12 @@ class Assembler {
     // Stack sugar: a store to [SP]- is a push, a load from [SP]+ is a pop.
     if (dst.t == T::Stack) {
       if (!dst.push) return err(lineNo, "a store to the stack uses [SP]-: LD [SP]- <- A");
-      if (src.t != T::Reg) return err(lineNo, "the stack takes a register: LD [SP]- <- A, D1, or D2");
+      if (src.t != T::Reg || src.r == "D3") return err(lineNo, "the stack takes a register: LD [SP]- <- A, D1, or D2");
       return push(src.r == "A" ? "PUSHB A" : "PUSHW " + src.r);
     }
     if (src.t == T::Stack) {
       if (src.push) return err(lineNo, "a load from the stack uses [SP]+: LD A <- [SP]+");
-      if (dst.t != T::Reg) return err(lineNo, "the stack fills a register: LD A, D1, or D2 <- [SP]+");
+      if (dst.t != T::Reg || dst.r == "D3") return err(lineNo, "the stack fills a register: LD A, D1, or D2 <- [SP]+");
       return push(dst.r == "A" ? "POPB A" : "POPW " + dst.r);
     }
 
@@ -895,10 +903,26 @@ class Assembler {
           return push("LD A <- [A]");
         case T::IndD: return push("LD A <- [D" + std::to_string(src.x) + "]" + (src.inc ? plus : ""));
         case T::DispD: return push("LD A <- [D" + std::to_string(src.x) + "+n]", src.expr, ExprKind::Disp8);
-        case T::IdxD: return push("LD A <- [D" + std::to_string(src.x) + "+A]");
+        case T::IdxD:
+          if (src.x == 3) return err(lineNo, D3_INDEX);
+          return push("LD A <- [D" + std::to_string(src.x) + "+A]");
         case T::Reg: return err(lineNo, "register to register moves do not exist");
         case T::Sum: return err(lineNo, "A is a byte and cannot hold an address sum; load it into D1 or D2");
         default: break;
+      }
+    }
+
+    if (dst.t == T::Reg && dst.r == "D3") {
+      switch (src.t) {
+        case T::Mem: return push("LD D3 <- [addr16]", src.expr, ExprKind::Addr16);
+        case T::Sum:
+          if (src.plusA) return err(lineNo, "D3 takes a constant offset only: LD D3 <- D" + std::to_string(src.x) + "+n");
+          return push("LD D3 <- D" + std::to_string(src.x) + "+n", src.expr, ExprKind::Off16);
+        case T::Reg:
+          if (src.r == "A") return err(lineNo, "a D register takes a byte from A only through RAM: store A, then load the word");
+          return push("LD D3 <- " + src.r + "+n", std::string("0"), ExprKind::Off16);
+        case T::Val: return err(lineNo, "LD D3 takes no constant: LD D1 <- value, then LD D3 <- D1");
+        default: return err(lineNo, "D3 loads from an address, or from D1, D2 or D3 plus an offset");
       }
     }
 
@@ -917,15 +941,17 @@ class Assembler {
           if (src.x == x) return err(lineNo, "LD " + X + " <- [" + X + "+n] corrupts its own address; use the other D register");
           return push("LD " + X + " <- [" + S + "+n]", src.expr, ExprKind::Disp8);
         case T::IdxD:
+          if (src.x == 3) return err(lineNo, D3_INDEX);
           if (src.x == x) return err(lineNo, "LD " + X + " <- [" + X + "+A] corrupts its own address; use the other D register");
           return push("LD " + X + " <- [" + S + "+A]");
         case T::Sum:
+          if (src.plusA && src.x == 3) return err(lineNo, "D3 takes a constant offset only: LD " + X + " <- D3+n");
           if (src.plusA) return push("LD " + X + " <- " + S + "+A");
           return push("LD " + X + " <- " + S + "+n", src.expr, ExprKind::Off16);
         case T::Reg:
           // A copy is the sum with nothing added. Onto itself it changes
           // only Z, which is the NULL test TST D1 spells.
-          if (src.r == "D1" || src.r == "D2") {
+          if (src.r == "D1" || src.r == "D2" || src.r == "D3") {
             return push("LD " + X + " <- " + src.r + "+n", std::string("0"), ExprKind::Off16);
           }
           return err(lineNo, "a D register takes a byte from A only through RAM: store A, then load the word");
@@ -942,6 +968,7 @@ class Assembler {
     const std::string X = "D" + std::to_string(dst.x);
     if (dst.t == T::IndD) {
       if (src.t == T::Reg && src.r == "A") return push("LD [" + X + "]" + (dst.inc ? plus : "") + " <- A");
+      if (src.t == T::Reg && src.r == "D3") return err(lineNo, "D3 is stored only at an address: LD [addr16] <- D3");
       if (src.t == T::Reg) {
         const int y = src.r == "D1" ? 1 : 2;
         if (dst.inc) return err(lineNo, "word stores take no +");
@@ -953,6 +980,7 @@ class Assembler {
 
     if (dst.t == T::DispD) {
       if (src.t == T::Reg && src.r == "A") return push("LD [" + X + "+n] <- A", dst.expr, ExprKind::Disp8);
+      if (src.t == T::Reg && src.r == "D3") return err(lineNo, "D3 is stored only at an address: LD [addr16] <- D3");
       if (src.t == T::Reg) {
         const int y = src.r == "D1" ? 1 : 2;
         if (y == dst.x) return err(lineNo, "LD [" + X + "+n] <- " + src.r + " is not in the instruction set; use the other D register");
@@ -961,6 +989,7 @@ class Assembler {
       return err(lineNo, "stores take a register source");
     }
 
+    if (dst.t == T::IdxD && dst.x == 3) return err(lineNo, D3_INDEX);
     if (dst.t == T::IdxD) return err(lineNo, "indexed stores do not exist: A is the index and the only byte source");
     if (dst.t == T::IndA) return err(lineNo, "stores through [A] do not exist; use a D register");
     err(lineNo, "unsupported LD shape");

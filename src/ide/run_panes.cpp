@@ -143,8 +143,8 @@ void Ide::registersBody() {
   ImGui::TextDisabled("microcode %s", computer_.microcodeInspectable() && computer_.microcodeName() != "@naive"
                                           ? "custom"
                                           : computer_.microcodeName().c_str());
-  ImGui::Text("PC %s   A %s (%3d)   D1 %s   D2 %s   SP %s", hex(m.pc, 4).c_str(), hex(m.acc, 2).c_str(), m.acc,
-              hex(m.d1, 4).c_str(), hex(m.d2, 4).c_str(), hex(m.sp, 4).c_str());
+  ImGui::Text("PC %s   A %s (%3d)   D1 %s   D2 %s   D3 %s   SP %s", hex(m.pc, 4).c_str(), hex(m.acc, 2).c_str(),
+              m.acc, hex(m.d1, 4).c_str(), hex(m.d2, 4).c_str(), hex(m.d3, 4).c_str(), hex(m.sp, 4).c_str());
   ImGui::Text("flags ");
   flagLetters(m.flags);
   ImGui::SameLine(0.0f, 16.0f);
@@ -222,6 +222,8 @@ void Ide::memoryBody() {
   ImGui::SameLine();
   if (ImGui::SmallButton("D2")) memJump_ = memAddr_ = m.d2 & 0xfff0;
   ImGui::SameLine();
+  if (ImGui::SmallButton("D3")) memJump_ = memAddr_ = m.d3 & 0xfff0;
+  ImGui::SameLine();
   if (ImGui::SmallButton("text screen")) memJump_ = memAddr_ = 0xFAC0;
   ImGui::SameLine();
   ImGui::Checkbox("follow the bus", &memFollow_);
@@ -264,11 +266,11 @@ void Ide::stackPane(const char* name) {
 
 void Ide::stackBody() {
   const Machine& m = computer_.machine();
-  ImGui::Text("SP %s   %d bytes in use of %d", hex(m.sp, 4).c_str(), STACK_TOP - m.sp, STACK_SIZE);
+  ImGui::Text("SP %s   %d bytes in use of %d", hex(m.sp, 4).c_str(), m.stackTop() - m.sp, m.stackSize());
   ImGui::SameLine();
   ImGui::Checkbox("follow SP", &stackFollow_);
   ImGui::SameLine();
-  if (ImGui::SmallButton("top")) stackJump_ = STACK_SIZE - 256;
+  if (ImGui::SmallButton("top")) stackJump_ = m.stackSize() - 256;
   std::optional<int> hot;
   if (m.lastBus && (m.lastBus->kind == BusEvent::Kind::StackRead || m.lastBus->kind == BusEvent::Kind::StackWrite)) {
     hot = static_cast<int>(m.lastBus->addr);
@@ -277,7 +279,7 @@ void Ide::stackBody() {
     const int want = std::max(0, (static_cast<int>(m.sp) & 0xfff0) - 64);
     if (want != stackShown_) stackJump_ = stackShown_ = want;
   }
-  hexDump("stack", m.stack.data(), STACK_SIZE, stackJump_, hot, static_cast<int>(m.sp));
+  hexDump("stack", m.stack.data(), m.stackSize(), stackJump_, hot, static_cast<int>(m.sp));
 }
 
 void Ide::breakpointsPane() {

@@ -1,4 +1,4 @@
-// The drawn CPU schema and its wiring knowledge. Sixteen boxes and the
+// The drawn CPU schema and its wiring knowledge. Seventeen boxes and the
 // wires between them. Which components and wires a control signal touches.
 // The short card for each box. The port of dpschema.ts, datapath.ts and
 // the titles of componentdocs.ts. Pure data, so a test could drive it
@@ -14,8 +14,9 @@
 
 namespace sc8::dp {
 
-// One box of the schema, in the 410 x 240 drawing space of the browser's
-// SVG. `value` marks a box with a live value slot.
+// One box of the schema, in a 496 x 252 drawing space. The browser's SVG
+// was 410 x 240: D3 widened it, and its wires deepened the gap under the D
+// row. `value` marks a box with a live value slot.
 struct Box {
   std::string_view id;
   float x, y, w, h;
@@ -29,8 +30,8 @@ struct Wire {
   std::vector<std::array<float, 2>> pts;
 };
 
-constexpr float VIEW_W = 410;
-constexpr float VIEW_H = 240;
+constexpr float VIEW_W = 496;
+constexpr float VIEW_H = 252;
 
 std::span<const Box> boxes();
 std::span<const Wire> wires();

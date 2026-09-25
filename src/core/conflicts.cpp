@@ -8,15 +8,15 @@ std::optional<Conflict> checkRow(const Row& row) {
   using enum MemAccess;
 
   // Rule 1: one writer per register atom.
-  std::array<std::optional<Signal>, 12> writer{};
+  std::array<std::optional<Signal>, 14> writer{};
   for (Signal s : row) {
     const SignalMeta& meta = signalMeta(s);
-    for (int bit = 0; bit < 12; bit++) {
+    for (int bit = 0; bit < 14; bit++) {
       if (!(meta.writes & (1u << bit))) continue;
       auto& prev = writer[static_cast<size_t>(bit)];
       if (prev) {
-        static constexpr std::array<std::string_view, 12> ATOM = {
-            "PCH", "PCL", "IR", "ACC", "A", "B", "D1H", "D1L", "D2H", "D2L", "SP", "FLAGS"};
+        static constexpr std::array<std::string_view, 14> ATOM = {
+            "PCH", "PCL", "IR", "ACC", "A", "B", "D1H", "D1L", "D2H", "D2L", "SP", "FLAGS", "D3H", "D3L"};
         return Conflict{1, std::string(signalName(*prev)) + " and " + std::string(meta.name) +
                                " both write " + std::string(ATOM[static_cast<size_t>(bit)])};
       }
@@ -72,7 +72,8 @@ std::optional<Conflict> checkRow(const Row& row) {
     return Conflict{8, "a data RAM access needs exactly one address base select"};
   }
   for (Signal s : row) {
-    if ((s == Signal::D1_LOAD_EA || s == Signal::D2_LOAD_EA) && bases != 1) {
+    if ((s == Signal::D1_LOAD_EA || s == Signal::D2_LOAD_EA || s == Signal::D3_LOAD_EA || s == Signal::EA_FLAGS) &&
+        bases != 1) {
       return Conflict{8, std::string(signalName(s)) + " needs exactly one address base select"};
     }
   }

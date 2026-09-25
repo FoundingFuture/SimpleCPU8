@@ -253,6 +253,33 @@ TEST_SUITE("assembler errors") {
     CHECK_EQ(a.program[2].op, a.program[0].op);
   }
 
+  TEST_CASE("D3: the frame forms, copies, sums and its word in memory") {
+    Assembled a = ok(
+        "LD D3 <- D1\nLD D3 <- D3-12\nLD D1 <- D3+4\nLD D2 <- D3\nLD A <- [D3+2]\nLD [D3] <- A\n"
+        "LD D1 <- [D3+6]\nLD [D3+6] <- D2\nADD A <- [D3+1]\nCMP A, [D3]\nTST A, [D3+3]\nTST D3\n"
+        "LD [$10] <- D3\nLD D3 <- [$10]\nLD D3 <- D3");
+    const char* names[] = {"LD D3 <- D1+n", "LD D3 <- D3+n", "LD D1 <- D3+n", "LD D2 <- D3+n",
+                           "LD A <- [D3+n]", "LD [D3+n] <- A", "LD D1 <- [D3+n]", "LD [D3+n] <- D2",
+                           "ADD A <- [D3+n]", "CMP A, [D3+n]", "TST A, [D3+n]", "LD D3 <- D3+n",
+                           "LD [addr16] <- D3", "LD D3 <- [addr16]", "LD D3 <- D3+n"};
+    REQUIRE_EQ(a.program.size(), std::size(names));
+    for (size_t i = 0; i < std::size(names); i++) {
+      CAPTURE(names[i]);
+      CHECK_EQ(a.program[i].op, opByName(names[i])->op);
+    }
+    CHECK_EQ(a.program[1].operand, 0xfff4);
+    CHECK_EQ(a.program[5].operand, 0);
+  }
+
+  TEST_CASE("D3 forms that do not exist say what to write instead") {
+    CHECK(has(firstError("LD A <- [D3+A]"), "LD D2 <- D3+n, then use [D2+A]"));
+    CHECK(has(firstError("LD D3 <- 1000"), "LD D1 <- value, then LD D3 <- D1"));
+    CHECK(has(firstError("LD D3 <- D1+A"), "constant offset only"));
+    CHECK(has(firstError("INC D3"), "LD D3 <- D3+1"));
+    CHECK(has(firstError("PUSH D3"), "A, D1, or D2"));
+    CHECK(has(firstError("LD [D3+2] <- D3"), "LD [addr16] <- D3"));
+  }
+
   TEST_CASE("a D register takes a sum: the address arithmetic") {
     Assembled a = ok("LD D1 <- D1+8\nLD D1 <- D1-8\nLD D2 <- D1+A\nLD D1 <- D2\nLD D2 <- D2+count\n.ram\ncount: db 0");
     REQUIRE_EQ(a.program.size(), 5u);

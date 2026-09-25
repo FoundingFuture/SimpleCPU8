@@ -163,7 +163,7 @@ build/release/src/tools/simplecpu-run first.rom --ram 0 3
 ```text
 status: halted
 instructions: 3  cycles: 16
-A=0c D1=0000 D2=0000 SP=0fff PC=0003 flags=----
+A=0c D1=0000 D2=0000 D3=0000 SP=07ff PC=0003 flags=----
 0000: 05 07 0c
 ```
 
@@ -177,7 +177,7 @@ three instructions are counted. `PC` is 3, the slot of the `HLT`.
 | `A` | 8 | the accumulator. Every byte load, every sum and every port read lands here |
 | `D1`, `D2` | 16 | pointers into data RAM. A word load fills one, and `[D1]` reads through it |
 | `PC` | 16 | the slot number of the next instruction |
-| `SP` | 16 | the next free cell of the stack. Starts at `$0FFF` and grows down |
+| `SP` | 16 | the next free cell of the stack. Starts at `$07FF` and grows down |
 | flags | 4 | `N`, `Z`, `C` and `V`, set by arithmetic and by loads |
 
 `A` is the only register the arithmetic instructions touch. To add two
@@ -210,7 +210,7 @@ the last line.
 ```
 
 ```text
-A=ff D1=0000 D2=0000 SP=0fff PC=0002 flags=N--C
+A=ff D1=0000 D2=0000 D3=0000 SP=07ff PC=0002 flags=N--C
 ```
 
 200 minus 201 needs a borrow, so `C` is set, and the result 255 has its
@@ -223,7 +223,7 @@ top bit set, so `N` is set.
 ```
 
 ```text
-A=c8 D1=0000 D2=0000 SP=0fff PC=0002 flags=NV--
+A=c8 D1=0000 D2=0000 D3=0000 SP=07ff PC=0002 flags=NV--
 ```
 
 200 fits in a byte, so no carry. Read as signed bytes, 100 plus 100
@@ -236,7 +236,7 @@ cannot be minus 56, so `V` says the signed answer is wrong.
 ```
 
 ```text
-A=00 D1=0000 D2=0000 SP=0fff PC=0002 flags=--ZC
+A=00 D1=0000 D2=0000 D3=0000 SP=07ff PC=0002 flags=--ZC
 ```
 
 The sum wrapped to zero and carried. `Z` and `C` together mean the byte
@@ -289,7 +289,8 @@ graphics mode, which is the power on mode, those bytes are free RAM. No
 data address is illegal. An address past `$FFFF` wraps to zero, so a
 pointer walked off the end reads address 0.
 
-The stack is a separate memory of 4096 bytes. Only `SP` reaches it. A
+The stack is a separate memory of 2048 bytes, or up to 64K with
+`simplecpu --stack-size`. Only `SP` reaches it. A
 push writes at `SP` and moves `SP` down. A pop moves `SP` up and reads.
 `JSR` pushes the return address and `RET` pops it. There is no
 instruction that reads the stack at an address, so a program cannot
@@ -512,7 +513,7 @@ Round brackets never dereference. They group arithmetic, as in `LD A <-
 
 `JSR label` pushes the slot number of the next instruction, high byte
 first, and jumps to the label. `RET` pops those two bytes into `PC`.
-The stack is 4096 bytes, so a program can nest about 2000 calls before
+The stack is 2048 bytes, so a program can nest about 1000 calls before
 `stack-overflow`, and a `RET` with no `JSR` before it crashes at once.
 
 A subroutine needs an agreement with its callers. It says where the
@@ -554,7 +555,7 @@ n3:     dw 40000
 ```text
 status: halted
 instructions: 27  cycles: 134
-A=a7 D1=0006 D2=0000 SP=0fff PC=0006 flags=N---
+A=a7 D1=0006 D2=0000 D3=0000 SP=07ff PC=0006 flags=N---
 0000: a7 f8 03 e8 07 d0 9c 40
 ```
 
@@ -564,9 +565,9 @@ bytes first, then the high bytes with the carry from the low ones.
 `total+1` in brackets is an expression the assembler folds to the
 address of the low byte.
 
-Set a breakpoint on the `RET` and run. `SP` reads `0FFD`, two below its
+Set a breakpoint on the `RET` and run. `SP` reads `07FD`, two below its
 start, and the Memory pane cannot show why: the stack is not in RAM.
-Step once and `SP` is back at `0FFF`.
+Step once and `SP` is back at `07FF`.
 
 ## Frames and drawing
 

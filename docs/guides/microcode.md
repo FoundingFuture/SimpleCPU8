@@ -70,7 +70,7 @@ The registers:
 | `A` | 8 | the ALU's left input latch, loaded from `ACC` |
 | `B` | 8 | the ALU's right input latch, loaded from the operand, RAM or the stack |
 | `D1`, `D2` | 16 | the pointer registers, in two halves of 8 bits each |
-| `SP` | 16 | the stack pointer. Starts at `$0FFF` and names the next free cell |
+| `SP` | 16 | the stack pointer. Starts at `$07FF` and names the next free cell |
 | `FLAGS` | 4 | `N`, `V`, `Z` and `C` |
 
 Two names collide here, and the collision matters for the whole guide.
@@ -95,7 +95,7 @@ The memories:
 |---|---|
 | `PROG` | 64K slots of three bytes. `FETCH` reads it, nothing writes it |
 | `RAM` | 65536 bytes of data. Reached only through `EA` |
-| `STACK` | 4096 bytes. Reached only through `SP` |
+| `STACK` | 2048 bytes, or up to 64K with `--stack-size`. Reached only through `SP` |
 
 The wires are drawn as a schematic would draw them. A wire touches only
 the boxes it joins. `PC` feeds `PROG`, and `PROG` feeds `IR`. `IR`
@@ -723,7 +723,7 @@ build/release/src/tools/simplecpu-run test/build/test.rom --ram 0 2
 ```text
 status: halted
 instructions: 5  cycles: 19
-A=0d D1=0000 D2=0000 SP=0fff PC=0005 flags=----
+A=0d D1=0000 D2=0000 D3=0000 SP=07ff PC=0005 flags=----
 0000: 0c 0d
 ```
 
@@ -747,7 +747,7 @@ test program:
 ```text
 status: halted
 instructions: 5  cycles: 17
-A=0c D1=0000 D2=0000 SP=0fff PC=0005 flags=----
+A=0c D1=0000 D2=0000 D3=0000 SP=07ff PC=0005 flags=----
 0000: 05 0c
 ```
 
@@ -791,7 +791,7 @@ table. A change to either set that moves a number fails the build until
 the table moves with it.
 
 The layer that catches the trap is tests/core/differential_test.cpp. It
-generates 250 random programs of 25 instructions from a list of 42
+generates 250 random programs of 25 instructions from a list of 52
 shapes, with random operands kept inside RAM. It runs each program on a
 machine with the naive set and on a machine with the optimal set, and
 compares the two at the end. The comparison covers the status, the
@@ -839,7 +839,7 @@ it.
 | `no-microcode` | the fetched opcode has no section | `no microprogram for opcode 0x48` |
 | `signal-conflict` | a row breaks a rule | `rule 1: ACC_LOAD_ALU and ACC_INC both write ACC` |
 | `stack-overflow` | `SP_DEC` runs with `SP` at 0 | `SP_DEC below the stack bottom` |
-| `stack-underflow` | `SP_INC` runs with `SP` at `$0FFF` | `SP_INC above the stack top` |
+| `stack-underflow` | `SP_INC` runs with `SP` at the top, `$07FF` by default | `SP_INC above the stack top` |
 
 The program counter checks run before each fetch. A `PC` equal to the
 number of instructions halts, which is how falling off the end works.

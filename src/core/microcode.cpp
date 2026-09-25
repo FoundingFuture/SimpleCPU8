@@ -61,6 +61,12 @@ constexpr Regs D2{S::RAM_TO_D2H,   S::RAM_TO_D2L,   S::RAM_WRITE_D2H, S::RAM_WRI
                   S::D2_TSTZ,      S::D2_INC,       S::D2_LOAD_OP16,  S::ADDR_D2,
                   S::STK_WRITE_D2H, S::STK_WRITE_D2L, S::STK_TO_D2H,  S::STK_TO_D2L,
                   S::IO_READ_D2H,  S::IO_READ_D2L};
+// D3 has no step, stack or port forms. Those fields repeat D3_TSTZ and are
+// never read for it.
+constexpr Regs D3{S::RAM_TO_D3H,  S::RAM_TO_D3L,  S::RAM_WRITE_D3H, S::RAM_WRITE_D3L,
+                  S::D3_TSTZ,     S::D3_TSTZ,     S::D3_TSTZ,       S::ADDR_D3,
+                  S::D3_TSTZ,     S::D3_TSTZ,     S::D3_TSTZ,       S::D3_TSTZ,
+                  S::D3_TSTZ,     S::D3_TSTZ};
 
 // JSR's own rows with the target signal swapped in for PC_LOAD. The optimal
 // fetch has already stepped PC, so only the naive form has to step it first
@@ -157,10 +163,39 @@ constexpr Shift SHIFTS[] = {
 };
 
 // The address arithmetic. dst gets base + n or base + A from the EA
-// adder, then Z is tested as for every load into a D register.
-Signal loadEa(int d) { return d == 1 ? S::D1_LOAD_EA : S::D2_LOAD_EA; }
-Signal addrOf(int d) { return d == 1 ? S::ADDR_D1 : S::ADDR_D2; }
-Signal tstzOf(int d) { return d == 1 ? S::D1_TSTZ : S::D2_TSTZ; }
+// adder, and EA_FLAGS sets Z from the sum and C when it wrapped, in the
+// same row.
+Signal loadEa(int d) { return d == 1 ? S::D1_LOAD_EA : d == 2 ? S::D2_LOAD_EA : S::D3_LOAD_EA; }
+Signal addrOf(int d) { return d == 1 ? S::ADDR_D1 : d == 2 ? S::ADDR_D2 : S::ADDR_D3; }
+
+// The address sums that exist: every pair of D1 and D2, and D3 with each.
+// Only D1 and D2 take +A.
+struct EaForm {
+  int dst, base;
+  bool plusA;
+};
+std::vector<EaForm> eaForms() {
+  std::vector<EaForm> v;
+  for (int d = 1; d <= 2; d++) {
+    for (int b = 1; b <= 2; b++) {
+      v.push_back({d, b, false});
+      v.push_back({d, b, true});
+    }
+  }
+  v.push_back({3, 3, false});
+  v.push_back({1, 3, false});
+  v.push_back({2, 3, false});
+  v.push_back({3, 1, false});
+  v.push_back({3, 2, false});
+  return v;
+}
+
+Row eaRow(const EaForm& f) {
+  return {loadEa(f.dst), addrOf(f.base), f.plusA ? S::EA_OFF_A : S::EA_OFF_OP16, S::EA_FLAGS};
+}
+std::string eaName(const EaForm& f) {
+  return "LD D" + std::to_string(f.dst) + " <- D" + std::to_string(f.base) + (f.plusA ? "+A" : "+n");
+}
 
 struct AluFamily {
   std::string_view name;
@@ -173,6 +208,28 @@ constexpr AluFamily ALU_FAMILIES[] = {
 };
 
 std::string dn(int x) { return "D" + std::to_string(x); }
+
+// The frame forms of D3: bytes, words and the ALU at [D3+n], and D3 itself
+// loaded and stored as a word.
+void addD3(Microcode& m, bool naive) {
+  const Row at = {S::ADDR_D3, S::EA_OFF_OP8};
+  const Row byteSrc = cat(Row{S::RAM_TO_B}, {S::ADDR_D3, S::EA_OFF_OP8});
+  m.set("LD A <- [D3+n]", naive ? naiveByteLoad(byteSrc) : optimalByteLoad(byteSrc));
+  const Row store = cat(Row{S::RAM_WRITE_ACC}, {S::ADDR_D3, S::EA_OFF_OP8});
+  m.set("LD [D3+n] <- A", naive ? Rows{store, {S::PC_INC}} : Rows{store});
+  for (int xi = 1; xi <= 2; xi++) {
+    const Regs& x = xi == 1 ? D1 : D2;
+    m.set("LD " + dn(xi) + " <- [D3+n]", naive ? naiveWordLoad(x, at) : optimalWordLoad(x, at));
+    m.set("LD [D3+n] <- " + dn(xi), wordStore(x, at, naive));
+  }
+  m.set("LD D3 <- [addr16]", naive ? naiveWordLoad(D3, {S::ADDR_OP16}) : optimalWordLoad(D3, {S::ADDR_OP16}));
+  m.set("LD [addr16] <- D3", wordStore(D3, {S::ADDR_OP16}, naive));
+  for (const AluFamily& f : ALU_FAMILIES) {
+    m.set(std::string(f.name) + " A <- [D3+n]", naive ? naiveAlu(f.select, byteSrc) : optimalAlu(f.select, byteSrc));
+  }
+  m.set("CMP A, [D3+n]", naive ? naiveTest(S::ALU_SUB, byteSrc) : optimalTest(S::ALU_SUB, byteSrc));
+  m.set("TST A, [D3+n]", naive ? naiveTest(S::ALU_AND, byteSrc) : optimalTest(S::ALU_AND, byteSrc));
+}
 
 }  // namespace
 
@@ -257,12 +314,8 @@ Microcode buildNaive() {
   for (const Shift& sh : SHIFTS) {
     m.set(std::string(sh.name) + " A", {{S::ACC_TO_A}, {sh.select, S::ACC_LOAD_ALU}, {sh.select, S::FLAGS_LOAD}, {S::PC_INC}});
   }
-  for (int d = 1; d <= 2; d++) {
-    for (int b = 1; b <= 2; b++) {
-      m.set("LD " + dn(d) + " <- " + dn(b) + "+n", {{loadEa(d), addrOf(b), S::EA_OFF_OP16}, {tstzOf(d)}, {S::PC_INC}});
-      m.set("LD " + dn(d) + " <- " + dn(b) + "+A", {{loadEa(d), addrOf(b), S::EA_OFF_A}, {tstzOf(d)}, {S::PC_INC}});
-    }
-  }
+  for (const EaForm& f : eaForms()) m.set(eaName(f), {eaRow(f), {S::PC_INC}});
+  addD3(m, true);
 
   m.set("PUSHB A", {{S::STK_WRITE_ACC}, {S::SP_DEC}, {S::PC_INC}});
   m.set("POPB A", {{S::SP_INC}, {S::STK_TO_B}, aluPassLoad(), aluPassFlags(), {S::PC_INC}});
@@ -355,12 +408,8 @@ Microcode buildOptimal() {
   for (const Shift& sh : SHIFTS) {
     m.set(std::string(sh.name) + " A", {{S::ACC_TO_A}, {sh.select, S::ACC_LOAD_ALU, S::FLAGS_LOAD}});
   }
-  for (int d = 1; d <= 2; d++) {
-    for (int b = 1; b <= 2; b++) {
-      m.set("LD " + dn(d) + " <- " + dn(b) + "+n", {{loadEa(d), addrOf(b), S::EA_OFF_OP16}, {tstzOf(d)}});
-      m.set("LD " + dn(d) + " <- " + dn(b) + "+A", {{loadEa(d), addrOf(b), S::EA_OFF_A}, {tstzOf(d)}});
-    }
-  }
+  for (const EaForm& f : eaForms()) m.set(eaName(f), {eaRow(f)});
+  addD3(m, false);
 
   m.set("PUSHB A", {{S::STK_WRITE_ACC, S::SP_DEC}});
   m.set("POPB A", {{S::STK_TO_B, S::STK_CIN, S::SP_INC},

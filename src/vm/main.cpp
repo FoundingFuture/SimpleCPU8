@@ -16,6 +16,8 @@
 //   simplecpu --rom game.rom --seconds 10   quit after ten seconds, with the
 //                                          frame rates printed as always
 //   simplecpu --rom game.rom --screenshot shot.png
+//   simplecpu --rom deep.rom --stack-size 16K   a bigger hardware stack, 256
+//                                           bytes to 64K, 2K by default
 //                                          save the window after one second and quit
 //
 // A ROM fills the screen, the way a game console does. BASIC opens in a
@@ -57,7 +59,7 @@ int usage() {
                "usage: simplecpu --rom FILE.rom [--fps N | --max] [--microcode naive|optimal]\n"
                "                 [--crt S | --no-crt] [--scale N] [--window | --fullscreen] [--title T] [--seconds S]\n"
                "       simplecpu --basic [FILE.bas [--run]]\n"
-               "       ... [--type TEXT] [--screenshot FILE.png]\n");
+               "       ... [--type TEXT] [--screenshot FILE.png] [--stack-size BYTES]\n");
   return 2;
 }
 
@@ -99,6 +101,7 @@ int main(int argc, char** argv) {
   bool basic = false, maxSpeed = false, runBasic = false;
   int fps = 60, scale = 3;
   int fullscreen = -1;
+  int stackSize = STACK_SIZE;
   double seconds = 0.0;  // quit after this long, 0 for never  // -1 decides by what runs: a ROM fills the screen
   DisplaySettings display;
 
@@ -142,6 +145,16 @@ int main(int argc, char** argv) {
     else if (a == "--title") title = next();
     else if (a == "--screenshot") screenshot = next();
     else if (a == "--seconds") seconds = std::stod(next());
+    else if (a == "--stack-size") {
+      const std::string v = next();
+      const auto bytes = parseStackSize(v);
+      if (!bytes) {
+        std::fprintf(stderr, "simplecpu: --stack-size takes %d to %d bytes, as 2048, 2K or 0x800, not %s\n",
+                     MIN_STACK_SIZE, MAX_STACK_SIZE, v.c_str());
+        return 2;
+      }
+      stackSize = *bytes;
+    }
     else return usage();
   }
   if (romPath.empty() && !basic) return usage();
@@ -185,6 +198,7 @@ int main(int argc, char** argv) {
   }
 
   Computer computer;
+  computer.setStackSize(stackSize);
   if (!microcode.empty()) {
     for (const std::string& e : computer.selectMicrocode(microcode)) std::fprintf(stderr, "microcode: %s\n", e.c_str());
     cart->microcode.clear();  // the command line wins over the ROM's choice

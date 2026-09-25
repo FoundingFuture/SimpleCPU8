@@ -17,12 +17,14 @@
 namespace sc8 {
 
 constexpr int RAM_SIZE = 65536;
-// DESIGN: 4096 bytes, and SP is 16 bits. A return address costs two bytes,
-// so the old 256 stopped nesting at 128 calls. The register is 16 bits
-// because every register here is 8 bits or 16. So the bound lives on the
-// memory instead, beside RAM_SIZE.
-constexpr int STACK_SIZE = 4096;
+// DESIGN: the stack memory is 2048 bytes unless the host asks for more, up
+// to 65536, which SP's 16 bits can reach. A return address costs two bytes,
+// so the default nests about 1000 calls deep. The bound lives on the
+// memory, beside RAM_SIZE, and simplecpu --stack-size sets it.
+constexpr int STACK_SIZE = 2048;  // the default size
 constexpr int STACK_TOP = STACK_SIZE - 1;
+constexpr int MIN_STACK_SIZE = 256;
+constexpr int MAX_STACK_SIZE = 65536;
 constexpr int ZERO_PAGE = 256;
 
 enum class CrashKind {
@@ -34,6 +36,10 @@ enum class CrashKind {
 };
 
 std::string_view crashKindName(CrashKind k);
+
+// A stack size as a command line writes it: 4096, 4K or 0x1000. Empty when
+// it is not a number or falls outside MIN_STACK_SIZE to MAX_STACK_SIZE.
+std::optional<int> parseStackSize(std::string_view text);
 
 enum class Status { Running, Halted, Crashed };
 
@@ -106,10 +112,19 @@ class Machine {
   uint8_t bLatch = 0;
   uint16_t d1 = 0;
   uint16_t d2 = 0;
+  // The data stack pointer by convention: the C runtime keeps its frames
+  // at [D3+n]. The hardware gives it no meaning of its own.
+  uint16_t d3 = 0;
   uint16_t sp = STACK_TOP;  // points at the next free cell, grows down
   Flags flags;
   std::array<uint8_t, RAM_SIZE> ram{};
-  std::array<uint8_t, STACK_SIZE> stack{};
+  std::vector<uint8_t> stack = std::vector<uint8_t>(STACK_SIZE);
+
+  // The stack memory's size, MIN_STACK_SIZE to MAX_STACK_SIZE. Setting it
+  // clears the stack and puts SP at the new top.
+  void setStackSize(int bytes);
+  int stackSize() const { return static_cast<int>(stack.size()); }
+  uint16_t stackTop() const { return static_cast<uint16_t>(stack.size() - 1); }
 
   std::vector<Instr> program;
 
@@ -187,6 +202,7 @@ class Machine {
   AluOut alu(AluOp op) const;
   uint16_t effectiveAddress(const Row& row);
   uint16_t stackAddress(const Row& row) const;
+  bool eaWrapped_ = false;  // the last sum left 0 to $FFFF, for EA_FLAGS
   void finishInstruction();
   void rebuildDispatch();
 

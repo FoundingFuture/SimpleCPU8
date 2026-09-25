@@ -68,6 +68,11 @@ class Computer {
   // shows a row.
   bool microcodeInspectable() const { return microcodeName_ != "@optimal"; }
 
+  // The hardware stack's size in bytes, for the next power on. simplecpu
+  // --stack-size sets it. The default is STACK_SIZE.
+  void setStackSize(int bytes) { stackSize_ = bytes; }
+  int stackSize() const { return stackSize_; }
+
   Machine& machine() { return *machine_; }
   const Machine& machine() const { return *machine_; }
 
@@ -152,6 +157,7 @@ class Computer {
 
   Cartridge cart_;
   std::string microcodeName_ = "@naive";
+  int stackSize_ = STACK_SIZE;
   Microcode microcode_;
   std::unique_ptr<Machine> machine_;
   // The chain: GPU, then the ACP, then the APU, then the input device.

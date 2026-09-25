@@ -1,7 +1,9 @@
 #include "core/machine.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 
 namespace sc8 {
 
@@ -52,7 +54,7 @@ std::string hex(unsigned v) {
 // still sees start-of-cycle values.
 struct Write {
   enum class Target : uint8_t {
-    PC, PCH, PCL, IR, ACC, A, B, D1, D1H, D1L, D2, D2H, D2L, SP, FLAGS, RAM, STACK
+    PC, PCH, PCL, IR, ACC, A, B, D1, D1H, D1L, D2, D2H, D2L, D3, D3H, D3L, SP, FLAGS, RAM, STACK
   };
   Target target;
   uint16_t value;
@@ -61,11 +63,11 @@ struct Write {
 };
 
 // The most writes a row that passed the rules can make: rule 1 allows one
-// writer per register atom, and there are twelve atoms (a PC or D load
+// writer per register atom, and there are fourteen atoms (a PC or D load
 // counts once here but takes two of them), rules 2 and 4 allow one RAM
 // and one stack access. A row of eleven signals that writes nine
 // registers passed every rule and overflowed the eight this held before.
-constexpr size_t REGISTER_ATOMS = 12;
+constexpr size_t REGISTER_ATOMS = 14;
 constexpr size_t MAX_WRITES = REGISTER_ATOMS + 2;
 
 struct WriteList {
@@ -130,7 +132,9 @@ Machine::RowInfo Machine::analyze(const Row& row) {
     const SignalMeta& meta = signalMeta(s);
     if (meta.mem == RamRead || meta.mem == RamWrite) info.needsRam = true;
     // An address load uses the adder with no RAM access.
-    if (s == Signal::D1_LOAD_EA || s == Signal::D2_LOAD_EA) info.needsRam = true;
+    if (s == Signal::D1_LOAD_EA || s == Signal::D2_LOAD_EA || s == Signal::D3_LOAD_EA || s == Signal::EA_FLAGS) {
+      info.needsRam = true;
+    }
     if (meta.mem == StackRead || meta.mem == StackWrite) info.needsStack = true;
     if (meta.aluSelect != AluOp::AluNone) info.aluOp = meta.aluSelect;
   }
@@ -157,6 +161,27 @@ void Machine::setTrace(bool on) {
   std::fill(ramWriteAt.begin(), ramWriteAt.end(), 0);
 }
 
+std::optional<int> parseStackSize(std::string_view text) {
+  std::string t(text);
+  long scale = 1;
+  if (!t.empty() && (t.back() == 'K' || t.back() == 'k')) {
+    scale = 1024;
+    t.pop_back();
+  }
+  if (t.empty()) return std::nullopt;
+  char* end = nullptr;
+  const long v = std::strtol(t.c_str(), &end, 0);
+  if (end == t.c_str() || *end != '\0') return std::nullopt;
+  const long bytes = v * scale;
+  if (bytes < MIN_STACK_SIZE || bytes > MAX_STACK_SIZE) return std::nullopt;
+  return static_cast<int>(bytes);
+}
+
+void Machine::setStackSize(int bytes) {
+  stack.assign(static_cast<size_t>(std::clamp(bytes, MIN_STACK_SIZE, MAX_STACK_SIZE)), 0);
+  sp = stackTop();
+}
+
 void Machine::reset() {
   pc = 0;
   irOp = 0;
@@ -166,7 +191,8 @@ void Machine::reset() {
   bLatch = 0;
   d1 = 0;
   d2 = 0;
-  sp = STACK_TOP;
+  d3 = 0;
+  sp = stackTop();
   flags = {};
   status = Status::Running;
   crash.reset();
@@ -268,12 +294,16 @@ uint16_t Machine::effectiveAddress(const Row& row) {
   else if (has(row, S::ADDR_OP16)) base = irOperand;
   else if (has(row, S::ADDR_D1)) base = d1;
   else if (has(row, S::ADDR_D2)) base = d2;
+  else if (has(row, S::ADDR_D3)) base = d3;
   else if (has(row, S::ADDR_A)) base = acc;
-  unsigned ea = base;
+  // Signed, so the sum can say whether it wrapped. A sixteen bit offset is
+  // two's complement: $FFF4 is -12, which is how D3-12 is written.
+  long ea = static_cast<long>(base);
   if (has(row, S::EA_OFF_OP8)) ea += irOperand & 0xff;
-  if (has(row, S::EA_OFF_OP16)) ea += irOperand;
+  if (has(row, S::EA_OFF_OP16)) ea += static_cast<int16_t>(irOperand);
   if (has(row, S::EA_OFF_A)) ea += acc;
   if (has(row, S::EA_CIN)) ea += 1;
+  eaWrapped_ = ea < 0 || ea > 0xffff;
   // No address is illegal. The adder masks to 16 bits and RAM is 64KB, so a
   // pointer walked off the end wraps to zero.
   ea &= 0xffff;
@@ -285,7 +315,7 @@ uint16_t Machine::effectiveAddress(const Row& row) {
 // because both bounds crash. The one address that can run past the top is
 // STK_CIN's, read in the same row that then fails on SP_INC.
 uint16_t Machine::stackAddress(const Row& row) const {
-  return has(row, Signal::STK_CIN) ? static_cast<uint16_t>((sp + 1) & (STACK_SIZE - 1)) : sp;
+  return has(row, Signal::STK_CIN) ? static_cast<uint16_t>((sp + 1u) % stack.size()) : sp;
 }
 
 bool Machine::executeRow(const Row& row) {
@@ -379,12 +409,26 @@ bool Machine::executeRow(const Row& row, const RowInfo& info) {
       case S::RAM_TO_D1L: writes.push(T::D1L, ramByte()); break;
       case S::RAM_TO_D2H: writes.push(T::D2H, ramByte()); break;
       case S::RAM_TO_D2L: writes.push(T::D2L, ramByte()); break;
+      case S::RAM_TO_D3H: writes.push(T::D3H, ramByte()); break;
+      case S::RAM_TO_D3L: writes.push(T::D3L, ramByte()); break;
+      case S::RAM_WRITE_D3H: writes.push(T::RAM, d3 >> 8, ea); break;
+      case S::RAM_WRITE_D3L: writes.push(T::RAM, d3 & 0xff, ea); break;
 
       case S::D1_LOAD_OP16: writes.push(T::D1, irOperand); break;
       case S::D2_LOAD_OP16: writes.push(T::D2, irOperand); break;
       // The adder's output itself, the address a RAM access would use.
       case S::D1_LOAD_EA: writes.push(T::D1, ea); break;
       case S::D2_LOAD_EA: writes.push(T::D2, ea); break;
+      case S::D3_LOAD_EA: writes.push(T::D3, ea); break;
+      // Z from the sum, C when it wrapped past either end of memory. After
+      // LD D2 <- D3-FLOOR, C set means D3 was below FLOOR, as after CMP.
+      case S::EA_FLAGS: {
+        Flags f = flags;
+        f.z = ea == 0;
+        f.c = eaWrapped_;
+        writes.pushFlags(f);
+        break;
+      }
       case S::D1_TSTZ: {
         Flags f = flags;
         f.z = d1 == 0;
@@ -397,12 +441,18 @@ bool Machine::executeRow(const Row& row, const RowInfo& info) {
         writes.pushFlags(f);
         break;
       }
+      case S::D3_TSTZ: {
+        Flags f = flags;
+        f.z = d3 == 0;
+        writes.pushFlags(f);
+        break;
+      }
 
       case S::D1_INC: writes.push(T::D1, static_cast<uint16_t>(d1 + 1)); break;
       case S::D2_INC: writes.push(T::D2, static_cast<uint16_t>(d2 + 1)); break;
       case S::ACC_INC: writes.push(T::ACC, (acc + 1) & 0xff); break;
       case S::SP_INC:
-        if (sp == STACK_TOP) {
+        if (sp == stackTop()) {
           fail(CrashKind::StackUnderflow, "SP_INC above the stack top", &row);
           return false;
         }
@@ -447,7 +497,7 @@ bool Machine::executeRow(const Row& row, const RowInfo& info) {
       case S::IO_READ_D2L: ioRead(T::D2L); break;
 
       // Pure address-stage and ALU-select signals carry no action of their own.
-      case S::ADDR_OP8: case S::ADDR_OP16: case S::ADDR_D1: case S::ADDR_D2:
+      case S::ADDR_OP8: case S::ADDR_OP16: case S::ADDR_D1: case S::ADDR_D2: case S::ADDR_D3:
       case S::ADDR_A: case S::EA_OFF_OP8: case S::EA_OFF_OP16: case S::EA_OFF_A: case S::EA_CIN:
       case S::STK_CIN:
       case S::ALU_ADD: case S::ALU_SUB: case S::ALU_ADC: case S::ALU_SBC:
@@ -477,6 +527,9 @@ bool Machine::executeRow(const Row& row, const RowInfo& info) {
       case T::D2: d2 = w.value; break;
       case T::D2H: d2 = static_cast<uint16_t>((byte << 8) | (d2 & 0xff)); break;
       case T::D2L: d2 = static_cast<uint16_t>((d2 & 0xff00) | byte); break;
+      case T::D3: d3 = w.value; break;
+      case T::D3H: d3 = static_cast<uint16_t>((byte << 8) | (d3 & 0xff)); break;
+      case T::D3L: d3 = static_cast<uint16_t>((d3 & 0xff00) | byte); break;
       case T::SP: sp = w.value; break;
       case T::FLAGS: flags = w.flags; break;
       case T::RAM:

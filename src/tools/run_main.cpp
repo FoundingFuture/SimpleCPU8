@@ -27,7 +27,7 @@ namespace {
 int usage() {
   std::fprintf(stderr,
                "usage: simplecpu-run <file.rom | file.asm> [--max N] [--microcode naive|optimal]\n"
-               "                     [--ram ADDR COUNT] [--trace]\n");
+               "                     [--ram ADDR COUNT] [--trace] [--stack-size BYTES]\n");
   return 2;
 }
 
@@ -67,12 +67,22 @@ int main(int argc, char** argv) {
   std::string microcodeOverride;
   bool trace = false;
   int ramAt = -1, ramCount = 0;
+  int stackSize = STACK_SIZE;
 
   for (int i = 1; i < argc; i++) {
     const std::string a = argv[i];
     if (a == "--max" && i + 1 < argc) maxInstr = std::stoull(argv[++i]);
     else if (a == "--microcode" && i + 1 < argc) microcodeOverride = argv[++i];
     else if (a == "--trace") trace = true;
+    else if (a == "--stack-size" && i + 1 < argc) {
+      const auto bytes = parseStackSize(argv[++i]);
+      if (!bytes) {
+        std::fprintf(stderr, "simplecpu-run: --stack-size takes %d to %d bytes, as 2048, 2K or 0x800\n",
+                     MIN_STACK_SIZE, MAX_STACK_SIZE);
+        return 2;
+      }
+      stackSize = *bytes;
+    }
     else if (a == "--ram" && i + 2 < argc) {
       ramAt = std::stoi(argv[++i], nullptr, 0);
       ramCount = std::stoi(argv[++i], nullptr, 0);
@@ -101,6 +111,7 @@ int main(int argc, char** argv) {
   LogIoBus io;
   Machine m(cart->program, std::move(mc), &io);
   m.setTrace(trace);
+  m.setStackSize(stackSize);
   std::copy(cart->ram.begin(), cart->ram.end(), m.ram.begin());
   m.run(maxInstr);
 
@@ -111,7 +122,7 @@ int main(int argc, char** argv) {
   }
   std::printf("\ninstructions: %llu  cycles: %llu\n", static_cast<unsigned long long>(m.instructions),
               static_cast<unsigned long long>(m.cycles));
-  std::printf("A=%02x D1=%04x D2=%04x SP=%04x PC=%04x flags=%c%c%c%c\n", m.acc, m.d1, m.d2, m.sp, m.pc,
+  std::printf("A=%02x D1=%04x D2=%04x D3=%04x SP=%04x PC=%04x flags=%c%c%c%c\n", m.acc, m.d1, m.d2, m.d3, m.sp, m.pc,
               m.flags.n ? 'N' : '-', m.flags.v ? 'V' : '-', m.flags.z ? 'Z' : '-', m.flags.c ? 'C' : '-');
   if (!io.log.empty()) {
     std::printf("port writes: %zu", io.log.size());

@@ -55,25 +55,33 @@ namespace sc8 {
   X(RAM_TO_D1L, W(D1L), RamRead, 0, AluNone, 0, 0, 0, 0, 0)                   \
   X(RAM_TO_D2H, W(D2H), RamRead, 0, AluNone, 0, 0, 0, 0, 0)                   \
   X(RAM_TO_D2L, W(D2L), RamRead, 0, AluNone, 0, 0, 0, 0, 0)                   \
+  X(RAM_TO_D3H, W(D3H), RamRead, 0, AluNone, 0, 0, 0, 0, 0)                   \
+  X(RAM_TO_D3L, W(D3L), RamRead, 0, AluNone, 0, 0, 0, 0, 0)                   \
   X(RAM_WRITE_D1H, W(), RamWrite, 0, AluNone, 0, 0, 0, 0, 0)                  \
   X(RAM_WRITE_D1L, W(), RamWrite, 0, AluNone, 0, 0, 0, 0, 0)                  \
   X(RAM_WRITE_D2H, W(), RamWrite, 0, AluNone, 0, 0, 0, 0, 0)                  \
   X(RAM_WRITE_D2L, W(), RamWrite, 0, AluNone, 0, 0, 0, 0, 0)                  \
+  X(RAM_WRITE_D3H, W(), RamWrite, 0, AluNone, 0, 0, 0, 0, 0)                  \
+  X(RAM_WRITE_D3L, W(), RamWrite, 0, AluNone, 0, 0, 0, 0, 0)                  \
   X(ADDR_OP8, W(), MemNone, 0, AluNone, 0, 0, 1, 0, 0)                        \
   X(ADDR_OP16, W(), MemNone, 0, AluNone, 0, 0, 1, 0, 0)                       \
   X(ADDR_D1, W(), MemNone, 0, AluNone, 0, 0, 1, 0, 0)                         \
   X(ADDR_D2, W(), MemNone, 0, AluNone, 0, 0, 1, 0, 0)                         \
+  X(ADDR_D3, W(), MemNone, 0, AluNone, 0, 0, 1, 0, 0)                         \
   X(ADDR_A, W(), MemNone, 0, AluNone, 0, 0, 1, 0, 0)                          \
   X(EA_OFF_OP8, W(), MemNone, 0, AluNone, 0, 0, 0, 1, 0)                      \
   X(EA_OFF_A, W(), MemNone, 0, AluNone, 0, 0, 0, 1, 0)                        \
   X(EA_OFF_OP16, W(), MemNone, 0, AluNone, 0, 0, 0, 1, 0)                     \
   X(EA_CIN, W(), MemNone, 0, AluNone, 0, 0, 0, 1, 0)                          \
+  X(EA_FLAGS, W(FLAGS), MemNone, 0, AluNone, 0, 0, 0, 0, 0)                   \
   X(D1_LOAD_OP16, W(D1H, D1L), MemNone, 0, AluNone, 0, 0, 0, 0, 0)            \
   X(D2_LOAD_OP16, W(D2H, D2L), MemNone, 0, AluNone, 0, 0, 0, 0, 0)            \
   X(D1_LOAD_EA, W(D1H, D1L), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
   X(D2_LOAD_EA, W(D2H, D2L), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
+  X(D3_LOAD_EA, W(D3H, D3L), MemNone, 0, AluNone, 0, 0, 0, 0, 0)              \
   X(D1_TSTZ, W(FLAGS), MemNone, 0, AluNone, 0, 0, 0, 0, 0)                    \
   X(D2_TSTZ, W(FLAGS), MemNone, 0, AluNone, 0, 0, 0, 0, 0)                    \
+  X(D3_TSTZ, W(FLAGS), MemNone, 0, AluNone, 0, 0, 0, 0, 0)                    \
   X(D1_INC, W(D1H, D1L), MemNone, 1, AluNone, 0, 0, 0, 0, 0)                  \
   X(D2_INC, W(D2H, D2L), MemNone, 1, AluNone, 0, 0, 0, 0, 0)                  \
   X(ACC_INC, W(ACC), MemNone, 1, AluNone, 0, 0, 0, 0, 0)                      \
@@ -128,6 +136,8 @@ enum RegAtom : uint16_t {
   D2L = 1 << 9,
   SP = 1 << 10,
   FLAGS = 1 << 11,
+  D3H = 1 << 12,
+  D3L = 1 << 13,
 };
 
 enum class MemAccess : uint8_t { MemNone, ProgRead, RamRead, RamWrite, StackRead, StackWrite };

@@ -28,14 +28,16 @@ const Box BOXES[] = {
     {"EA", 104, 70, 64, 30, "EA", true},
     {"D1", 240, 70, 64, 30, "D1", true},
     {"D2", 336, 70, 66, 30, "D2", true},
-    {"STACK", 8, 130, 64, 34, "STACK", false},
-    {"SP", 104, 132, 48, 30, "SP", true},
-    {"A", 184, 132, 48, 30, "A", true},
-    {"B", 256, 132, 48, 30, "B", true},
-    {"IO", 336, 132, 66, 30, "IO", false},
-    {"ACC", 8, 196, 64, 34, "ACC", true},
-    {"ALU", 160, 190, 124, 44, "ALU", false},
-    {"FLAGS", 336, 196, 66, 34, "FLAGS", true},
+    // D3 sits past D2, and its three wires run under the D row.
+    {"D3", 424, 70, 64, 30, "D3", true},
+    {"STACK", 8, 142, 64, 34, "STACK", false},
+    {"SP", 104, 144, 48, 30, "SP", true},
+    {"A", 184, 144, 48, 30, "A", true},
+    {"B", 256, 144, 48, 30, "B", true},
+    {"IO", 336, 144, 66, 30, "IO", false},
+    {"ACC", 8, 208, 64, 34, "ACC", true},
+    {"ALU", 160, 202, 124, 44, "ALU", false},
+    {"FLAGS", 336, 208, 66, 34, "FLAGS", true},
 };
 
 // Routed the way a real schematic would: a wire only touches a box it
@@ -53,32 +55,35 @@ const Wire WIRES[] = {
     {"d2-ea", {{336, 88}, {168, 88}}},
     {"ea-d1", {{168, 96}, {240, 96}}},
     {"ea-d2", {{160, 100}, {160, 104}, {320, 104}, {320, 96}, {336, 96}}},
-    {"acc-ea", {{44, 196}, {44, 184}, {88, 184}, {88, 120}, {132, 120}, {132, 100}}},
+    {"acc-ea", {{44, 208}, {44, 196}, {88, 196}, {88, 120}, {132, 120}, {132, 100}}},
     {"ram-d1", {{72, 76}, {240, 76}}},
     {"ram-d2", {{72, 72}, {336, 72}}},
     {"ir-d", {{176, 42}, {176, 56}, {260, 56}, {260, 70}}},
-    {"ir-b", {{160, 42}, {160, 50}, {220, 50}, {220, 115}, {276, 115}, {276, 132}}},
-    {"ram-b", {{40, 104}, {40, 112}, {244, 112}, {244, 146}, {256, 146}}},
-    {"acc-ram", {{30, 196}, {30, 104}}},
-    {"sp-stack", {{104, 146}, {72, 146}}},
-    {"stack-b", {{40, 164}, {40, 172}, {264, 172}, {264, 162}}},
-    {"stack-pc", {{52, 130}, {52, 115}, {88, 115}, {88, 48}, {268, 48}, {268, 42}}},
-    {"stack-d", {{60, 130}, {60, 108}, {252, 108}, {252, 100}}},
-    {"acc-stack", {{20, 196}, {20, 164}}},
-    {"acc-a", {{72, 206}, {96, 206}, {96, 176}, {196, 176}, {196, 162}}},
-    {"a-alu", {{208, 162}, {208, 190}}},
-    {"b-alu", {{272, 162}, {272, 190}}},
-    {"alu-acc", {{160, 212}, {72, 212}}},
-    {"alu-flags", {{284, 212}, {336, 212}}},
-    {"io-acc", {{350, 162}, {350, 180}, {90, 180}, {90, 200}, {72, 200}}},
-    {"ir-io", {{192, 42}, {192, 62}, {320, 62}, {320, 122}, {352, 122}, {352, 132}}},
+    {"ir-b", {{160, 42}, {160, 50}, {220, 50}, {220, 115}, {276, 115}, {276, 144}}},
+    {"ram-b", {{40, 104}, {40, 112}, {244, 112}, {244, 158}, {256, 158}}},
+    {"acc-ram", {{30, 208}, {30, 104}}},
+    {"sp-stack", {{104, 158}, {72, 158}}},
+    {"stack-b", {{40, 176}, {40, 184}, {264, 184}, {264, 174}}},
+    {"stack-pc", {{52, 142}, {52, 115}, {88, 115}, {88, 48}, {268, 48}, {268, 42}}},
+    {"stack-d", {{60, 142}, {60, 108}, {252, 108}, {252, 100}}},
+    {"acc-stack", {{20, 208}, {20, 176}}},
+    {"acc-a", {{72, 218}, {96, 218}, {96, 188}, {196, 188}, {196, 174}}},
+    {"a-alu", {{208, 174}, {208, 202}}},
+    {"b-alu", {{272, 174}, {272, 202}}},
+    {"alu-acc", {{160, 224}, {72, 224}}},
+    {"alu-flags", {{284, 224}, {336, 224}}},
+    {"io-acc", {{350, 174}, {350, 192}, {90, 192}, {90, 212}, {72, 212}}},
+    {"ir-io", {{192, 42}, {192, 62}, {320, 62}, {320, 122}, {352, 122}, {352, 144}}},
     {"step-d1", {{356, 42}, {356, 56}, {284, 56}, {284, 70}}},
     {"step-d2", {{372, 42}, {372, 70}}},
-    {"step-sp", {{344, 42}, {344, 66}, {226, 66}, {226, 118}, {148, 118}, {148, 132}}},
+    {"step-sp", {{344, 42}, {344, 66}, {226, 66}, {226, 118}, {148, 118}, {148, 144}}},
+    {"d3-ea", {{432, 100}, {432, 126}, {146, 126}, {146, 100}}},
+    {"ea-d3", {{154, 100}, {154, 131}, {448, 131}, {448, 100}}},
+    {"ram-d3", {{66, 104}, {66, 136}, {472, 136}, {472, 100}}},
 };
 
 constexpr std::string_view COMPONENTS[] = {
-    "PROG", "IR", "PC", "STEP", "RAM", "EA", "D1", "D2", "STACK", "SP", "A", "B", "IO", "ALU", "FLAGS", "ACC",
+    "PROG", "IR", "PC", "STEP", "RAM", "EA", "D1", "D2", "D3", "STACK", "SP", "A", "B", "IO", "ALU", "FLAGS", "ACC",
 };
 
 bool starts(std::string_view s, std::string_view p) { return s.substr(0, p.size()) == p; }
@@ -112,14 +117,18 @@ const Card CARDS[] = {
     {"EA", "EA · effective address adder", "combinational · forgets every cycle",
      "EA stands for effective address: the address that actually takes effect on RAM this cycle, after all "
      "the addressing math is done. The EA adder computes it fresh, every cycle, from three ingredients: a "
-     "base, an optional offset, and an optional carry-in. D1_LOAD_EA and D2_LOAD_EA keep the sum in a D "
-     "register instead, which is how LD D1 <- D1+8 steps a pointer by any amount."},
+     "base, an optional offset, and an optional carry-in. D1_LOAD_EA, D2_LOAD_EA and D3_LOAD_EA keep the sum "
+     "in a D register instead, which is how LD D1 <- D1+8 steps a pointer by any amount. EA_FLAGS sets Z from "
+     "the sum and C when it wrapped past either end of memory."},
     {"D1", "D1 · pointer register", "register · remembers across cycles",
      "A 16 bit pointer register. It can load whole from the operand (D1_LOAD_OP16), or one byte half at a "
      "time from RAM or the stack, high half then low half, matching the machine's big-endian words."},
     {"D2", "D2 · pointer register", "register · remembers across cycles",
      "The twin of D1: a second 16 bit pointer with exactly the same connections, so two pointers can walk "
      "two structures at once, the linked list demo's whole trick."},
+    {"D3", "D3 · data stack pointer", "register · remembers across cycles",
+     "A third 16 bit pointer, for a stack in RAM. It reaches memory only as [D3+n] and moves only through the "
+     "EA adder, LD D3 <- D3-12. The C runtime keeps its frames there. The hardware gives it no other meaning."},
     {"STACK", STACK_TITLE, "memory",
      "A separate memory that only SP can address. Programs reach it exclusively through push, pop, JSR, and "
      "RET; no pointer arithmetic, no EA adder, no way in from data RAM."},
@@ -184,11 +193,14 @@ std::vector<std::string_view> componentsFor(Signal s) {
     case Signal::ADDR_OP16: return {"EA", "IR"};
     case Signal::ADDR_D1: return {"EA", "D1"};
     case Signal::ADDR_D2: return {"EA", "D2"};
+    case Signal::ADDR_D3: return {"EA", "D3"};
     case Signal::ADDR_A: return {"EA", "ACC"};
     case Signal::EA_OFF_OP8:
     case Signal::EA_OFF_OP16: return {"EA", "IR"};
     case Signal::D1_LOAD_EA: return {"EA", "D1"};
     case Signal::D2_LOAD_EA: return {"EA", "D2"};
+    case Signal::D3_LOAD_EA: return {"EA", "D3"};
+    case Signal::EA_FLAGS: return {"EA", "FLAGS"};
     // A shift reads the A latch alone.
     case Signal::ALU_SHL:
     case Signal::ALU_SHR:
@@ -201,6 +213,7 @@ std::vector<std::string_view> componentsFor(Signal s) {
     case Signal::D2_LOAD_OP16: return {"D2", "IR"};
     case Signal::D1_TSTZ: return {"D1", "FLAGS"};
     case Signal::D2_TSTZ: return {"D2", "FLAGS"};
+    case Signal::D3_TSTZ: return {"D3", "FLAGS"};
     case Signal::D1_INC: return {"D1", "STEP"};
     case Signal::D2_INC: return {"D2", "STEP"};
     case Signal::ACC_INC: return {"ACC", "STEP"};
@@ -220,6 +233,7 @@ std::vector<std::string_view> componentsFor(Signal s) {
   // registers, ALU selects, stack writes of PC and ACC.
   if (ramD(n, '1')) return {"RAM", "D1"};
   if (ramD(n, '2')) return {"RAM", "D2"};
+  if (ramD(n, '3')) return {"RAM", "D3"};
   if (stkD(n, '1')) return {"STACK", "SP", "D1"};
   if (stkD(n, '2')) return {"STACK", "SP", "D2"};
   if (stkPc(n)) return {"STACK", "SP", "PC"};
@@ -261,11 +275,13 @@ std::vector<std::string_view> wiresFor(Signal s) {
     case Signal::EA_OFF_OP16: out = {"ir-ea"}; break;
     case Signal::ADDR_D1: out = {"d1-ea"}; break;
     case Signal::ADDR_D2: out = {"d2-ea"}; break;
+    case Signal::ADDR_D3: out = {"d3-ea"}; break;
     case Signal::ADDR_A:
     case Signal::EA_OFF_A: out = {"acc-ea"}; break;
     case Signal::EA_CIN: break;
     case Signal::D1_LOAD_EA: out = {"ea-d1"}; break;
     case Signal::D2_LOAD_EA: out = {"ea-d2"}; break;
+    case Signal::D3_LOAD_EA: out = {"ea-d3"}; break;
     case Signal::D1_LOAD_OP16:
     case Signal::D2_LOAD_OP16: out = {"ir-d"}; break;
     case Signal::D1_INC: out = {"step-d1"}; break;
@@ -287,7 +303,8 @@ std::vector<std::string_view> wiresFor(Signal s) {
   }
   if (ramD(n, '1')) out.push_back("ram-d1");
   if (ramD(n, '2')) out.push_back("ram-d2");
-  if (ramD(n, '1') || ramD(n, '2')) out.push_back("ea-ram");
+  if (ramD(n, '3')) out.push_back("ram-d3");
+  if (ramD(n, '1') || ramD(n, '2') || ramD(n, '3')) out.push_back("ea-ram");
   if (stkPc(n)) {
     out.push_back("stack-pc");
     out.push_back("sp-stack");

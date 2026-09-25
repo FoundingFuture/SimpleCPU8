@@ -10,7 +10,7 @@ namespace {
 
 using enum OperandKind;
 
-constexpr std::array<OpDef, 119> OPS = {{
+constexpr std::array<OpDef, 141> OPS = {{
     {0x00, "NOP", None},
     {0x01, "HLT", None},
 
@@ -148,6 +148,7 @@ constexpr std::array<OpDef, 119> OPS = {{
     {0x91, "TST A, imm8", Imm8},
     {0x92, "TST A, [D1+n]", Disp8},
     {0x93, "TST A, [D2+n]", Disp8},
+    {0x94, "TST A, [D3+n]", Disp8},
 
     // One bit left or right. C takes the bit that leaves.
     {0x98, "SHL A", None},
@@ -155,6 +156,32 @@ constexpr std::array<OpDef, 119> OPS = {{
     {0x9a, "ROL A", None},
     {0x9b, "ROR A", None},
     {0x9c, "ASR A", None},
+
+    // D3, the data stack pointer. A C frame is [D3+n]: its locals, the
+    // parameters above them, and every address the address adder makes.
+    {0xa0, "LD A <- [D3+n]", Disp8},
+    {0xa1, "LD [D3+n] <- A", Disp8},
+    {0xa2, "LD D1 <- [D3+n]", Disp8},
+    {0xa3, "LD D2 <- [D3+n]", Disp8},
+    {0xa4, "LD [D3+n] <- D1", Disp8},
+    {0xa5, "LD [D3+n] <- D2", Disp8},
+    {0xa6, "LD D3 <- D3+n", Off16},
+    {0xa7, "LD D1 <- D3+n", Off16},
+    {0xa8, "LD D2 <- D3+n", Off16},
+    {0xa9, "LD D3 <- D1+n", Off16},
+    {0xaa, "LD D3 <- D2+n", Off16},
+    {0xab, "LD D3 <- [addr16]", Addr16},
+    {0xac, "LD [addr16] <- D3", Addr16},
+
+    // The ALU on a byte of the frame. The low nibble matches $40-$47.
+    {0xb0, "ADD A <- [D3+n]", Disp8},
+    {0xb1, "SUB A <- [D3+n]", Disp8},
+    {0xb2, "AND A <- [D3+n]", Disp8},
+    {0xb3, "OR A <- [D3+n]", Disp8},
+    {0xb4, "XOR A <- [D3+n]", Disp8},
+    {0xb5, "ADC A <- [D3+n]", Disp8},
+    {0xb6, "SBC A <- [D3+n]", Disp8},
+    {0xb7, "CMP A, [D3+n]", Disp8},
 }};
 
 struct Tables {

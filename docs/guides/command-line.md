@@ -148,6 +148,7 @@ machine's 256 by 256 pixels. F11 switches between the two while it runs.
 | `--microcode naive` or `optimal` | runs the ROM on another set |
 | `--crt 0.6`, `--no-crt` | the strength of the CRT look, or none |
 | `--seconds 10` | quits by itself after ten seconds |
+| `--stack-size 16K` | the hardware stack's size, 256 bytes to 64K. 2K is the default |
 | `--type 'RUN\n'` | types text into the machine after it boots, `\n` being Enter |
 | `--screenshot shot.png` | saves the window after one second and quits |
 
@@ -330,7 +331,7 @@ simplecpu-run add.asm --ram 0 3
 ```text
 status: halted
 instructions: 3  cycles: 16
-A=2a D1=0000 D2=0000 SP=0fff PC=0003 flags=----
+A=2a D1=0000 D2=0000 D3=0000 SP=07ff PC=0003 flags=----
 0000: 14 16 2a
 ```
 
@@ -514,6 +515,7 @@ beside the source.
 | `--max N` | stops after N instructions |
 | `--microcode naive` or `optimal` | the set to run on |
 | `--ram ADDR COUNT` | prints COUNT bytes of RAM from ADDR at the end |
+| `--stack-size BYTES` | the hardware stack's size, as for `simplecpu` |
 
 ## Working in the repository
 

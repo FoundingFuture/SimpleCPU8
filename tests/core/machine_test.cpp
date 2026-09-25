@@ -234,6 +234,7 @@ Machine runBoth(std::vector<Instr> program) {
   CHECK_EQ(a.acc, b.acc);
   CHECK_EQ(a.d1, b.d1);
   CHECK_EQ(a.d2, b.d2);
+  CHECK_EQ(a.d3, b.d3);
   CHECK_EQ(a.flags, b.flags);
   return b;
 }
@@ -302,11 +303,94 @@ TEST_SUITE("compare, test, shift and address arithmetic") {
     m = runBoth({ins("LD D1 <- imm16", 8), ins("LD D1 <- D1+n", 0xfff8)});
     CHECK_EQ(m.d1, 0);
     CHECK(m.flags.z);
-    // The sum wraps at 16 bits, and C is not touched.
-    m = runBoth({ins("LD A <- imm8", 0xff), ins("ADD A <- imm8", 1), ins("LD D2 <- imm16", 0xffff),
-                 ins("LD D2 <- D2+n", 2)});
+    // The sum wraps at 16 bits, and C says it wrapped.
+    m = runBoth({ins("LD D2 <- imm16", 0xffff), ins("LD D2 <- D2+n", 2)});
     CHECK_EQ(m.d2, 1);
     CHECK(m.flags.c);
+  }
+
+  TEST_CASE("an address add sets C when it wraps past either end, and clears it otherwise") {
+    // Below zero: $0008 - 12.
+    Machine m = runBoth({ins("LD D1 <- imm16", 8), ins("LD D2 <- D1+n", 0xfff4)});
+    CHECK_EQ(m.d2, 0xfffc);
+    CHECK(m.flags.c);
+    // Not below: C is cleared even when it was set before.
+    m = runBoth({ins("LD A <- imm8", 0xff), ins("ADD A <- imm8", 1), ins("LD D1 <- imm16", 12),
+                 ins("LD D2 <- D1+n", 0xfff4)});
+    CHECK_EQ(m.d2, 0);
+    CHECK(m.flags.z);
+    CHECK(!m.flags.c);
+    // N and V are left alone.
+    m = runBoth({ins("LD A <- imm8", 0x7f), ins("ADD A <- imm8", 1), ins("LD D1 <- imm16", 1), ins("LD D1 <- D1+n", 1)});
+    CHECK(m.flags.n);
+    CHECK(m.flags.v);
+  }
+
+  TEST_CASE("the stack check: D3 minus the floor sets C when D3 is below it") {
+    for (const auto& [d3, below] : {std::pair<uint16_t, bool>{0x2000, false}, {0x1fff, true}, {0x2001, false}}) {
+      Machine m = runBoth({ins("LD D1 <- imm16", d3), ins("LD D3 <- D1+n", 0), ins("LD D2 <- D3+n", 0xe000)});
+      CHECK_EQ(m.flags.c, below);
+    }
+  }
+}
+
+TEST_SUITE("the hardware stack's size") {
+  TEST_CASE("the size sets SP's start and where a push overflows") {
+    Machine m({{0x50, 0}, {0x08, 0}}, naive());  // PUSHB A, JMP 0
+    CHECK_EQ(m.stackSize(), STACK_SIZE);
+    m.setStackSize(256);
+    CHECK_EQ(m.sp, 0xff);
+    m.run(10000);
+    REQUIRE(m.crash);
+    CHECK_EQ(m.crash->kind, CrashKind::StackOverflow);
+    // 255 pushes and their jumps finish. The 256th writes cell 0 and then
+    // cannot step SP below it.
+    CHECK_EQ(m.instructions, 255u * 2);
+    m.setStackSize(MAX_STACK_SIZE);
+    CHECK_EQ(m.sp, 0xffff);
+  }
+
+  TEST_CASE("a command line size reads as bytes, K or hex, inside the bounds") {
+    CHECK_EQ(parseStackSize("2048"), 2048);
+    CHECK_EQ(parseStackSize("16K"), 16384);
+    CHECK_EQ(parseStackSize("0x800"), 2048);
+    CHECK_EQ(parseStackSize("64k"), 65536);
+    CHECK_FALSE(parseStackSize("65K"));
+    CHECK_FALSE(parseStackSize("100"));
+    CHECK_FALSE(parseStackSize("big"));
+  }
+}
+
+TEST_SUITE("D3, the data stack pointer") {
+  TEST_CASE("a frame at [D3+n]: bytes, words and the ALU") {
+    Machine m = runBoth({ins("LD D1 <- imm16", 0x2000), ins("LD D3 <- D1+n", 0), ins("LD D3 <- D3+n", 0xfffa),
+                         ins("LD A <- imm8", 7), ins("LD [D3+n] <- A", 1), ins("LD A <- imm8", 5),
+                         ins("ADD A <- [D3+n]", 1), ins("LD [D3+n] <- A", 2), ins("LD D2 <- imm16", 0x1234),
+                         ins("LD [D3+n] <- D2", 4), ins("LD D1 <- [D3+n]", 4), ins("CMP A, [D3+n]", 2)});
+    CHECK_EQ(m.d3, 0x1ffa);
+    CHECK_EQ(m.ram[0x1ffb], 7);
+    CHECK_EQ(m.ram[0x1ffc], 12);
+    CHECK_EQ(m.ram[0x1ffe], 0x12);
+    CHECK_EQ(m.ram[0x1fff], 0x34);
+    CHECK_EQ(m.d1, 0x1234);
+    CHECK(m.flags.z);
+  }
+
+  TEST_CASE("the address of a local, and D3 saved and restored through memory") {
+    Machine m = runBoth({ins("LD D1 <- imm16", 0x3000), ins("LD D3 <- D1+n", 0), ins("LD D2 <- D3+n", 3),
+                         ins("LD [addr16] <- D3", 0x10), ins("LD D1 <- imm16", 0), ins("LD D3 <- D1+n", 0),
+                         ins("LD D3 <- [addr16]", 0x10)});
+    CHECK_EQ(m.d2, 0x3003);
+    CHECK_EQ(m.d3, 0x3000);
+    CHECK(!m.flags.z);
+    CHECK_EQ(m.ram[0x10], 0x30);
+  }
+
+  TEST_CASE("TST A through D3") {
+    Machine m = runBoth({ins("LD D1 <- imm16", 0x100), ins("LD D3 <- D1+n", 0), ins("LD A <- imm8", 0x0f),
+                         ins("LD [D3+n] <- A", 0), ins("LD A <- imm8", 0xf0), ins("TST A, [D3+n]", 0)});
+    CHECK(m.flags.z);
+    CHECK_EQ(m.acc, 0xf0);
   }
 }
 

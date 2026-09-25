@@ -87,6 +87,7 @@ void Computer::insert(Cartridge cart) {
 void Computer::newMachine() {
   machine_ = std::make_unique<Machine>(cart_.program, microcode_, &gpu_);
   machine_->setTrace(traceOn_);
+  machine_->setStackSize(stackSize_);
   gpu_.attachRam(machine_->ram.data());
   acp_.attachRam(machine_->ram.data());
   storage_.attachRam(machine_->ram.data());

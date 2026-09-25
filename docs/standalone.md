@@ -306,7 +306,7 @@ A double click on the grip fits the width again. Save layout keeps which section
 height. The Run level has Memory and Stack as panes
 beside the manual. Memory is the whole 64K behind a clipper. It jumps to
 the zero page, D1, D2 and the text screen, and follows the last bus
-access while stepping. The stack shows its 4096 bytes with SP
+access while stepping. The stack shows its 2048 bytes, or the size given, with SP
 marked and follows SP.
 
 Full screen shows the machine's picture alone on the whole display. It

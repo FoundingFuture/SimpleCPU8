@@ -48,6 +48,7 @@ std::string boxValue(std::string_view id, const Machine& m) {
   if (id == "PC") return hex(m.pc, 4);
   if (id == "D1") return hex(m.d1, 4);
   if (id == "D2") return hex(m.d2, 4);
+  if (id == "D3") return hex(m.d3, 4);
   if (id == "SP") return hex(m.sp, 4);
   if (id == "A") return hex(m.aLatch, 2);
   if (id == "B") return hex(m.bLatch, 2);
@@ -110,7 +111,7 @@ void Ide::datapathBody() {
     }
   }
 
-  // The drawing space is 410 x 240, scaled to the pane.
+  // The drawing space is dp::VIEW_W by dp::VIEW_H, scaled to the pane.
   const ImVec2 avail = ImGui::GetContentRegionAvail();
   const float rowH = ImGui::GetTextLineHeightWithSpacing() * 2.0f;
   const float scale = std::max(0.5f, std::min(avail.x / dp::VIEW_W, (avail.y - rowH) / dp::VIEW_H));
