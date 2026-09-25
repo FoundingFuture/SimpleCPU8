@@ -12,16 +12,6 @@ project(SimpleCPU8
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
-# On macOS the IDE has one Objective-C++ file, src/ide/native_window.mm.
-# A language has to be enabled here, at the top: enabled in a
-# subdirectory, CMake generates no rules for it.
-if(APPLE)
-  enable_language(OBJCXX)
-  set(CMAKE_OBJCXX_STANDARD 20)
-  set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
-  set(CMAKE_OBJCXX_EXTENSIONS OFF)
-endif()
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)

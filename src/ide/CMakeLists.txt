@@ -37,10 +37,14 @@ add_executable(simplecpu-ide
   sprite_pane.cpp
   "${SC8_GUIDES_H}")
 
-# The window's own full screen is a Cocoa call on macOS. The top level
-# CMakeLists.txt enables Objective-C++ for it.
+# The window's own full screen is a Cocoa call on macOS. The one
+# Objective-C++ file compiles as C++ told to read Objective-C++, rather
+# than through CMake's OBJCXX language. Enabling that language for the
+# whole tree also took over GLFW's Objective-C files inside raylib, which
+# then failed to build as C++.
 if(APPLE)
   target_sources(simplecpu-ide PRIVATE native_window.mm)
+  set_source_files_properties(native_window.mm PROPERTIES LANGUAGE CXX COMPILE_OPTIONS "-xobjective-c++")
   target_link_libraries(simplecpu-ide PRIVATE "-framework Cocoa")
 else()
   target_sources(simplecpu-ide PRIVATE native_window.cpp)
