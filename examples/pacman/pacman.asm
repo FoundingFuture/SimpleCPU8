@@ -504,7 +504,7 @@ atnext: LD A <- 0
 ; DESIGN: the roster stamps sprite phase plus 2 for a ghost and sprite 1 for
 ; Pac-Man. His frame 1 is the half open mouth facing right. The ghosts are at
 ; frame 0 from atsetup, facing right too. The row is a text row, so the stamp
-; lands at eight times it less two. That centres a 12 pixel sprite on an 8
+; lands at eight times it less three. That centres a 14 pixel sprite on an 8
 ; pixel line of text.
 atrnew: LD A <- [atph]
         CMP A, 4
@@ -517,7 +517,7 @@ atrpac: LD A <- 1
         LD A <- 1
 atrst:  OUTA GPU_SPRITE
         OUT GPU_SPRITE_X_HI, 0
-        OUT GPU_SPRITE_X, 72
+        OUT GPU_SPRITE_X, 71
         OUT GPU_SPRITE_Y_HI, 0
         LD A <- [atrow]
         LD [t3] <- A
@@ -526,7 +526,7 @@ atrst:  OUTA GPU_SPRITE
         ADD A <- [t3]
         LD [t3] <- A
         ADD A <- [t3]        ; eight times the row
-        SUB A <- 2
+        SUB A <- 3
         OUTA GPU_SPRITE_Y
         OUT GPU_CMD, CMD_STAMP
         OUT GPU_TEXT_COL, 16
@@ -1496,11 +1496,14 @@ rectxy: OUT GPU_X_HI, 0
 ; for the round. A wall one tile thick has open ground on both faces, so
 ; it draws both lines and comes out four pixels from line to line.
 ; That leaves exactly twelve clear pixels across a one-tile corridor, which
-; is what the 12 pixel actors were sized to. Corridor tile c has a wall at
-; c-1 whose right line lands at 8(c-1)+5, and a wall at c+1 whose left line
-; lands at 8(c+1)+2, so the open span runs 8c-2 to 8c+9. actdraw centres a
-; sprite at 8c-2, so a tile-aligned actor fills that span and touches
-; neither line. Between tiles he laps onto them, which costs nothing: the
+; is what the first, 12 pixel actors were sized to. Corridor tile c has a
+; wall at c-1 whose right line lands at 8(c-1)+5, and a wall at c+1 whose
+; left line lands at 8(c+1)+2, so the open span runs 8c-2 to 8c+9.
+; DESIGN: the actors are 14 pixels now. actdraw centres one at 8c-3, so a
+; tile-aligned actor laps one pixel onto each wall line. Those pixels are
+; the sprite's anti-aliased rim, dark shades of the body, so over the line
+; they read as the edge of the round and not as an overlap. Between tiles
+; he laps further, which costs nothing: the
 ; GPU composites sprites over the framebuffer every frame and never writes
 ; them into video memory, so nothing has to be restored behind him.
 ;
@@ -4128,30 +4131,30 @@ adsle:  LD A <- [aspr]
 adsdef: OUT GPU_CMD, CMD_SPRITE_DEF
 adsdone: RET
 
-; --- centre one coordinate on the actor's tile: A minus 2, floored at 0.
-; DESIGN: a record holds a tile origin and a tile is 8 pixels, so a 12 pixel
-; sprite centred on that tile starts two pixels earlier on each axis.
+; --- centre one coordinate on the actor's tile: A minus 3, floored at 0.
+; DESIGN: a record holds a tile origin and a tile is 8 pixels, so a 14 pixel
+; sprite centred on that tile starts three pixels earlier on each axis.
 ; DESIGN: floored, not wrapped, and the floor is not decoration. CLASSIC's
 ; tunnel mouths are row 14 columns 0 and 27, so an actor walking onto the left
-; one holds ax 0. With the maze against the screen's edge that is 0 minus 2 in
-; a byte, which is 254. Flooring costs that tile a two pixel offset, which
+; one holds ax 0. With the maze against the screen's edge that is 0 minus 3 in
+; a byte, which is 253. Flooring costs that tile a three pixel offset, which
 ; nobody can see; wrapping would throw the sprite to the far side of the
 ; screen for every frame spent there, which everybody can. The GPU does not
 ; save us either: CMD_SPRITE_MOVE takes the data byte as an unsigned pixel
-; column, so 254 is a real place and not an error.
+; column, so 253 is a real place and not an error.
 ; Both coordinates arrive with their offset already added. Tile row 0 sits at
-; screen row 8 and centring takes it to 6; tile column 0 sits at screen column
-; mzxleft, 16 on every shipped maze, and centring takes it to 14. So today
+; screen row 8 and centring takes it to 5; tile column 0 sits at screen column
+; mzxleft, 16 on every shipped maze, and centring takes it to 13. So today
 ; neither axis reaches the floor. It stays for a maze 32 columns wide, whose
 ; mzxleft is 0 and whose left mouth is the case above. One routine for both
 ; axes costs nothing.
-; The considered alternative was a true negative: GPU_X_HI $FF with GPU_X $FE
-; reads as -2 (the GPU sign-extends the 16 bit pair), which would keep the
+; The considered alternative was a true negative: GPU_X_HI $FF with GPU_X $FD
+; reads as -3 (the GPU sign-extends the 16 bit pair), which would keep the
 ; sprite exactly centred and let it clip off the edge. Rejected because it
-; hides two columns of an actor who is fully on screen everywhere else, and
+; hides three columns of an actor who is fully on screen everywhere else, and
 ; because it costs adxy a second conditional per axis for the one tile in the
 ; maze that can reach it.
-adcent: SUB A <- 2
+adcent: SUB A <- 3
         JC adedge
         RET
 adedge: LD A <- 0
@@ -4431,8 +4434,8 @@ foblack: LD D1 <- palbuf+3
 
 ; =========================== contact and lives ===========================
 ; --- has a ghost caught him? Broad phase on the GPU, narrow phase here.
-; DESIGN: a bounding box is not a catch. Two 12 by 12 sprites overlap while
-; their centres are eleven pixels apart, which is a tile and a half, and a
+; DESIGN: a bounding box is not a catch. Two 14 by 14 sprites overlap while
+; their centres are thirteen pixels apart, which is a tile and a half, and a
 ; player watching that would call it a miss. A box test therefore kills
 ; Pac-Man early and feels unfair. So the box is read as "look closer" and
 ; what decides is the distance between the two actors' centres.
@@ -8563,7 +8566,8 @@ bigover: db 56, 63, 49, 70, 255               ; OVER
 ; RGB(255,255,0). The pupils are index 4, which the editor shows in the
 ; default palette's dark green: the program sets 4 to near black at start.
 ; No sprite colour may sit in 1 to 3, which the maze fades rewrite.
-; DESIGN: Pac-Man is twelve frames, four facings times three mouth
+; DESIGN: every frame is 14 by 14, drawn by gensprites.py beside this
+; file. Pac-Man is twelve frames, four facings times three mouth
 ; positions. A ghost is eight, two per facing, the second with the other
 ; skirt, so the body ripples as it moves. The frightened strip is four:
 ; blue, blue, white, white, each pair a skirt and the other. The eyes are
