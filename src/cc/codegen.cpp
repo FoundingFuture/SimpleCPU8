@@ -910,8 +910,22 @@ class Gen {
     genStmt(f.body);
 
     lab(f.name + "__end");
-    epilogue();
+    // A body that ends in a return has written the epilogue already, and
+    // nothing jumps to the label, so a second copy would never run.
+    if (!endsInReturn()) epilogue();
     fn_ = nullptr;
+  }
+
+  // The last line emitted is a RET or a JMP, ignoring the label just laid,
+  // comments and the peephole markers.
+  bool endsInReturn() const {
+    for (size_t i = out_.size() - 1; i-- > 0;) {
+      std::string t = out_[i];
+      t.erase(0, t.find_first_not_of(' '));
+      if (t.empty() || t[0] == ';') continue;
+      return t == "RET" || t.rfind("JMP ", 0) == 0;
+    }
+    return false;
   }
 
   // D1 is still the frame base here: every call puts it back. The frame
@@ -1043,6 +1057,20 @@ class Gen {
             genLow(s.e, 0);
             op("LD A <- " + lo(0));
             op("LD [" + S(ZP_RET) + "+1] <- A");
+          } else if (sizeOf(fn_->ret) == 2 && fn_->ret.ptr == 0 && !isFloat(fn_->ret) && !romRef(s.e) &&
+                     typeOf(s.e).ptr == 0 && sizeOf(typeOf(s.e)) == 1 && !isFloat(typeOf(s.e))) {
+            // A byte widened into an int result goes straight into __ret,
+            // not through a temp word and D2.
+            const bool sign = isSigned(typeOf(s.e));
+            genLow(s.e, 0);
+            op("LD A <- " + lo(0));
+            op("LD [" + S(ZP_RET) + "+1] <- A");
+            if (sign) {
+              signFill();
+            } else {
+              op("LD A <- 0");
+            }
+            op("LD [" + S(ZP_RET) + "] <- A");
           } else {
             const CType t = genExpr(s.e, 0);
             convert(0, t, fn_->ret);
@@ -1560,19 +1588,20 @@ class Gen {
     if (ts == 1) return;  // narrowing keeps the low byte, which is already there
     // Widening a byte. Sign extend a signed one, zero the high half otherwise.
     if (isSigned(from)) {
-      const std::string neg = uniq("sx");
-      const std::string done = uniq("sxd");
       op("LD A <- " + lo(slot));
-      op("JN " + neg);
-      op("LD A <- 0");
-      op("JMP " + done);
-      lab(neg);
-      op("LD A <- $FF");
-      lab(done);
+      signFill();
     } else {
       op("LD A <- 0");
     }
     op("LD " + hi(slot) + " <- A");
+  }
+
+  // A := $FF when bit 7 of A is set, 0 otherwise. SHL moves the sign into
+  // C, the load keeps C, and 0 - 0 - C is the fill. No branch, no label.
+  void signFill() {
+    op("SHL A");
+    op("LD A <- 0");
+    op("SBC A <- 0");
   }
 
   CType typeOf(const ExprPtr& ep) {
@@ -3022,15 +3051,8 @@ class Gen {
     const bool sgn = isSigned(t) || t.ptr == 0;
     op("LD D2 <- " + slotAt(d));
     if (sgn) {
-      const std::string neg = uniq("dsx");
-      const std::string done = uniq("dsxd");
       op("LD A <- " + hi(slot));
-      op("JN " + neg);
-      op("LD A <- 0");
-      op("JMP " + done);
-      lab(neg);
-      op("LD A <- $FF");
-      lab(done);
+      signFill();
     } else {
       op("LD A <- 0");
     }

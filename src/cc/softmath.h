@@ -21,7 +21,7 @@ namespace sc8::cc {
 // the program, because the zero page is 256 bytes and it is the register
 // file.
 constexpr const char* ZP_RP = "__rp";  // the running product, or the remainder
-constexpr const char* ZP_RQ = "__rq";  // the quotient being built
+constexpr const char* ZP_RQ = "__rq";  // scratch for a trial subtract
 constexpr const char* ZP_RC = "__rc";  // a bit counter
 constexpr int SOFT_ZP_BYTES = 2 + 2 + 1;
 

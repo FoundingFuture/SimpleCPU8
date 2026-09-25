@@ -9,29 +9,60 @@ namespace {
 
 std::string S(const char* s) { return std::string(s); }
 
-// Every routine here works left to right, from the top bit down, because
-// this machine has no right shift. Doubling is an add, and the top bit of a
-// word is the N flag after a load of its high byte. Those two facts are the
-// whole trick.
+// A word is high byte first, so a shift left starts at the low byte with
+// SHL and carries up with ROL, and a shift right starts at the high byte
+// with SHR (or ASR) and carries down with ROR. C holds the bit in between.
+
+std::string lo(const std::string& at) { return at + "+1"; }
 
 // dst += src, sixteen bits, low byte first so the carry chains.
 void add16(const Emit& e, const std::string& dst, const std::string& src) {
-  e("        LD A <- [" + dst + "+1]");
-  e("        ADD A <- [" + src + "+1]");
-  e("        LD [" + dst + "+1] <- A");
+  e("        LD A <- [" + lo(dst) + "]");
+  e("        ADD A <- [" + lo(src) + "]");
+  e("        LD [" + lo(dst) + "] <- A");
   e("        LD A <- [" + dst + "]");
   e("        ADC A <- [" + src + "]");
   e("        LD [" + dst + "] <- A");
 }
 
-// dst -= src, and C is left holding the borrow for the caller to test.
+// dst -= src, and C is left holding the borrow.
 void sub16(const Emit& e, const std::string& dst, const std::string& src) {
-  e("        LD A <- [" + dst + "+1]");
-  e("        SUB A <- [" + src + "+1]");
-  e("        LD [" + dst + "+1] <- A");
+  e("        LD A <- [" + lo(dst) + "]");
+  e("        SUB A <- [" + lo(src) + "]");
+  e("        LD [" + lo(dst) + "] <- A");
   e("        LD A <- [" + dst + "]");
   e("        SBC A <- [" + src + "]");
   e("        LD [" + dst + "] <- A");
+}
+
+// at <<= 1. C comes out holding the old bit 15.
+void shl16(const Emit& e, const std::string& at) {
+  e("        LD A <- [" + lo(at) + "]");
+  e("        SHL A");
+  e("        LD [" + lo(at) + "] <- A");
+  e("        LD A <- [" + at + "]");
+  e("        ROL A");
+  e("        LD [" + at + "] <- A");
+}
+
+// at = at << 1 | C, the old bit 15 into C. Brings a bit in from below.
+void rol16(const Emit& e, const std::string& at) {
+  e("        LD A <- [" + lo(at) + "]");
+  e("        ROL A");
+  e("        LD [" + lo(at) + "] <- A");
+  e("        LD A <- [" + at + "]");
+  e("        ROL A");
+  e("        LD [" + at + "] <- A");
+}
+
+// at >>= 1, SHR or ASR on the high byte. C comes out holding the old bit 0.
+void shr16(const Emit& e, const std::string& at, const char* top) {
+  e("        LD A <- [" + at + "]");
+  e(std::string("        ") + top + " A");
+  e("        LD [" + at + "] <- A");
+  e("        LD A <- [" + lo(at) + "]");
+  e("        ROR A");
+  e("        LD [" + lo(at) + "] <- A");
 }
 
 void zero16(const Emit& e, const std::string& at) {
@@ -44,85 +75,82 @@ void copy16(const Emit& e, const std::string& dst, const std::string& src) {
   e("        LD [" + dst + "] <- D2");
 }
 
-std::string bare(const std::string& name) { return name.starts_with("__") ? name.substr(2) : name; }
-
-// Multiply, left to right. Sixteen rounds of: double the product, and add B
-// when A's top bit is set, then double A.
-void mul(const Emit& e) {
-  e("");
-  e("; __mul16, in software. Doubling is an add and there is no right shift,");
-  e("; so this walks A from its TOP bit down. Compare it with one ACP_MUL.");
-  e("__mul16:");
-  zero16(e, ZP_RP);
-  e("        LD A <- 16");
-  e("        LD [" + S(ZP_RC) + "] <- A");
-  e("__mul16_loop:");
-  add16(e, ZP_RP, ZP_RP);  // product <<= 1
-  e("        LD A <- [" + S(ZP_RA) + "]");  // the load sets N from bit 15
-  e("        JN __mul16_add");
-  e("        JMP __mul16_next");
-  e("__mul16_add:");
-  add16(e, ZP_RP, ZP_RB);
-  e("__mul16_next:");
-  add16(e, ZP_RA, ZP_RA);  // a <<= 1
+// The round counter: one off, and a jump back while rounds remain.
+void countdown(const Emit& e, const std::string& loop) {
   e("        LD A <- [" + S(ZP_RC) + "]");
   e("        SUB A <- 1");
   e("        LD [" + S(ZP_RC) + "] <- A");
-  e("        JZ __mul16_done");
-  e("        JMP __mul16_loop");
-  e("__mul16_done:");
+  e("        JNZ " + loop);
+}
+
+std::string bare(const std::string& name) { return name.starts_with("__") ? name.substr(2) : name; }
+
+// Multiply, low bit first. Each round shifts A's low bit into C, adds B to
+// the product when it was set, then doubles B. The loop ends when A has no
+// set bits left, so a small multiplier costs few rounds.
+void mul(const Emit& e) {
+  e("");
+  e("; __mul16, in software: shift and add, A's low bit first. It stops");
+  e("; when A runs out of set bits. Compare it with one ACP_MUL.");
+  e("__mul16:");
+  zero16(e, ZP_RP);
+  e("__mul16_loop:");
+  shr16(e, ZP_RA, "SHR");
+  e("        JNC __mul16_skip");
+  add16(e, ZP_RP, ZP_RB);
+  e("__mul16_skip:");
+  shl16(e, ZP_RB);
+  e("        LD A <- [" + S(ZP_RA) + "]");
+  e("        OR A <- [" + lo(ZP_RA) + "]");
+  e("        JNZ __mul16_loop");
   copy16(e, ZP_RA, ZP_RP);
   e("        RET");
 }
 
-// Restoring division, most significant bit first. The remainder is shifted
-// up a bit at a time and the divisor subtracted when it fits, which is long
-// division in base two.
+// Restoring division, most significant bit first. The dividend shifts left
+// into the remainder a bit at a time, and the divisor comes off when it
+// fits. The quotient's bits go in at the bottom of the dividend as its
+// bits leave the top, so after sixteen rounds __ra holds the quotient.
 void divmod(const Emit& e, const std::string& name, bool wantRemainder) {
-  const std::string L = bare(name);
+  const std::string L = "__" + bare(name);
   e("");
   e("; " + name + ", in software. Restoring division, one bit a round.");
   e(name + ":");
   // Dividing by zero gives all ones and the dividend back, which is what
   // div8 does and what the manual documents.
   e("        LD A <- [" + S(ZP_RB) + "]");
-  e("        OR A <- [" + S(ZP_RB) + "+1]");
-  e("        JZ __" + L + "_byzero");
+  e("        OR A <- [" + lo(ZP_RB) + "]");
+  e("        JZ " + L + "_byzero");
   zero16(e, ZP_RP);
-  zero16(e, ZP_RQ);
   e("        LD A <- 16");
   e("        LD [" + S(ZP_RC) + "] <- A");
-  e("__" + L + "_loop:");
-  add16(e, ZP_RQ, ZP_RQ);  // quotient <<= 1
-  add16(e, ZP_RP, ZP_RP);  // remainder <<= 1
-  e("        LD A <- [" + S(ZP_RA) + "]");  // bring down the dividend's top bit
-  e("        JN __" + L + "_one");
-  e("        JMP __" + L + "_shifted");
-  e("__" + L + "_one:");
-  e("        LD A <- [" + S(ZP_RP) + "+1]");
-  e("        OR A <- 1");
-  e("        LD [" + S(ZP_RP) + "+1] <- A");
-  e("__" + L + "_shifted:");
-  add16(e, ZP_RA, ZP_RA);  // dividend <<= 1
-  // Try the subtract. C set after the high byte means it did not fit.
+  e(L + "_loop:");
+  shl16(e, ZP_RA);  // the dividend's top bit into C
+  rol16(e, ZP_RP);  // and into the remainder
+  // A seventeenth bit means the remainder is past any divisor: it fits.
+  e("        JC " + L + "_take");
+  // Try the subtract without keeping it: the low byte waits in __rq.
+  e("        LD A <- [" + lo(ZP_RP) + "]");
+  e("        SUB A <- [" + lo(ZP_RB) + "]");
+  e("        LD [" + lo(ZP_RQ) + "] <- A");
+  e("        LD A <- [" + S(ZP_RP) + "]");
+  e("        SBC A <- [" + S(ZP_RB) + "]");
+  e("        JC " + L + "_next");  // a borrow: it did not fit
+  e("        LD [" + S(ZP_RP) + "] <- A");
+  e("        LD A <- [" + lo(ZP_RQ) + "]");
+  e("        LD [" + lo(ZP_RP) + "] <- A");
+  e("        JMP " + L + "_bit");
+  e(L + "_take:");
   sub16(e, ZP_RP, ZP_RB);
-  e("        JC __" + L + "_restore");
-  e("        LD A <- [" + S(ZP_RQ) + "+1]");  // it fitted: set the quotient's low bit
+  e(L + "_bit:");
+  e("        LD A <- [" + lo(ZP_RA) + "]");  // a quotient bit of one
   e("        OR A <- 1");
-  e("        LD [" + S(ZP_RQ) + "+1] <- A");
-  e("        JMP __" + L + "_next");
-  e("__" + L + "_restore:");
-  add16(e, ZP_RP, ZP_RB);
-  e("__" + L + "_next:");
-  e("        LD A <- [" + S(ZP_RC) + "]");
-  e("        SUB A <- 1");
-  e("        LD [" + S(ZP_RC) + "] <- A");
-  e("        JZ __" + L + "_done");
-  e("        JMP __" + L + "_loop");
-  e("__" + L + "_done:");
-  copy16(e, ZP_RA, wantRemainder ? ZP_RP : ZP_RQ);
+  e("        LD [" + lo(ZP_RA) + "] <- A");
+  e(L + "_next:");
+  countdown(e, L + "_loop");
+  if (wantRemainder) copy16(e, ZP_RA, ZP_RP);
   e("        RET");
-  e("__" + L + "_byzero:");
+  e(L + "_byzero:");
   if (wantRemainder) {
     e("        RET");  // the dividend is already in __ra
   } else {
@@ -132,39 +160,33 @@ void divmod(const Emit& e, const std::string& name, bool wantRemainder) {
   }
 }
 
-// Two's complement in place: invert both bytes and add one.
+// Two's complement in place: zero minus the word.
 void negate(const Emit& e, const std::string& at) {
-  e("        LD A <- [" + at + "+1]");
-  e("        XOR A <- $FF");
-  e("        ADD A <- 1");
-  e("        LD [" + at + "+1] <- A");
-  e("        LD A <- [" + at + "]");
-  e("        XOR A <- $FF");
-  e("        ADC A <- 0");
+  e("        LD A <- 0");
+  e("        SUB A <- [" + lo(at) + "]");
+  e("        LD [" + lo(at) + "] <- A");
+  e("        LD A <- 0");
+  e("        SBC A <- [" + at + "]");
   e("        LD [" + at + "] <- A");
 }
 
 // A signed divide or remainder: take the signs off, do it unsigned, put the
 // sign back. C truncates toward zero and the remainder follows the dividend.
 void signedDiv(const Emit& e, const std::string& name, const std::string& base, bool wantRemainder) {
-  const std::string L = bare(name);
+  const std::string L = "__" + bare(name);
   e("");
   e("; " + name + ": signs off, unsigned, sign back. C truncates toward zero.");
   e(name + ":");
   e("        LD A <- 0");
   e("        LD [" + S(ZP_RC) + "] <- A");  // the sign of the answer
   e("        LD A <- [" + S(ZP_RA) + "]");
-  e("        JN __" + L + "_nega");
-  e("        JMP __" + L + "_posa");
-  e("__" + L + "_nega:");
+  e("        JP " + L + "_posa");
   negate(e, ZP_RA);
   e("        LD A <- 1");
   e("        LD [" + S(ZP_RC) + "] <- A");
-  e("__" + L + "_posa:");
+  e(L + "_posa:");
   e("        LD A <- [" + S(ZP_RB) + "]");
-  e("        JN __" + L + "_negb");
-  e("        JMP __" + L + "_posb");
-  e("__" + L + "_negb:");
+  e("        JP " + L + "_posb");
   negate(e, ZP_RB);
   if (!wantRemainder) {
     // The remainder takes the dividend's sign alone, so only a quotient
@@ -173,128 +195,64 @@ void signedDiv(const Emit& e, const std::string& name, const std::string& base, 
     e("        XOR A <- 1");
     e("        LD [" + S(ZP_RC) + "] <- A");
   }
-  e("__" + L + "_posb:");
-  e("        PUSH A");
+  e(L + "_posb:");
+  // The unsigned routine counts its rounds in __rc, so the sign waits on
+  // the stack. POP sets Z from it.
   e("        LD A <- [" + S(ZP_RC) + "]");
   e("        PUSH A");
   e("        JSR " + base);
   e("        POP A");
-  e("        LD [" + S(ZP_RC) + "] <- A");
-  e("        POP A");
-  e("        LD A <- [" + S(ZP_RC) + "]");
-  e("        JZ __" + L + "_out");
+  e("        JZ " + L + "_out");
   negate(e, ZP_RA);
-  e("__" + L + "_out:");
+  e(L + "_out:");
   e("        RET");
 }
 
-// Invert both bytes, in place. Not a negation: the arithmetic shift wants
-// this one, because ~((~v) >>u n) is exactly floor(v / 2^n) for a negative
-// v. Negating twice instead truncates toward zero, which made -9 >> 1 come
-// out as -4 where an arithmetic shift has to floor it to -5.
-void complement(const Emit& e, const std::string& at) {
-  e("        LD A <- [" + at + "+1]");
-  e("        XOR A <- $FF");
-  e("        LD [" + at + "+1] <- A");
-  e("        LD A <- [" + at + "]");
-  e("        XOR A <- $FF");
-  e("        LD [" + at + "] <- A");
-}
-
-// Shift left by __rb, which is adds.
+// Shift left by __rb, one SHL and ROL a round.
 void shl(const Emit& e) {
   e("");
-  e("; __shl16: doubling, __rb times. The one shift this CPU does cheaply.");
+  e("; __shl16: SHL and ROL, __rb times.");
   e("__shl16:");
-  e("        LD A <- [" + S(ZP_RB) + "+1]");
+  e("        LD A <- [" + lo(ZP_RB) + "]");
   e("        LD [" + S(ZP_RC) + "] <- A");
-  e("__shl16_loop:");
-  e("        LD A <- [" + S(ZP_RC) + "]");
   e("        JZ __shl16_done");
-  add16(e, ZP_RA, ZP_RA);
-  e("        LD A <- [" + S(ZP_RC) + "]");
-  e("        SUB A <- 1");
-  e("        LD [" + S(ZP_RC) + "] <- A");
-  e("        JMP __shl16_loop");
+  e("__shl16_loop:");
+  shl16(e, ZP_RA);
+  countdown(e, "__shl16_loop");
   e("__shl16_done:");
   e("        RET");
 }
 
-// Shift right, which the CPU cannot do at all. One bit a round, from the top
-// down, rebuilding the answer as it goes.
+// Shift right by __rb: SHR and ROR a round, or ASR for a signed value,
+// which floors the way C's arithmetic shift does.
 void shr(const Emit& e, const std::string& name, bool arithmetic) {
-  const std::string L = bare(name);
+  const std::string L = "__" + bare(name);
   e("");
-  e("; " + name + ": sixteen rounds, top bit down. There is no right shift, so");
-  e("; the answer is BUILT rather than shifted.");
+  e("; " + name + ": " + (arithmetic ? "ASR" : "SHR") + " and ROR, __rb times.");
   e(name + ":");
-  e("        LD A <- [" + S(ZP_RB) + "+1]");
+  e("        LD A <- [" + lo(ZP_RB) + "]");
   e("        LD [" + S(ZP_RC) + "] <- A");
-  e("        JZ __" + L + "_out");  // a shift by zero is the value itself
-  e("        LD A <- 16");
-  e("        SUB A <- [" + S(ZP_RC) + "]");
-  e("        JC __" + L + "_allgone");  // shifting by more than the width
-  e("        LD [" + S(ZP_RC) + "] <- A");
-  e("        JZ __" + L + "_allgone");
-  zero16(e, ZP_RP);
+  e("        JZ " + L + "_out");  // a shift by zero is the value itself
+  e("        CMP A, 16");
+  e("        JNC " + L + "_allgone");  // shifting by the width or more
+  e(L + "_loop:");
+  shr16(e, ZP_RA, arithmetic ? "ASR" : "SHR");
+  countdown(e, L + "_loop");
+  e(L + "_out:");
+  e("        RET");
+  e(L + "_allgone:");
   if (arithmetic) {
-    // A negative value is COMPLEMENTED, shifted unsigned, and complemented
-    // back. That identity floors, which is what an arithmetic shift does and
-    // the one thing a divide cannot.
-    e("        LD A <- 0");
-    e("        LD [" + S(ZP_RQ) + "] <- A");
-    e("        LD A <- [" + S(ZP_RA) + "]");
-    e("        JN __" + L + "_neg");
-    e("        JMP __" + L + "_body");
-    e("__" + L + "_neg:");
-    complement(e, ZP_RA);
-    e("        LD A <- 1");
-    e("        LD [" + S(ZP_RQ) + "] <- A");
-    e("__" + L + "_body:");
-  }
-  // Keep the top (16 - n) bits: double the answer and bring a bit down, n
-  // times fewer than the width.
-  e("__" + L + "_loop:");
-  add16(e, ZP_RP, ZP_RP);
-  e("        LD A <- [" + S(ZP_RA) + "]");
-  e("        JN __" + L + "_one");
-  e("        JMP __" + L + "_next");
-  e("__" + L + "_one:");
-  e("        LD A <- [" + S(ZP_RP) + "+1]");
-  e("        OR A <- 1");
-  e("        LD [" + S(ZP_RP) + "+1] <- A");
-  e("__" + L + "_next:");
-  add16(e, ZP_RA, ZP_RA);
-  e("        LD A <- [" + S(ZP_RC) + "]");
-  e("        SUB A <- 1");
-  e("        LD [" + S(ZP_RC) + "] <- A");
-  e("        JZ __" + L + "_finish");
-  e("        JMP __" + L + "_loop");
-  e("__" + L + "_finish:");
-  copy16(e, ZP_RA, ZP_RP);
-  if (arithmetic) {
-    e("        LD A <- [" + S(ZP_RQ) + "]");
-    e("        JZ __" + L + "_out");
-    complement(e, ZP_RA);
-    e("__" + L + "_out:");
-    e("        RET");
-    e("__" + L + "_allgone:");
     // Every bit gone: zero, or all ones when it was negative.
     e("        LD A <- [" + S(ZP_RA) + "]");
-    e("        JN __" + L + "_ones");
-    e("        LD D2 <- 0");
-    e("        LD [" + S(ZP_RA) + "] <- D2");
+    e("        JN " + L + "_ones");
+    zero16(e, ZP_RA);
     e("        RET");
-    e("__" + L + "_ones:");
+    e(L + "_ones:");
     e("        LD D2 <- 65535");
     e("        LD [" + S(ZP_RA) + "] <- D2");
     e("        RET");
   } else {
-    e("__" + L + "_out:");
-    e("        RET");
-    e("__" + L + "_allgone:");
-    e("        LD D2 <- 0");
-    e("        LD [" + S(ZP_RA) + "] <- D2");
+    zero16(e, ZP_RA);
     e("        RET");
   }
 }

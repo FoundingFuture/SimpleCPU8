@@ -57,6 +57,15 @@ std::string viaVars(const std::string& type, int a, const std::string& op, int b
          "; int main(void) { r = x " + op + " y; return 0; }";
 }
 
+// A case written "a op b", run with both operands in variables so the
+// constant folder cannot answer it.
+std::string viaCase(const std::string& type, const std::string& c) {
+  const size_t s1 = c.find(' ');
+  const size_t s2 = c.find(' ', s1 + 1);
+  return viaVars(type, std::stoi(c.substr(0, s1), nullptr, 0), c.substr(s1 + 1, s2 - s1 - 1),
+                 std::stoi(c.substr(s2 + 1), nullptr, 0));
+}
+
 }  // namespace
 
 TEST_SUITE("the switch reaches the runtime") {
@@ -101,7 +110,7 @@ TEST_SUITE("unsigned multiply agrees") {
   TEST_CASE("on every case") {
     for (const char* c : {"6 * 7", "300 * 4", "1000 * 60", "0 * 1234", "1 * 65535",
                           "255 * 257", "1000 * 1000", "12345 * 3"}) {
-      const Both r = both(prog("unsigned int", c));
+      const Both r = both(viaCase("unsigned int", c));
       CHECK_MESSAGE(r.soft == r.acp, c, ": soft ", r.soft, " acp ", r.acp);
     }
   }
@@ -114,7 +123,7 @@ TEST_SUITE("unsigned multiply agrees") {
 TEST_SUITE("signed multiply agrees") {
   TEST_CASE("on every case") {
     for (const char* c : {"-3 * 5", "-1 * -1", "1000 * -3", "-32768 * 1"}) {
-      const Both r = both(prog("int", c));
+      const Both r = both(viaCase("int", c));
       CHECK_MESSAGE(asSigned(r.soft) == asSigned(r.acp), c);
     }
   }
@@ -123,8 +132,11 @@ TEST_SUITE("signed multiply agrees") {
 TEST_SUITE("unsigned divide and remainder agree") {
   TEST_CASE("on every case") {
     for (const char* c : {"100 / 7", "60000 / 3", "1 / 1", "0 / 5", "65535 / 255",
-                          "7 / 8", "100 % 7", "65535 % 256", "5 % 5"}) {
-      const Both r = both(prog("unsigned int", c));
+                          "7 / 8", "100 % 7", "65535 % 256", "5 % 5",
+                          // A divisor past 32767: the shifted remainder
+                          // needs a seventeenth bit.
+                          "65535 / 40000", "65535 % 40000", "50000 / 33000", "60000 % 32769"}) {
+      const Both r = both(viaCase("unsigned int", c));
       CHECK_MESSAGE(r.soft == r.acp, c, ": soft ", r.soft, " acp ", r.acp);
     }
   }
@@ -141,7 +153,7 @@ TEST_SUITE("unsigned divide and remainder agree") {
 TEST_SUITE("signed divide and remainder agree") {
   TEST_CASE("on every case") {
     for (const char* c : {"-7 / 2", "7 / -2", "-7 / -2", "-7 % 2", "7 % -2", "-100 / 10"}) {
-      const Both r = both(prog("int", c));
+      const Both r = both(viaCase("int", c));
       CHECK_MESSAGE(asSigned(r.soft) == asSigned(r.acp), c);
     }
   }
@@ -156,7 +168,7 @@ TEST_SUITE("shifts agree") {
   TEST_CASE("on every case") {
     for (const char* c : {"1 << 3", "300 << 2", "1000 >> 3", "0x8000 >> 15", "65535 >> 8",
                           "1 >> 1", "1234 >> 0", "5 >> 16", "5 >> 20"}) {
-      const Both r = both(prog("unsigned int", c));
+      const Both r = both(viaCase("unsigned int", c));
       CHECK_MESSAGE(r.soft == r.acp, c, ": soft ", r.soft, " acp ", r.acp);
     }
   }
@@ -174,7 +186,7 @@ TEST_SUITE("shifts agree") {
 TEST_SUITE("the arithmetic shift agrees, and floors") {
   TEST_CASE("on every case") {
     for (const char* c : {"-8 >> 1", "-1 >> 4", "-9 >> 1", "-32768 >> 15", "-3 >> 8"}) {
-      const Both r = both(prog("int", c));
+      const Both r = both(viaCase("int", c));
       CHECK_MESSAGE(asSigned(r.soft) == asSigned(r.acp), c);
     }
   }

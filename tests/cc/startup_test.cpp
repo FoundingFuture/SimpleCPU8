@@ -26,8 +26,11 @@ TEST_SUITE("the entry point") {
 
   TEST_CASE("gives main a RET, like any other function") {
     const std::string a = compile("int main(void) { return 0; }");
-    const std::string end = a.substr(a.find("main__end:"));
-    CHECK(has(end.substr(0, 200), "RET"));
+    // The return writes the epilogue in place, so the RET is in the body
+    // and main__end has no second copy.
+    const size_t from = a.find("\nmain:");
+    const std::string body = a.substr(from, a.find("main__end:") - from);
+    CHECK(has(body, "RET"));
   }
 
   TEST_CASE("halts a program that simply returns") {
