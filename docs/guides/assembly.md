@@ -434,9 +434,8 @@ address or `[D1+n]` and `[D2+n]`. `TST A, BTN_FIRE` asks whether one bit
 is set, and `A` still holds the rest of the byte afterwards.
 
 `TST D1` is a spelling of `LD D1 <- D1+0`, the address add with nothing
-added. It tests a pointer for NULL. The assembler refuses `LD D1 <- D1`
-and names `TST D1` and `NOP` instead. The copy spelling hides what the
-instruction is for, and a copy onto itself would do nothing.
+added. It tests a pointer for NULL. `LD D1 <- D1` and `LD D1 <- D1+0` are
+the same instruction, and the disassembly prints all three as `TST D1`.
 
 Shifts, one bit at a time, on `A`:
 

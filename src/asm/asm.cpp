@@ -923,12 +923,9 @@ class Assembler {
           if (src.plusA) return push("LD " + X + " <- " + S + "+A");
           return push("LD " + X + " <- " + S + "+n", src.expr, ExprKind::Off16);
         case T::Reg:
-          // A copy is the sum with nothing added.
+          // A copy is the sum with nothing added. Onto itself it changes
+          // only Z, which is the NULL test TST D1 spells.
           if (src.r == "D1" || src.r == "D2") {
-            if (src.r == X) {
-              return err(lineNo, "LD " + X + " <- " + X + " only sets Z from " + X + ". Write TST " + X +
-                                     " to test " + X + " for zero, or NOP to do nothing");
-            }
             return push("LD " + X + " <- " + src.r + "+n", std::string("0"), ExprKind::Off16);
           }
           return err(lineNo, "a D register takes a byte from A only through RAM: store A, then load the word");
