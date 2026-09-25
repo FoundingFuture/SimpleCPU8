@@ -530,17 +530,24 @@ class Gen {
       equ.push_back(".equ " + checkLabel(f) + ", " + S(value));
     }
     anyChecked = !equ.empty();
-    // The unused checks become a note, line for line, so every mark into
-    // the body still points at its line.
+    // The unused checks go, and every mark into the body moves with the
+    // lines after them.
+    std::vector<bool> drop(lines.size(), false);
     for (size_t i = 0; i + 1 < lines.size(); i++) {
-      const std::string& l = lines[i];
-      const size_t p = l.find("LD D2 <- D3-__hs_");
-      if (p == std::string::npos) continue;
-      const std::string f = l.substr(p + 17);
-      if (checked.count(f)) continue;
-      lines[i] = "        ; heap stack: this call chain was checked before it began";
-      if (lines[i + 1].find("JNC __stack_overflow") != std::string::npos) lines[i + 1] = "";
+      const size_t p = lines[i].find("LD D2 <- D3-__hs_");
+      if (p == std::string::npos || checked.count(lines[i].substr(p + 17))) continue;
+      drop[i] = true;
+      if (lines[i + 1].find("JNC __stack_overflow") != std::string::npos) drop[i + 1] = true;
     }
+    std::vector<int> newIndex(lines.size() + 1, 0);
+    std::vector<std::string> kept;
+    for (size_t i = 0; i < lines.size(); i++) {
+      newIndex[i] = static_cast<int>(kept.size());
+      if (!drop[i]) kept.push_back(lines[i]);
+    }
+    newIndex[lines.size()] = static_cast<int>(kept.size());
+    for (auto& [k, v] : lineOf_) v = newIndex[static_cast<size_t>(v)];
+    lines = std::move(kept);
     return equ;
   }
 

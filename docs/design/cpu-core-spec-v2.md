@@ -777,6 +777,14 @@ The machine moved on. These lines are corrections, not new proposals.
   ALU_SHL, ALU_SHR, ALU_ROL, ALU_ROR, ALU_ASR, EA_OFF_OP16, D1_LOAD_EA and
   D2_LOAD_EA, 83 in all. docs/design/instruction-set.md has every opcode
   with its cost.
+- D3 is a third pointer register, for a stack in RAM. Its 22 opcodes sit
+  at 0x94, 0xA0 to 0xAC and 0xB0 to 0xB7, for 141 in all. Its signals are
+  ADDR_D3, D3_LOAD_EA, D3_TSTZ and the four RAM halves. EA_FLAGS sets Z
+  from the address adder's sum and C from its carry out of bit 15. Every
+  address add now sets both, and costs one cycle less. There are 91
+  signals.
+- The stack memory is 2048 bytes by default. simplecpu --stack-size sets
+  it from 256 bytes to 64K.
 - Data RAM is 65536 bytes, not the 2048 this document assumed.
 - The machine keeps four arrays over data RAM that no program can reach.
   `ramReadAt` and `ramWriteAt` hold cycle stamps, `ramReads` and `ramWrites`

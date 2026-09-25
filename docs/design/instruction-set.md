@@ -16,7 +16,7 @@ is the sealed set a ROM runs by default.
 
 ## The opcode map
 
-There are 119 opcodes and 37 mnemonics. The high nibble groups them.
+There are 141 opcodes and 37 mnemonics. The high nibble groups them.
 
 | Range | Family |
 |---|---|
@@ -29,12 +29,14 @@ There are 119 opcodes and 37 mnemonics. The high nibble groups them.
 | $60 to $64 | the ports |
 | $79 to $7C | JNZ, JNC, JP, JNV: the jumps on a clear flag, low nibble as in $09 to $0C |
 | $80 to $8F | the ALU and CMP on a byte through [D1+n] or [D2+n], low nibble as in $40 to $47 |
-| $90 to $93 | TST |
+| $90 to $94 | TST |
 | $98 to $9C | SHL, SHR, ROL, ROR, ASR |
+| $A0 to $AC | D3: bytes and words at [D3+n], address adds into and out of D3, D3 at an address |
+| $B0 to $B7 | the ALU and CMP on a byte at [D3+n], low nibble as in $40 to $47 |
 
-The free codes are $02, $03, $0D, $56, $57, $5A to $5F, $65 to $78, $7D
-to $7F, $94 to $97 and $9D to $FE. $FF marks a program slot nothing was
-loaded into.
+The free codes are $02, $03, $0D, $56, $57, $5A to $5F, $65 to $78 and
+$7D to $7F. Then $95 to $97, $9D to $9F, $AD to $AF and $B8 to $FE. $FF
+marks a program slot nothing was loaded into.
 
 ## The instructions
 
@@ -114,14 +116,14 @@ loaded into.
 
 | Op | Instruction | Naive | Optimal | Sets | Reads |
 |---|---|---|---|---|---|
-| $38 | `LD D1 <- D1+n` | 4 | 3 | Z |  |
-| $39 | `LD D2 <- D2+n` | 4 | 3 | Z |  |
-| $3A | `LD D1 <- D2+n` | 4 | 3 | Z |  |
-| $3B | `LD D2 <- D1+n` | 4 | 3 | Z |  |
-| $3C | `LD D1 <- D1+A` | 4 | 3 | Z |  |
-| $3D | `LD D2 <- D2+A` | 4 | 3 | Z |  |
-| $3E | `LD D1 <- D2+A` | 4 | 3 | Z |  |
-| $3F | `LD D2 <- D1+A` | 4 | 3 | Z |  |
+| $38 | `LD D1 <- D1+n` | 3 | 2 | Z C |  |
+| $39 | `LD D2 <- D2+n` | 3 | 2 | Z C |  |
+| $3A | `LD D1 <- D2+n` | 3 | 2 | Z C |  |
+| $3B | `LD D2 <- D1+n` | 3 | 2 | Z C |  |
+| $3C | `LD D1 <- D1+A` | 3 | 2 | Z C |  |
+| $3D | `LD D2 <- D2+A` | 3 | 2 | Z C |  |
+| $3E | `LD D1 <- D2+A` | 3 | 2 | Z C |  |
+| $3F | `LD D2 <- D1+A` | 3 | 2 | Z C |  |
 
 ### ALU on the zero page and immediates
 
@@ -169,6 +171,33 @@ loaded into.
 | $92 | `TST A, [D1+n]` | 5 | 3 | Z N |  |
 | $93 | `TST A, [D2+n]` | 5 | 3 | Z N |  |
 
+### D3, the data stack pointer
+
+| Op | Instruction | Naive | Optimal | Sets | Reads |
+|---|---|---|---|---|---|
+| $94 | `TST A, [D3+n]` | 5 | 3 | Z N |  |
+| $A0 | `LD A <- [D3+n]` | 5 | 3 | Z N |  |
+| $A1 | `LD [D3+n] <- A` | 3 | 2 | none |  |
+| $A2 | `LD D1 <- [D3+n]` | 5 | 4 | Z |  |
+| $A3 | `LD D2 <- [D3+n]` | 5 | 4 | Z |  |
+| $A4 | `LD [D3+n] <- D1` | 4 | 3 | none |  |
+| $A5 | `LD [D3+n] <- D2` | 4 | 3 | none |  |
+| $A6 | `LD D3 <- D3+n` | 3 | 2 | Z C |  |
+| $A7 | `LD D1 <- D3+n` | 3 | 2 | Z C |  |
+| $A8 | `LD D2 <- D3+n` | 3 | 2 | Z C |  |
+| $A9 | `LD D3 <- D1+n` | 3 | 2 | Z C |  |
+| $AA | `LD D3 <- D2+n` | 3 | 2 | Z C |  |
+| $AB | `LD D3 <- [addr16]` | 5 | 4 | Z |  |
+| $AC | `LD [addr16] <- D3` | 4 | 3 | none |  |
+| $B0 | `ADD A <- [D3+n]` | 6 | 3 | Z N C V |  |
+| $B1 | `SUB A <- [D3+n]` | 6 | 3 | Z N C V |  |
+| $B2 | `AND A <- [D3+n]` | 6 | 3 | Z N |  |
+| $B3 | `OR A <- [D3+n]` | 6 | 3 | Z N |  |
+| $B4 | `XOR A <- [D3+n]` | 6 | 3 | Z N |  |
+| $B5 | `ADC A <- [D3+n]` | 6 | 3 | Z N C V | C |
+| $B6 | `SBC A <- [D3+n]` | 6 | 3 | Z N C V | C |
+| $B7 | `CMP A, [D3+n]` | 5 | 3 | Z N C V |  |
+
 ### Shifts
 
 | Op | Instruction | Naive | Optimal | Sets | Reads |
@@ -211,14 +240,16 @@ loaded into.
 
 | Flag | Set by | Means |
 |---|---|---|
-| Z | every ALU result, CMP and TST, a byte load into A, a word load into D1 or D2, POPB, POPW, INW | the value is zero. For a word it is all 16 bits, so a load is a NULL test |
+| Z | every ALU result, CMP and TST, a byte load into A, a word load into a D register, an address add, POPB, POPW, INW | the value is zero. For a word it is all 16 bits, so a load is a NULL test |
 | N | every ALU result, CMP and TST, a byte load into A, POPB | bit 7 of the byte |
-| C | ADD, ADC, SUB, SBC, CMP, the shifts | the carry out, the borrow for a subtract, the bit a shift pushed out |
+| C | ADD, ADC, SUB, SBC, CMP, the shifts, an address add | the carry out, the borrow for a subtract, the bit a shift pushed out. For an address add, the adder's carry out of bit 15 |
 | V | ADD, ADC, SUB, SBC, CMP | signed overflow of the byte result |
 
 Stores, pushes, OUT, INB, INC D1, INC D2 and the jumps set no flag. A load
 leaves C and V alone, so a chain of ADD and ADC can load between its
-steps.
+steps. An address add sets C, so it cannot sit inside such a chain.
+After LD D2 <- D3-FLOOR, C clear means D3 was below FLOOR. That is the
+inverse of CMP's borrow.
 
 Each flag has a jump for set and for clear. After CMP A, x or SUB A <- x:
 
@@ -232,24 +263,25 @@ Each flag has a jump for set and for clear. After CMP A, x or SUB A <- x:
 ## What the C compiler uses them for
 
 The compiler keeps expression values in zero page temps and works through
-A. D1 is the frame pointer, and D2 is its scratch register for addresses.
+A. D3 is the heap stack pointer and the frame base. D2 is the scratch
+register for addresses, and D1 carries word arguments.
 A peephole pass removes a store and reload of the same byte and a store
 nobody reads. The sequences below are what it emits, with optimal cycles.
 
-A local variable lives in the frame at [D1+n]. A byte local is read with
-LD A <- [D1+n], 3 cycles, and written with LD [D1+n] <- A, 2 cycles. The
-ALU reads it in place: ADD A <- [D1+n] is 3 cycles, with no copy to a
-temp first. A word local moves whole through D2: LD D2 <- [D1+n] and LD
-[D1+n] <- D2. A global in the zero page is read the same way through
+A local variable lives in the frame at [D3+n]. A byte local is read with
+LD A <- [D3+n], 3 cycles, and written with LD [D3+n] <- A, 2 cycles. The
+ALU reads it in place: ADD A <- [D3+n] is 3 cycles, with no copy to a
+temp first. A word local moves whole through D2: LD D2 <- [D3+n] and LD
+[D3+n] <- D2. A global in the zero page is read the same way through
 [label].
 
 `i = i + 1` on a byte is LD A, ADD A <- 1 and LD back: 8 cycles. On an
 int or a pointer, the address adder does the 16 bit add in one step:
 
 ```asm
-        LD D2 <- [D1+2]     ; 4
-        LD D2 <- D2+1       ; 3, and D2-1 for i - 1
-        LD [D1+2] <- D2     ; 3
+        LD D2 <- [D3+2]     ; 4
+        LD D2 <- D2+1       ; 2, and D2-1 for i - 1
+        LD [D3+2] <- D2     ; 3
 ```
 
 A pointer plus a constant is the same shape, with the constant scaled by
@@ -258,7 +290,7 @@ the element size.
 An array element with a byte index is the base in D2 and the index in A:
 
 ```asm
-        LD A <- [D1+0]      ; i
+        LD A <- [D3+0]      ; i
         LD D2 <- buf        ; the array's address
         LD A <- [D2+A]      ; buf[i]
 ```
@@ -272,7 +304,7 @@ A condition compiles to a compare and one jump, never to a 0 or 1 first.
 `if (c >= 48 && c <= 57)` becomes:
 
 ```asm
-        LD A <- [D1+0]
+        LD A <- [D3+0]
         CMP A, 48
         JC not              ; below 48
         CMP A, 58
@@ -295,25 +327,36 @@ value gets k - 1 added first. A remainder by a power of two is an
 AND. A signed char widens without a branch. SHL puts its sign in C, and
 LD A <- 0 then SBC A <- 0 turns C into the high byte.
 
-A frame is made and dropped through the address adder:
+A frame is made and dropped by moving D3 through the address adder:
 
 ```asm
-        LD D1 <- [__sp]     ; the caller's stack pointer
-        LD D1 <- D1-6       ; this frame's locals and saved temps
-        LD [__sp] <- D1
+        LD D3 <- D3-6       ; 2, this frame's locals and saved temps
         ; the body
-        LD D1 <- D1+7       ; the frame and the one byte argument
-        LD [__sp] <- D1
+        LD D3 <- D3+7       ; 2, the frame and the one byte argument
         RET
 ```
 
-Temps are saved in the frame only around a call. So a function that calls
+A call writes its arguments below the frame through D2, then moves D3
+down to them and does JSR. The callee's epilogue takes D3 back past
+them, so the caller's frame base is D3 again with nothing reloaded. Temps
+are saved in the frame only around a call. A function that calls
 nothing has a frame of its locals alone. A return writes the epilogue in
-place instead of a jump to it. An argument that is a constant, a variable or a string is
-read straight into the new frame. A word argument goes through D1, since
-D1 is loaded again after the call. A small static function is not called
-at all. Its body is expanded in the caller, and its parameters live in
-the caller's frame.
+place instead of a jump to it. An argument that is a constant, a
+variable or a string is read straight into the new frame. A word argument
+goes through D1. A small static function is not called at all. Its body
+is expanded in the caller, and its parameters live in the caller's frame.
+
+The heap stack runs from under the text screen down to a floor. The floor
+is the end of the program's data, or what #pragma heap_stack_size sets. A
+function that can recurse, or that assembly can call, checks at entry:
+
+```asm
+        LD D2 <- D3-__hs_f  ; 2, the floor plus what the calls below need
+        JNC __stack_overflow ; 2, C clear: D3 went below it
+```
+
+Every other function is on a fixed chain whose depth the compiler adds
+up. When main's chain cannot fit, the compiler refuses the program.
 
 ## What stays with the coprocessor
 

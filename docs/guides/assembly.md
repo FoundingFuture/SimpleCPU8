@@ -176,6 +176,7 @@ three instructions are counted. `PC` is 3, the slot of the `HLT`.
 |---|---|---|
 | `A` | 8 | the accumulator. Every byte load, every sum and every port read lands here |
 | `D1`, `D2` | 16 | pointers into data RAM. A word load fills one, and `[D1]` reads through it |
+| `D3` | 16 | a third pointer, for a stack in RAM. It reaches memory only as `[D3+n]`. C keeps its frames there |
 | `PC` | 16 | the slot number of the next instruction |
 | `SP` | 16 | the next free cell of the stack. Starts at `$07FF` and grows down |
 | flags | 4 | `N`, `Z`, `C` and `V`, set by arithmetic and by loads |
@@ -190,6 +191,13 @@ add.
 `D1` and `D2` are the reach into memory beyond the first 256 bytes. A
 byte instruction can name an address only up to 255. Above that, a
 pointer register holds the address and the instruction says `[D1]`.
+
+`D3` is narrower on purpose. It has the forms a stack frame needs and no
+others: a byte, a word or an ALU operand at `[D3+n]`, sums into and out
+of it, and a whole word load and store at an address. The C compiler
+keeps every parameter and local at `[D3+n]`, and the C runtime calls it
+the heap stack. A routine called from C or from BASIC leaves `D3` as it
+found it.
 
 ## The flags
 
@@ -378,19 +386,26 @@ Word loads and stores, through `D1` and `D2`:
 | `LD [D2] <- D1` | store where `D2` points | none |
 | `LD [D2+n] <- D1` | store `n` past `D2` | none |
 
-Address arithmetic, a 16 bit add into `D1` or `D2`:
+Address arithmetic, a 16 bit add into `D1`, `D2` or `D3`:
 
 | Syntax | Does | Flags |
 |---|---|---|
-| `LD D1 <- D1+n` | `D1` plus a constant, negative ones too. The sum wraps at 16 bits | `Z` |
-| `LD D1 <- D2-6` | `D2` minus a constant, into the other register | `Z` |
-| `LD D1 <- D2` | a copy, the same opcode with nothing added | `Z` |
-| `LD D1 <- D1+A` | `D1` plus the byte in `A`, from 0 to 255 | `Z` |
+| `LD D1 <- D1+n` | `D1` plus a constant, negative ones too. The sum wraps at 16 bits | `Z C` |
+| `LD D1 <- D2-6` | `D2` minus a constant, into the other register | `Z C` |
+| `LD D1 <- D2` | a copy, the same opcode with nothing added | `Z C` |
+| `LD D1 <- D1+A` | `D1` plus the byte in `A`, from 0 to 255 | `Z C` |
+| `LD D3 <- D3-12` | `D3` plus a constant, and the same from and to `D1` and `D2` | `Z C` |
 
-Each has a form for every pair of `D1` and `D2`. The adder is the one
-that computes `[D1+n]` for a load, so the sum costs no ALU time and
-leaves `A` and the other flags alone. It steps a pointer back as easily
-as forward, and a record or a row at a time.
+Each has a form for every pair of `D1` and `D2`. `D3` takes a constant
+only. The adder is the one that computes `[D1+n]` for a load, so the sum
+costs no ALU time and leaves `A` alone. It steps a pointer back as
+easily as forward, and a record or a row at a time.
+
+`Z` is set when the sum is zero. `C` is the adder's carry out of bit 15.
+A negative offset is a large one: `D1-12` adds `$FFF4`. So `C` is set
+when the result did not go below zero, the inverse of a borrow. After
+`LD D2 <- D3-FLOOR`, `JNC` jumps when `D3` was below `FLOOR`. That is the
+C runtime's stack check. `N` and `V` are left alone.
 
 A word is two bytes, high byte at the lower address. The register
 outside the brackets decides the width. So `[D1]+` steps by one after
@@ -1277,32 +1292,44 @@ unsigned char twice(unsigned char n)
 
 ```asm
 twice:
-        LD D1 <- [__sp]
-        LD A <- [D1+0]
-        ADD A <- [D1+0]
+        LD A <- [D3+0]
+        ADD A <- [D3+0]
         LD [__ret+1] <- A
-        LD D1 <- D1+1
-        LD [__sp] <- D1
+        LD D3 <- D3+1
         RET
 ```
 
-`__sp` is a word in the zero page, the compiler's stack pointer. C
-locals live in data RAM on a stack the compiler keeps itself, because the
-hardware stack cannot be read at an address. `LD D1 <- [__sp]` makes `D1`
-the frame pointer, and the argument `n` is `[D1+0]`. The add reads it in
-place through the pointer, so nothing is copied first. C does arithmetic
-in `int`, but only the low byte of the sum reaches an `unsigned char`. So
-the compiler works on that byte alone and leaves it in the low byte of
-`__ret`. The last three lines drop the argument with one address add and
-return.
+C keeps every parameter and local in the frame `D3` points at, and calls
+`D3` the heap stack pointer. The heap stack is in RAM, because the hardware
+stack cannot be read at an address. The argument `n` is `[D3+0]`, and the
+add reads it in place through the pointer, so nothing is copied first. C
+does arithmetic in `int`, but only the low byte of the sum reaches an
+`unsigned char`. So the compiler works on that byte alone and leaves it
+in the low byte of `__ret`. `LD D3 <- D3+1` drops the argument, and `RET`
+returns.
 
-The call site steps `__sp` down a byte with `LD D2 <- D1-1`, writes 21
-through `D2`, and does `JSR twice`. The call and the function come to a
-dozen instructions, and every one is visible. That is the trade the C
-guide described from the other side.
+The call site makes room for the argument with `LD D2 <- D3-1`, writes
+21 through `D2`, moves `D3` down to it and does `JSR twice`. The call
+and the function come to ten instructions, and every one is visible.
+That is the trade the C guide described from the other side.
+
+Recursion adds a check of the heap stack where the function starts:
+
+```asm
+fact:
+        LD D3 <- D3-6
+        LD D2 <- D3-__hs_fact
+        JNC __stack_overflow
+```
+
+`__hs_fact` is a constant the compiler works out: the lowest `D3` may
+go, plus what the calls under `fact` still need. The subtract clears `C`
+when `D3` is below it, and `__stack_overflow` prints `HEAP STACK
+OVERFLOW` and halts. A chain of calls with no recursion is added up when
+it compiles, so it carries no check.
 
 The compiler's own names start with two underline characters, as in
-`__sp`, `__ret` and `__t0`. A global named `count` in C is the label `count` in the
+`__ret` and `__t0`. A global named `count` in C is the label `count` in the
 assembly, so an assembly file in the same project can read it. Every
 `.asm` in a C project is appended after the generated code, with its
 own `.ram` and `.data` following the compiler's.
@@ -1364,17 +1391,16 @@ there. So this routine borrows `$04`, which BASIC overwrites on return
 anyway, as the one zero page byte an `ADD` can read.
 
 `USR` asks a routine for an answer instead. It calls the routine the way
-C calls a function. Up to three parameter words sit on the software
-stack, the first at the address `__sp` holds, high byte first. The
-answer goes in the return cells, `__ret` then `__ret+1`, high byte
-first. Those two labels are the interpreter's own and are the only zero
-page bytes past the system page a routine may use. BASIC puts the stack
-back after the call, so the routine does not pop its parameters.
+C calls a function. Up to three parameter words sit on the heap stack,
+the first at `[D3+0]`, high byte first. The answer goes in the return
+cells, `__ret` then `__ret+1`, high byte first. Those two labels are the
+interpreter's own and are the only zero page bytes past the system page
+a routine may use. BASIC puts `D3` back after the call, so the routine
+does not pop its parameters.
 
 ```asm
 ; PLUS1: USR(1, PLUS1, n) answers n + 1. Only the low byte of n is read.
-PLUS1:  LD D1 <- [__sp]
-        LD A <- [D1+1]                ; the low byte of the first word
+PLUS1:  LD A <- [D3+1]                ; the low byte of the first word
         INC A
         LD [__ret+1] <- A
         LD A <- 0

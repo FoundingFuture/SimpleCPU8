@@ -479,6 +479,7 @@ simplecpu-cc main.c -o main.asm
 | `-D NAME[=VALUE]` | a preprocessor definition |
 | `-msoft-mul` | multiplies and divides on the CPU instead of the coprocessor |
 | `-zp-reserve N` | leaves the first N bytes of the zero page to the program |
+| `--heap-stack-size N` | the C stack's size in RAM, as 4096 or 4K. `#pragma heap_stack_size` does the same from a source |
 | `--rom-header file` | also writes `ROM.h`, the map of what the cartridge holds |
 
 Pictures and sounds named in the C are looked up beside the first file.

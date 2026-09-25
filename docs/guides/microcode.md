@@ -70,6 +70,7 @@ The registers:
 | `A` | 8 | the ALU's left input latch, loaded from `ACC` |
 | `B` | 8 | the ALU's right input latch, loaded from the operand, RAM or the stack |
 | `D1`, `D2` | 16 | the pointer registers, in two halves of 8 bits each |
+| `D3` | 16 | the data stack pointer. It reaches `RAM` only through `EA`, as a base |
 | `SP` | 16 | the stack pointer. Starts at `$07FF` and names the next free cell |
 | `FLAGS` | 4 | `N`, `V`, `Z` and `C` |
 
@@ -101,12 +102,12 @@ The wires are drawn as a schematic would draw them. A wire touches only
 the boxes it joins. `PC` feeds `PROG`, and `PROG` feeds `IR`. `IR`
 feeds `PC`, `EA`, `B`, `D1`, `D2` and `IO`, because the operand can be
 a target, an address, a constant, a word or a port. `RAM` feeds `B`,
-`D1` and `D2`, and `ACC`, `D1` and `D2` feed `RAM`. `STACK` feeds `B`,
+`D1`, `D2` and `D3`, and `ACC`, `D1`, `D2` and `D3` feed `RAM`. `STACK` feeds `B`,
 `PC`, `D1` and `D2`. `ACC` feeds `A`, and `A` and `B` feed the `ALU`,
 which feeds `ACC` and `FLAGS`. `STEP` feeds `PC`, `SP`, `D1` and `D2`. The drawing has no wire from
-`STEP` to `ACC`, though `ACC_INC` lights both boxes. `EA` feeds `D1`
-and `D2`, for an address add. That is also the only way from `D1` to
-`D2`. There is no wire from `RAM` to `ACC` and none
+`STEP` to `ACC`, though `ACC_INC` lights both boxes. `EA` feeds `D1`,
+`D2` and `D3`, for an address add, and each of the three feeds `EA` as a
+base. That is also the only way from one pointer register to another. There is no wire from `RAM` to `ACC` and none
 from `PROG` to anywhere but `IR`. Those absences are the instruction
 set. A move between `ACC` and a pointer does not exist because no wire
 carries it.
@@ -139,7 +140,7 @@ src/core/signals.h lists every signal in one table. The table gives each
 one the register atoms it writes and the memory it touches. It also
 gives its use of the step unit, its ALU role, its IO role and its
 address role. The conflict rules and the executor both read that table.
-A new signal cannot exist in one and not the other. There are 83 signals. They are
+A new signal cannot exist in one and not the other. There are 91 signals. They are
 grouped here by the unit they drive. `OP16` is the whole operand,
 `OPLO` its low byte and `OPHI` its high byte.
 
@@ -187,8 +188,8 @@ Data RAM:
 | Signal | Does |
 |---|---|
 | `RAM_WRITE_ACC` | `RAM[ea] <- ACC` |
-| `RAM_TO_D1H`, `RAM_TO_D1L`, `RAM_TO_D2H`, `RAM_TO_D2L` | one half of a pointer from `RAM[ea]` |
-| `RAM_WRITE_D1H`, `RAM_WRITE_D1L`, `RAM_WRITE_D2H`, `RAM_WRITE_D2L` | `RAM[ea] <-` one half of a pointer |
+| `RAM_TO_D1H`, `RAM_TO_D1L`, `RAM_TO_D2H`, `RAM_TO_D2L`, `RAM_TO_D3H`, `RAM_TO_D3L` | one half of a pointer from `RAM[ea]` |
+| `RAM_WRITE_D1H`, `RAM_WRITE_D1L`, `RAM_WRITE_D2H`, `RAM_WRITE_D2L`, `RAM_WRITE_D3H`, `RAM_WRITE_D3L` | `RAM[ea] <-` one half of a pointer |
 
 Every one of these is one data RAM access, and every one needs the
 address stage to say where. Words are two bytes, high byte first, so a
@@ -200,27 +201,31 @@ The address stage:
 |---|---|
 | `ADDR_OP8` | base is `OPLO`, a zero page address |
 | `ADDR_OP16` | base is `OP16` |
-| `ADDR_D1`, `ADDR_D2` | base is the pointer register |
+| `ADDR_D1`, `ADDR_D2`, `ADDR_D3` | base is the pointer register |
 | `ADDR_A` | base is `ACC`, zero extended |
 | `EA_OFF_OP8` | adds `OPLO` to the base |
 | `EA_OFF_A` | adds `ACC` to the base |
 | `EA_OFF_OP16` | adds `OP16` to the base, for an address add |
 | `EA_CIN` | adds one to the sum |
+| `EA_FLAGS` | `Z` from the sum and `C` from its carry out of bit 15. `N` and `V` keep their values |
 
 The effective address is the base plus the offsets, masked to 16 bits.
 `[D1+n]` is `ADDR_D1, EA_OFF_OP8`. `[D1+A]` is `ADDR_D1, EA_OFF_A`.
 `EA_CIN` reaches the second byte of a word without stepping any
 register. These signals carry no action of their own. They shape the
-address the RAM signals in the same row use, or the sum `D1_LOAD_EA`
-and `D2_LOAD_EA` capture.
+address the RAM signals in the same row use, or the sum `D1_LOAD_EA`,
+`D2_LOAD_EA` and `D3_LOAD_EA` capture. The adder is 16 bits wide, so a
+negative offset is a large one, and `C` set by `EA_FLAGS` is the inverse
+of a borrow. Every address add is one row: `LD D3 <- D3+n` is
+`D3_LOAD_EA, ADDR_D3, EA_OFF_OP16, EA_FLAGS`.
 
 The pointer registers and the step unit:
 
 | Signal | Does |
 |---|---|
 | `D1_LOAD_OP16`, `D2_LOAD_OP16` | `D1 <- OP16` or `D2 <- OP16`, both halves at once |
-| `D1_LOAD_EA`, `D2_LOAD_EA` | `D1 <- ea` or `D2 <- ea`, the address stage's sum. `LD D2 <- D1+n` is `ADDR_D1, EA_OFF_OP16, D2_LOAD_EA` |
-| `D1_TSTZ`, `D2_TSTZ` | `Z <- (D1 == 0)` or `(D2 == 0)`, from the start of cycle value. The other flags keep their values |
+| `D1_LOAD_EA`, `D2_LOAD_EA`, `D3_LOAD_EA` | a pointer register `<- ea`, the address stage's sum. `LD D2 <- D1+n` is `ADDR_D1, EA_OFF_OP16, D2_LOAD_EA, EA_FLAGS` |
+| `D1_TSTZ`, `D2_TSTZ`, `D3_TSTZ` | `Z <- (D1 == 0)` and the like, from the start of cycle value. The other flags keep their values |
 | `D1_INC`, `D2_INC` | step a pointer by one |
 | `ACC_INC` | step the accumulator by one, wrapping at 256 |
 | `SP_INC`, `SP_DEC` | step the stack pointer up or down |
@@ -270,10 +275,10 @@ row that breaks two reports the lower number.
 
 Rule 1. One writer per register atom. The message names the pair:
 `PC_INC and PC_LOAD both write PCL`. The atoms are `PCH`, `PCL`, `IR`,
-`ACC`, `A`, `B`, `D1H`, `D1L`, `D2H`, `D2L`, `SP` and `FLAGS`. A
+`ACC`, `A`, `B`, `D1H`, `D1L`, `D2H`, `D2L`, `D3H`, `D3L`, `SP` and `FLAGS`. A
 register is a set of bits, and two signals writing it in one cycle
 would leave it holding neither value. Half writes exist, so the halves
-of `PC`, `D1` and `D2` count apart. A flag gated load counts as a
+of `PC`, `D1`, `D2` and `D3` count apart. A flag gated load counts as a
 writer even when its flag is clear, because the rule is about wiring,
 not about this cycle's values. `D1_TSTZ` and `FLAGS_LOAD` collide,
 because both write `FLAGS`.
@@ -310,8 +315,9 @@ address base select` and `a data RAM access needs exactly one address
 base select`. The port gateway moves one byte a cycle. The address
 adder takes one base, and a RAM access without a base has no address.
 `RAM_TO_B` alone is refused. `RAM_TO_B, ADDR_D1, ADDR_D2` is refused.
-An address add needs its base as well. `D1_LOAD_EA` without one is
-refused with `D1_LOAD_EA needs exactly one address base select`.
+An address add needs its base as well, and so does `EA_FLAGS`, which
+reads the sum. `D1_LOAD_EA` without one is refused with `D1_LOAD_EA
+needs exactly one address base select`.
 
 tests/core/conflicts_test.cpp has one case per rule. It also has three
 rows that must pass: the optimal fetch, a post-increment read and the

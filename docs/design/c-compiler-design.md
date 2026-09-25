@@ -18,7 +18,7 @@ whole design, and the rest of the document follows from it.
 - [What the machine does to a compiler](#what-the-machine-does-to-a-compiler)
 - [The memory map](#the-memory-map)
 - [The zero page is the scarce memory](#the-zero-page-is-the-scarce-memory)
-- [The software stack](#the-software-stack)
+- [The heap stack](#the-heap-stack)
 - [The calling convention](#the-calling-convention)
 - [ROM](#rom)
 - [Types the CPU does not have](#types-the-cpu-does-not-have)
@@ -196,7 +196,7 @@ A compiled program cannot place its tables by hand the way Pac-Man puts its
 palette at `$2000`. The runtime owns a map, and the compiler obeys it.
 
 ```text
-$0000-$00FF   zero page: sp, the compiler's temps, then __zp and what fits
+$0000-$00FF   zero page: __ret, the compiler's temps, then __zp and what fits
 $0100-        the runtime: the ACP scratch block, sized by the program,
               and the six byte shadow of the ACP configuration
               globals, then bss
@@ -323,75 +323,93 @@ An allocator that quietly decided which of your variables are fast would be
 the magic this machine exists to remove. One that shows its working is a
 lesson in why the zero page mattered so much on the machines this copies.
 
-## The software stack
+## The heap stack
 
-The hardware stack is 4096 bytes in its own memory, reached only through SP,
-and nothing can address into it. So C frames live in data RAM, on a stack the
-compiler keeps itself.
+The hardware stack is its own memory, 2048 bytes by default, reached only
+through SP, and nothing can address into it. So C frames live in data RAM,
+on a stack the C runtime keeps itself: the heap stack.
 
-The stack POINTER lives in the zero page, at two bytes such as `$FE` and
-`$FF`. It has to. Growing the stack by a frame is 16 bit arithmetic on that
-word. The ALU can only touch an operand in the zero page:
-
-```asm
-LD D1 <- [sp]         ; the caller's stack pointer
-LD D1 <- D1-12        ; the frame size, through the address adder
-LD [sp] <- D1
-```
-
-Three instructions, and D1 is the frame pointer at the end of them. Before
-the address add this was six, a SUB and SBC on the two bytes of `sp`. That
-is why `sp` has to be in the zero page. The stack DATA lives at the top of
-RAM. Only the pointer is low.
-
-D1 is the frame pointer for the whole function. A local is `[D1+n]`, and
-that shape exists for both load and store:
+The machine gives it a register. D3 is the heap stack pointer, with the
+forms a frame needs. Bytes, words and ALU operands sit at `[D3+n]`, and
+address adds move it and copy it. A frame is one address add each way:
 
 ```asm
-LD A <- [D1+4]        ; read a local
-LD [D1+4] <- A        ; write one
+LD D3 <- D3-12        ; the frame, through the address adder
+; the body: every local is [D3+n]
+LD D3 <- D3+14        ; the frame and the two argument bytes
+RET
 ```
 
-The costs, honestly:
+It was six instructions when the pointer was a word in the zero page.
+There was a SUB and an SBC on its two bytes. Then three once the address adder could load
+D1, which was the frame pointer. Now D3 is both the pointer and the frame
+base, so nothing is loaded or stored at all.
+
+The costs:
 
 | operation | instructions | why |
 |---|---|---|
-| read or write a local | 1 | `[D1+n]` is a real addressing mode |
-| arithmetic on a local | 1 | the ALU takes `[D1+n]` as its operand |
-| a prologue: grow sp, load D1 | 3 | a load, an address add, a store |
-| an epilogue: shrink sp | 3 | an address add, a store, RET |
-| recursion | free | it is a stack |
-
-Static zero page frames were the optimisation planned for the middle row.
-The `[D1+n]` ALU forms made it unnecessary. The stack serves every
-function. It is correct, it is general, and the compiler stays small.
+| read or write a local | 1 | `[D3+n]` is a real addressing mode |
+| arithmetic on a local | 1 | the ALU takes `[D3+n]` as its operand |
+| a prologue | 1 | an address add |
+| an epilogue | 2 | an address add and RET |
+| recursion | 2 more at entry | the heap stack check below |
 
 Return addresses stay on the hardware stack. JSR and RET do not change, and
-they stay one instruction each. The software stack holds data only, so the
-two never confuse each other.
+they stay one instruction each. The heap stack holds data only, so the two
+never confuse each other. SP is 16 bits, and `simplecpu --stack-size` makes
+the hardware stack up to 64K. A program that recurses past it crashes on
+the hardware stack, and the error says which stack ran out.
 
-SP is 16 bits and the stack is 4096 bytes, so a return address costs two of
-them and nesting stops near 2048 deep. It was 128, on an 8 bit SP over 256
-bytes, which a BASIC interpreter parsing a nested expression could reach. A
-program that recurses past 2048 crashes on the hardware stack, and the error
-says which stack ran out.
+D1 and D2 are both free for pointers. An array load is `D2 = base, A =
+index, LD A <- [D2+A]`, one instruction. An array STORE has no `[D2+A]`
+form. `LD D2 <- D2+A` steps the pointer to the element, then the store
+goes through `[D2]`.
 
-D1 being the frame pointer leaves D2 as the one free pointer register. An
-array load is `D2 = base, A = index, LD A <- [D2+A]`, one instruction. An
-array STORE has no `[D2+A]` form. `LD D2 <- D2+A` steps the pointer to the
-element, then the store goes through `[D2]`. `PUSH D1` and `POP D1` on the hardware stack let a function borrow
-D1 for a moment when it must.
+### How big the heap stack is
+
+It runs from under the text screen down to a floor. By default the floor
+is the end of the program's data, so the heap stack gets every free byte.
+`#pragma heap_stack_size N` in any file, or `simplecpu-cc
+--heap-stack-size N`, sets the floor N bytes below the top instead. A size
+that would reach into the program's data is refused.
+
+The compiler knows every frame's size and every direct call. So it adds
+up the deepest point of a chain of calls with no recursion. It refuses a
+main whose chain cannot fit. That check costs nothing at run
+time. What it cannot add up it checks at run time, at the entry of:
+
+- A function that can recurse, since its depth depends on its data.
+- A function named in inline assembly or taken as an address. The
+  compiler cannot see from how deep it is called.
+- A function main does not reach through calls, such as one BASIC calls
+  with USR.
+
+The check is two instructions against a constant the compiler works out.
+The constant is the floor plus the deepest unchecked chain under the
+function:
+
+```asm
+LD D2 <- D3-__hs_f    ; C is the adder's carry: clear when D3 is below
+JNC __stack_overflow
+```
+
+`__stack_overflow` prints `HEAP STACK OVERFLOW` on the screen and halts. In
+the BASIC interpreter the checks cost 0.35% of the benchmark's cycles.
 
 ## The calling convention
 
-The caller computes the callee's new sp, writes the arguments at fixed low
-offsets above it, stores sp, and JSRs. The callee does `LD D1 <- [sp]` and
-everything is `[D1+n]`: arguments at `+0` and `+2` upward, its own locals
-above them. On return it adds the frame back.
+The caller writes the arguments below its frame through D2, at fixed
+offsets, moves D3 down to them and JSRs. The callee moves D3 down past
+its own locals, and everything is `[D3+n]`. Its locals are at the
+bottom, the saved temps above them, then the arguments. On return it adds its frame
+and the arguments back, so the caller's D3 is its frame base again.
 
-A byte comes back in A. A word comes back in A and a zero page word. Every
-argument, local and saved pointer is in RAM, in the order the compiler laid
-it out. That is what a student stepping through a call should get to see.
+A byte comes back in the low byte of `__ret`. A word comes back in
+`__ret`. Every argument, local and saved temp is in RAM, in the order the
+compiler laid it out. That is what a student stepping through a call
+should get to see. An assembly routine called from C gives D3 back as it
+found it.
 
 ## ROM
 
@@ -856,7 +874,7 @@ labels and leaves the exported ones alone. A `static` function is private by
 that rule rather than by a second mechanism.
 
 **The zero page is allocated whole-program.** Temps and globals want one
-view of it. That happens at link time, once the units are known. The software stack is what makes that easy. Locals are
+view of it. That happens at link time, once the units are known. The heap stack is what makes that easy. Locals are
 frame offsets, so no unit needs to know another's frame.
 
 **Dead code costs nothing.** The linker takes only the members something
@@ -1067,8 +1085,8 @@ bytes the CPU could only ever copy.
 
 ## Settled, recorded so they are not reopened
 
-The software stack with its pointer in the zero page. D1 as the frame
-pointer. The stack top as a linker constant. `__ROM` as a storage class the
+The heap stack under D3, which is the frame base too. The stack top as a
+linker constant. `__ROM` as a storage class the
 CPU cannot read, with `ROM.h` generated from both sources on every compile.
 `rom_copy` as the only way to read ROM, and `__ROM` as its spelling. A build
 line in a comment rather than a Makefile. No mouse for now, so the `io` library covers the pad and the keyboard, and a

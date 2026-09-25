@@ -300,8 +300,23 @@ TALLY CALLED 3 TIMES
 ```
 
 `factorial` calls itself. That works because each call gets its own copy
-of `n` on a stack in memory. The stack starts near the top of RAM and
-grows downwards, and a call costs a few bytes of it.
+of `n` on a stack in memory, the heap stack. It starts directly under the text
+screen and grows downwards, and a call costs a few bytes of it.
+
+The heap stack is the C runtime's, not the processor's. The processor's
+own stack holds only return addresses, in a memory of its own. The heap
+stack holds every parameter and local, in RAM, so a pointer to a local is
+an ordinary address. The register D3 points at it, and the IDE shows D3
+among the registers.
+
+By default the heap stack gets all the RAM the program's globals leave
+free. `#pragma heap_stack_size 4096` anywhere in the project asks for a
+fixed size instead, and so does `simplecpu-cc --heap-stack-size 4096`.
+The compiler adds up how deep a chain of calls goes wherever it can, and
+refuses a `main` whose calls cannot fit. A function that calls itself
+cannot be added up, so it checks for room each time it starts. When the
+room runs out the program stops with `HEAP STACK OVERFLOW` at the top of
+the screen.
 
 `for (i = 1; i <= 5; i++)` is `FOR I=1 TO 5`. The three parts are the
 start, the test that keeps the loop going and the step. `i++` adds one.
@@ -990,6 +1005,7 @@ come up most:
 | `this format takes 2 arguments and 1 was given` | `printf` holes and arguments differ |
 | `f is defined in other.c as well` | two files define one public name, so mark one `static` |
 | `main needs a frame of 300 bytes and a frame reaches 255` | a local array too big, so make it global |
+| `main's calls need 900 bytes of heap stack, and it has 512` | a `#pragma heap_stack_size` too small for the program |
 | `pic is __ROM and cannot be read from C` | use `rom_copy` |
 | `cannot find <stdio.h>` | the message lists the headers that exist |
 | `show is a macro from graphics.h` | a function named like a macro, so rename it or leave the header out |

@@ -49,7 +49,7 @@ struct Meta {
 
 // The stack's size, written once by the machine. The text then follows
 // the machine when the stack changes.
-std::string stackBytes() { return std::to_string(STACK_SIZE) + " bytes"; }
+std::string stackBytes() { return std::to_string(STACK_SIZE) + " bytes by default"; }
 
 // One entry per mnemonic, the uniform page fields of the browser's META.
 const std::map<std::string, Meta>& meta() {
@@ -105,25 +105,28 @@ const std::map<std::string, Meta>& meta() {
                "Pops two bytes off the stack into PC. Pair every RET with a JSR. Popping an empty stack crashes "
                "with a stack underflow."}},
       {"LD", {"LOAD & STORE", "LD src -> dst", "destination and source joined by an arrow, either direction",
-              FlagFacts{"N, Z", "loads: set when the loaded value is zero. stores: " + UNAFFECTED,
-                        "byte loads into A: set to bit 7. word loads and stores: " + UNAFFECTED, UNAFFECTED,
-                        UNAFFECTED},
-              "A, D1, D2, or RAM, depending on the shape",
+              FlagFacts{"N, Z, C", "loads: set when the loaded value is zero. stores: " + UNAFFECTED,
+                        "byte loads into A: set to bit 7. word loads and stores: " + UNAFFECTED,
+                        "address sums: the carry out of bit 15. everything else: " + UNAFFECTED, UNAFFECTED},
+              "A, D1, D2, D3, or RAM, depending on the shape",
               "The one data mover. LD A <- x and LD x -> A are the same instruction. Square brackets mean "
               "contents of. A trailing + steps the pointer by the transfer width after the access. The register "
-              "outside the brackets decides the width: A moves one byte, D1 and D2 move two, big-endian. [A] "
+              "outside the brackets decides the width: A moves one byte, D1, D2 and D3 move two, big-endian. [A] "
               "addresses the zero page and never crashes, and [A]+ steps A after a word load. D registers reach "
               "all of data RAM. No data address is illegal. An effective address wraps at 16 bits, so a pointer "
               "walked off the end wraps to zero. Without brackets a sum is the address itself: LD D1 <- D1+8 "
               "adds 8 to D1, LD D1 <- D1-8 subtracts, LD D2 <- D1+A adds A, and LD D2 <- D1 copies. These run "
-              "through the address adder, set Z like every load into a D register, and leave C alone."}},
-      {"ADD", {"ARITHMETIC", "ADD A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
+              "through the address adder, set Z from the sum and set C to the adder's carry out of bit 15. So "
+              "after LD D2 <- D3-FLOOR, C is clear when D3 was below FLOOR. D3, the data stack pointer, "
+              "reaches memory only as [D3+n], takes sums with D1, D2 and itself, and loads and stores whole "
+              "at an address."}},
+      {"ADD", {"ARITHMETIC", "ADD A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n], [D2+n] or [D3+n]",
                arithFlags("set on carry out of bit 7"), "A",
                "Adds the operand to A. INC A is the same instruction as ADD A <- 1."}},
-      {"SUB", {"ARITHMETIC", "SUB A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
+      {"SUB", {"ARITHMETIC", "SUB A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n], [D2+n] or [D3+n]",
                arithFlags("set when a borrow occurred"), "A",
                "Subtracts the operand from A. DEC A is the same instruction as SUB A <- 1."}},
-      {"ADC", {"ARITHMETIC", "ADC A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
+      {"ADC", {"ARITHMETIC", "ADC A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n], [D2+n] or [D3+n]",
                [] {
                  FlagFacts f = arithFlags("read as carry in, then set to the carry out");
                  f.list = "N, V, Z, C (reads C)";
@@ -132,29 +135,29 @@ const std::map<std::string, Meta>& meta() {
                "A",
                "Adds the operand and the incoming C flag. This chains byte additions into wider ones: ADD the "
                "low bytes, then ADC each higher byte."}},
-      {"SBC", {"ARITHMETIC", "SBC A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
+      {"SBC", {"ARITHMETIC", "SBC A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n], [D2+n] or [D3+n]",
                [] {
                  FlagFacts f = arithFlags("read as borrow in, then set when a borrow occurred");
                  f.list = "N, V, Z, C (reads C)";
                  return f;
                }(),
                "A", "Subtracts the operand and the incoming borrow. The mirror of ADC for multi byte subtraction."}},
-      {"AND", {"LOGIC", "AND A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]", LOGIC_FLAGS,
+      {"AND", {"LOGIC", "AND A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n], [D2+n] or [D3+n]", LOGIC_FLAGS,
                "A", "Bitwise AND into A. Masks bits: AND A <- $0F keeps the low nibble."}},
-      {"OR", {"LOGIC", "OR A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]", LOGIC_FLAGS,
+      {"OR", {"LOGIC", "OR A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n], [D2+n] or [D3+n]", LOGIC_FLAGS,
               "A", "Bitwise OR into A. Sets bits."}},
-      {"XOR", {"LOGIC", "XOR A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]", LOGIC_FLAGS,
+      {"XOR", {"LOGIC", "XOR A <- value", "A <- an 8 bit immediate, [zero page address], or [D1+n], [D2+n] or [D3+n]", LOGIC_FLAGS,
                "A", "Bitwise XOR into A. Flips bits. XOR A <- $FF inverts A. XOR with itself clears A."}},
-      {"CMP", {"ARITHMETIC", "CMP A, value", "A, then an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
+      {"CMP", {"ARITHMETIC", "CMP A, value", "A, then an 8 bit immediate, [zero page address], or [D1+n], [D2+n] or [D3+n]",
                arithFlags("set when A is below the value, unsigned"), "none",
                "Compares A with the operand: the flags of SUB, and A keeps its value. So one byte can be tested "
                "against several values in a row. JZ jumps when they are equal, JC when A is lower and JNC when "
                "it is the same or higher, unsigned. Signed order is N xor V, as after SUB."}},
-      {"TST", {"LOGIC", "TST A, value", "A, then an 8 bit immediate, [zero page address], or [D1+n] or [D2+n]",
+      {"TST", {"LOGIC", "TST A, value", "A, then an 8 bit immediate, [zero page address], or [D1+n], [D2+n] or [D3+n]",
                LOGIC_FLAGS, "none",
                "Tests bits: the flags of AND, and A keeps its value. TST A, $80 sets Z when bit 7 is clear. TST "
-               "A, $FF tests A itself, which a port read needs, since IN sets no flags. TST D1 and TST D2 are "
-               "LD D1 <- D1+0 and LD D2 <- D2+0: Z set when the whole pointer is zero, the NULL test."}},
+               "A, $FF tests A itself, which a port read needs, since IN sets no flags. TST D1, TST D2 and TST D3 "
+               "are LD D1 <- D1+0 and the like: Z set when the whole pointer is zero, the NULL test."}},
       {"SHL", {"SHIFT", "SHL A", "A", FlagFacts{"N, Z, C", "set when the result is zero", "set to bit 7 of the result", "set to the bit shifted out of bit 7", UNAFFECTED}, "A",
                "Shifts A one bit left, a 0 into bit 0. A doubles. For a 16 bit value, SHL the low byte and ROL "
                "the high byte."}},

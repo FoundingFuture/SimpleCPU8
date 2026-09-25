@@ -38,6 +38,7 @@ Eddie decided.
 - [The camera's two matrices](#the-cameras-two-matrices)
 - [Jumps on a clear flag](#jumps-on-a-clear-flag)
 - [Compares, tests, address adds and shifts](#compares-tests-address-adds-and-shifts)
+- [D3 and the heap stack](#d3-and-the-heap-stack)
 - [Deferred instructions](#deferred-instructions)
 
 ## Hex prefix over the 6502 hash
@@ -667,6 +668,45 @@ without reloading, and it multiplies and divides by constants with
 shifts. The BASIC interpreter it compiles came out 12% smaller. Its loop
 benchmark runs in a third of the cycles it took before. That counts the
 opcodes and the compiler work that uses them together.
+
+## D3 and the heap stack
+
+Question: C wants a stack for parameters and locals. A pointer to a local
+must be an ordinary RAM address. The hardware stack is a memory of its
+own, and no pointer reaches it. What should hold the C stack.
+
+Decision: two stacks with two owners. The hardware stack stays private and
+holds return addresses and pushes. Its size is a host option, `simplecpu
+--stack-size`, 2 KB by default and up to 64 KB. The C stack lives in RAM
+and belongs to the C runtime, which calls it the heap stack. A third
+pointer register, D3, points at it. Its size is the compiler's
+`--heap-stack-size`, or `#pragma heap_stack_size` in a source.
+
+Reason: the hardware stack in RAM, or shown through a window, would let
+any stray store overwrite a return address. It would also end the
+`stack-overflow` crash. A private return stack is what x86 added in 2020
+as its shadow stack. A C pointer carries no tag saying which memory it
+points into. So a local must live where every pointer reaches. D3 gives
+the heap stack a register without touching the hardware stack. The name
+heap stack is Eddie's.
+
+D3 has only the forms a frame needs. Bytes, words, the ALU, CMP and TST
+reach `[D3+n]`. Address adds go into and out of it, and it loads and
+stores whole at an address. That is 22 opcodes and eight signals, and no new
+adder: the address stage takes D3 as a base.
+
+The address adder now sets C from its carry out of bit 15, as well as Z.
+A stack check is then `LD D2 <- D3-FLOOR` and `JNC`, two instructions.
+The same signal puts Z and C in the add's own row. So every address add
+got one cycle faster. The C runtime checks only where it must. That is a
+function that can recurse, or one that assembly or an address reaches. The
+compiler adds up every fixed call chain and refuses a main that cannot
+fit. On the BASIC benchmark the checks cost 0.35% of the cycles. The
+whole change took the benchmark from 36.6M cycles to 33.2M.
+
+A cost worth stating: an address add no longer leaves C alone. mul8 and
+mul16 had counted passes with one inside a carry chain. They now test the
+multiplier's bit with TST.
 
 ## Deferred instructions
 

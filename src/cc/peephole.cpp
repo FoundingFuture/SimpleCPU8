@@ -20,7 +20,7 @@ struct Line {
   bool setsZ = false, setsN = false;
   bool flow = false;     // control may leave: any jump, call, return, halt
   bool devices = false;  // OUT or IN: a device may read or write RAM
-  bool writesD1 = false, writesD2 = false;
+  bool writesD1 = false, writesD2 = false, writesD3 = false;
   std::string byteStore;  // [X] when A is stored to X
   std::string wordStore;  // [X] when a D register is stored to X
 };
@@ -89,6 +89,13 @@ Line parse(const std::string& raw) {
       return l;
     }
     const bool dstD = l.dst == "D1" || l.dst == "D2";
+    // The heap stack pointer moving: an address add into D3. The frame
+    // slots named through it change meaning, so the passes forget them.
+    if (l.dst == "D3" && l.src.rfind("D3", 0) == 0) {
+      l.writesD3 = true;
+      l.setsZ = true;
+      return l;
+    }
     if (l.dst == "A") {
       l.writesA = true;
       l.readsA = mentionsA(l.src);
@@ -424,6 +431,7 @@ class Pass {
         if (l.devices) dropIf([](const std::string& k) { return k[0] == '['; });
       }
       if (l.writesD1) dropIf([](const std::string& k) { return k.find("D1") != std::string::npos; });
+      if (l.writesD3) dropIf([](const std::string& k) { return k.find("D3") != std::string::npos; });
     }
     return changed;
   }
@@ -531,6 +539,7 @@ class Pass {
       if (!l.wordStore.empty()) clobber(l.wordStore);
       if (l.devices) dropIf([](const std::string& k) { return k[0] == '['; });
       if (l.writesD1) dropIf([](const std::string& k) { return k.find("D1") != std::string::npos; });
+      if (l.writesD3) dropIf([](const std::string& k) { return k.find("D3") != std::string::npos; });
     }
     return changed;
   }
@@ -577,6 +586,8 @@ class Pass {
         // A callee writes temps before it reads them, and a caller's live
         // temps are saved in its frame before the call, which reads them.
         if (x.mnem == "JSR") continue;
+        // The overflow stop reads no temp: it prints and halts.
+        if (x.src == "__stack_overflow") continue;
         const auto target = labels_.find(x.src);
         if (target == labels_.end() || !unread(target->second, base, pending, budget)) return false;
         if (x.mnem == "JMP") return true;

@@ -94,9 +94,9 @@ system page, which is BASIC's register file.
 `USR(width, n, p1, p2, p3)` is a function. It calls the routine at slot
 n the way compiled C calls a function, so a C function needs no glue.
 The parameters are optional, up to three, and each is a word. BASIC
-parks them at SYS_USR and copies them onto the software stack. The first
-lands at the address `__sp` holds, high byte first, the next two above
-it. Then it calls the routine. The routine leaves its answer in the
+parks them at SYS_USR and copies them onto the heap stack, the C stack
+in RAM under `D3`. The first lands at `[D3+0]`, high byte first, the
+next two above it. Then it calls the routine. The routine leaves its answer in the
 return cells, `__ret` and `__ret+1`, high byte first, where every C
 function leaves its value. Width 0 is for a routine called for what it
 does, and USR gives 0. Width 1 gives the low byte, 0 to 255. Width 2
@@ -108,11 +108,12 @@ routine filled, for `PEEK` and `DEEK` to read.
 20 P = USR(2, FILL, 7) : PRINT PEEK(P), PEEK(P + 1)
 ```
 
-BASIC puts `__sp` back as it was after the call. A C function pops its
-own parameters, and an assembly routine that ignores them leaves the
-stack as it found it anyway. An assembly routine reads its parameters
-through `__sp` and writes its answer to `__ret`. Those two are the only
-bytes past the system page it may touch. A width other than 0, 1 or 2
+BASIC puts `D3` back as it was after the call. A C function pops its
+own parameters, and an assembly routine that ignores them leaves `D3` as
+it found it anyway. An assembly routine reads its parameters at
+`[D3+0]` to `[D3+5]` and writes its answer to `__ret`. `__ret` and
+`__ret+1` are the only bytes past the system page it may touch, and `D3`
+is the one register it must give back unchanged. A width other than 0, 1 or 2
 is `RETURN VALUE WIDTH IS OUT OF RANGE [0,1,2]`.
 
 In a project built by simplecpu-make, the number may be a name. `CALL
