@@ -16,11 +16,13 @@
 
 ; Pac-Man's second sprite, drawn over the ghosts. See paclayer.
 .equ PACTOP, 6
-; The half shades the maze is anti-aliased with: the wall's, and the one
-; dots and pills share. Palette entries the fades write beside 1 to 3, so no
-; sprite colour may sit on them either. 4 between them is the pupils.
+; The shades the maze is anti-aliased with: the wall's half shade, the
+; dot's quarter shade and the pill's half shade. Palette entries the fades
+; write beside 1 to 3, so no sprite colour may sit on them either. 4
+; between them is the pupils.
 .equ WALLDIM, 5
 .equ DOTDIM, 6
+.equ PILLDIM, 7
 
 ; --- silence first, before anything else runs. The audio chip survives a
 ; Reset, and so does data RAM, so a Reset pressed while the siren is looping
@@ -1988,9 +1990,10 @@ wdim:   LD A <- [px]
         RET
 
 ; --- a dot in the middle of the cell at (px, py): a 2 by 2 core in the
-; colour the caller set, entry 2, and a rim of half shade on its four sides.
-; The rim is what a round dot of that size covers in part, so it reads as
-; round and anti-aliased. The cell is 8 by 8 and the dot stays inside it, so
+; colour the caller set, entry 2, and a rim of quarter shade on its four
+; sides. A round dot as wide as the core covers about a fifth of each rim
+; pixel, so the rim is faint. The dot keeps the size of the plain 2 by 2
+; one and loses its square corners. The cell is 8 by 8 and the dot stays inside it, so
 ; cellrect still paints it all out when he eats it.
 dotrect:        LD A <- 3
         LD [cx0] <- A
@@ -2054,7 +2057,7 @@ pillrect:        LD A <- 2
         LD A <- 5
         LD [cy1] <- A
         JSR cellpart
-        OUT GPU_COLOR, DOTDIM
+        OUT GPU_COLOR, PILLDIM
         OUT GPU_CMD, CMD_SET_COLOR
         LD A <- 2
         LD [cx0] <- A
@@ -2205,6 +2208,13 @@ fisnap: LD D1 <- palbuf+3
         LD [D1]+ <- A
         LD A <- 128
         LD [D1]+ <- A
+        LD A <- 63
+        LD [D1]+ <- A
+        LD A <- 56
+        LD [D1]+ <- A
+        LD A <- 44
+        LD [D1]+ <- A
+        LD A <- 128
         LD [D1]+ <- A
         LD A <- 112
         LD [D1]+ <- A
@@ -2233,12 +2243,25 @@ fput:   LD D1 <- palbuf+3
         LD [D1]+ <- A
         LD A <- [fdb]
         LD [D1] <- A
-; the half shades, entries 5 and 6: each counter halved
+; the shades, entries 5 to 7: the wall halved, the dot quartered, the
+; pill halved
         LD D1 <- palbuf+WALLDIM*3
         LD A <- 0
         LD [D1]+ <- A
         LD [D1]+ <- A
         LD A <- [fwb]
+        SHR A
+        LD [D1]+ <- A
+        LD A <- [fr]
+        SHR A
+        SHR A
+        LD [D1]+ <- A
+        LD A <- [fg]
+        SHR A
+        SHR A
+        LD [D1]+ <- A
+        LD A <- [fdb]
+        SHR A
         SHR A
         LD [D1]+ <- A
         LD A <- [fr]
@@ -4744,6 +4767,9 @@ foblack: LD D1 <- palbuf+3
         LD [D1]+ <- A
         LD [D1] <- A
         LD D1 <- palbuf+WALLDIM*3
+        LD [D1]+ <- A
+        LD [D1]+ <- A
+        LD [D1]+ <- A
         LD [D1]+ <- A
         LD [D1]+ <- A
         LD [D1]+ <- A
