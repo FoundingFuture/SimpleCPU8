@@ -173,14 +173,16 @@ machine's 256 by 256 pixels. F11 switches between the two while it runs.
 | `--fps 60` | paces the machine to 60 frames a second, which is the default |
 | `--max` | runs the machine as fast as the host allows |
 | `--microcode naive` or `optimal` | runs the ROM on another set |
-| `--crt 0.6`, `--no-crt` | the strength of the CRT look, or none |
+| `--crt 0.6`, `--no-crt` | the strength of the display look, or none |
+| `--crt-effect lcd` | another look: `sharp`, `sharp-smooth`, `classic`, `shadow-mask`, `aperture-grille`, `slot-mask`, `lcd`, `composite` or `smooth` |
 | `--seconds 10` | quits by itself after ten seconds |
 | `--stack-size 16K` | the hardware stack's size, 256 bytes to 64K. 2K is the default |
 | `--type 'RUN\n'` | types text into the machine after it boots, `\n` being Enter |
 | `--screenshot shot.png` | saves the window after one second and quits |
 
-While it runs, F1 turns the CRT look on and off. F2 and F3 turn it down
-and up, and F5 powers the machine on again. Every other key goes to the
+While it runs, F1 turns the display look on and off. F2 and F3 turn it
+down and up, and F4 steps to the next look. F5 powers the machine on
+again. Every other key goes to the
 machine. Quitting is the operating system's own gesture, Command-Q on
 macOS or the close button elsewhere. So Escape and Ctrl-C reach BASIC,
 which uses both to stop a program.
@@ -449,7 +451,7 @@ ball:   db 1, 16, 16
 | C | Assembly | Takes |
 |---|---|---|
 | `__image("x.png")` | `.image('x.png')` | a picture up to 256 by 256 |
-| `__sprite("x.png", n)` | a header and `.image` | a strip of n frames side by side, each up to 64 by 64 |
+| `__sprite("x.png", n)` | a header and `.image` | a strip of n frames side by side, each up to 64 by 64. Without n, the count the sprite editor saved in the PNG |
 | `__palette("x.png")` | `.palette('x.png')` | a picture's 256 colours |
 | `__sample("x.wav")` | `.sample('x.wav')` | a sound, made 8 bit mono at 8000 a second |
 | `__file("x.bin")` | `.file('x.bin')` | any bytes as they are |

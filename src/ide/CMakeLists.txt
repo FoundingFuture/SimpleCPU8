@@ -33,6 +33,8 @@ add_executable(simplecpu-ide
   manual.cpp
   guide.cpp
   datapath.cpp
+  sprite_editor.cpp
+  sprite_pane.cpp
   "${SC8_GUIDES_H}")
 
 target_include_directories(simplecpu-ide PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

@@ -9,6 +9,7 @@
 
 #include "imgui.h"
 #include "raylib.h"
+#include "rlImGui.h"
 
 #include "core/cartridge.h"
 #include "ide/ide.h"
@@ -25,9 +26,33 @@ namespace sc8 {
 
 namespace panes {
 
-RenderTexture2D& target() {
-  static RenderTexture2D rt = LoadRenderTexture(PANE_SIDE, PANE_SIDE);
-  return rt;
+RenderTexture2D& PaneTarget::texture() {
+  if (side_ != wanted_) {
+    if (side_ > 0) UnloadRenderTexture(rt_);
+    side_ = wanted_;
+    rt_ = LoadRenderTexture(side_, side_);
+  }
+  return rt_;
+}
+
+void PaneTarget::show(float side) {
+  // Framebuffer pixels per ImGui unit: 2 on a dense display.
+  const float density = ImGui::GetIO().DisplayFramebufferScale.x;
+  wanted_ = std::clamp(static_cast<int>(side * (density > 0.0f ? density : 1.0f)), 64, 4096);
+  if (side_ == 0) return;
+  // A render texture is stored upside down, so the source rectangle flips it.
+  const Rectangle src{0, 0, static_cast<float>(side_), -static_cast<float>(side_)};
+  rlImGuiImageRect(&rt_.texture, static_cast<int>(side), static_cast<int>(side), src);
+}
+
+PaneTarget& screenTarget() {
+  static PaneTarget t;
+  return t;
+}
+
+PaneTarget& previewTarget() {
+  static PaneTarget t;
+  return t;
 }
 
 namespace {

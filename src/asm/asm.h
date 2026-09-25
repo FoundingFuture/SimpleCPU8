@@ -36,6 +36,7 @@ struct ImageAsset {
   int height = 0;
   std::vector<uint8_t> pixels;   // width * height palette indexes, row-major
   std::vector<uint8_t> palette;  // 768 bytes: 256 x RGB888
+  int frames = 0;  // the frame count a sprite strip's PNG states, 0 when it states none
 };
 
 // Assets referenced by .data directives, by the name the directive uses.

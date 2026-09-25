@@ -58,6 +58,8 @@ DocKind docKindOf(const std::string& name) {
 // ---- the project
 
 void Ide::newScratchProject() {
+  // A sprite belongs to the project it came from, so it closes with it.
+  sprite_.close();
   projectDir_.clear();
   projectTitle_ = "scratch";
   romBase_.reset();
@@ -165,6 +167,7 @@ void Ide::addAsset(const std::string& path) {
 }
 
 void Ide::removeAsset(const std::string& name) {
+  if (sprite_.isOpen() && sprite_.name() == name) sprite_.close();
   if (!projectDir_.empty()) {
     const fs::path file = layout().assets / name;
     std::error_code ec;
@@ -231,6 +234,7 @@ void Ide::openProject(const std::string& dir) {
     note(dir + " is not a folder");
     return;
   }
+  sprite_.close();
   projectDir_ = fs::absolute(dir).string();
   projectTitle_ = l.name;
   romBase_.reset();
@@ -288,6 +292,7 @@ void Ide::openRomAsProject(const std::string& path) {
     note(path + ": " + r.error);
     return;
   }
+  sprite_.close();
   projectDir_.clear();
   romPath_ = fs::absolute(path).string();
   projectTitle_ = fs::path(path).stem().string();
@@ -358,6 +363,7 @@ void Ide::saveProjectAs(const std::string& dir) {
   projectDir_ = root.string();
   projectTitle_ = root.filename().string();
   for (Doc& d : docs_) saveDoc(d);
+  if (sprite_.dirty()) sprite_.save();
   for (const auto& [name, bytes] : romFiles_) {
     if (name.find("..") != std::string::npos) continue;
     const fs::path at = root / name;
@@ -421,6 +427,8 @@ void Ide::saveAll() {
   for (Doc& d : docs_) {
     if (d.dirty) saveDoc(d);
   }
+  // The sprite too, so a build reads the strip as it is drawn.
+  if (sprite_.dirty()) sprite_.save();
 }
 
 // Save is the whole project: every changed document into the folder. A
@@ -481,7 +489,7 @@ void Ide::saveProject() {
 }
 
 bool Ide::anyDirty() const {
-  if (filesChanged_) return true;
+  if (filesChanged_ || sprite_.dirty()) return true;
   for (const Doc& d : docs_) {
     if (d.dirty) return true;
   }
@@ -514,6 +522,8 @@ void Ide::buildProject(bool run) {
 }
 
 project::Built Ide::buildInMemory() {
+  // The sprite being drawn is one of the assets the build reads.
+  if (sprite_.dirty()) sprite_.save();
   std::vector<std::string> notes;
   // A carried project reads its pictures and sounds from the ROM and
   // builds the program again; a bare ROM keeps its program.
@@ -781,13 +791,20 @@ void Ide::filesPane(const char* name, bool* open) {
   if (assets.empty()) ImGui::TextDisabled("none yet");
   for (const AssetEntry& a : assets) {
     ImGui::PushID(a.name.c_str());
-    ImGui::Selectable(a.name.c_str());
+    const bool picture = isPicture(a.name);
+    const bool editing = sprite_.isOpen() && sprite_.name() == a.name;
+    if (ImGui::Selectable(a.name.c_str(), editing, ImGuiSelectableFlags_AllowDoubleClick) && picture &&
+        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+      openSprite(a.name);
+    }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("%s, %ju bytes. C names it as __sprite(\"%s\", n), __image, __sample or __file; "
-                        "assembly as .image('%s'), .sample or .file.",
-                        a.name.c_str(), a.bytes, a.name.c_str(), a.name.c_str());
+      ImGui::SetTooltip("%s, %ju bytes. C names it as __sprite(\"%s\"), __image, __sample or __file; "
+                        "assembly as .image('%s'), .sample or .file.%s",
+                        a.name.c_str(), a.bytes, a.name.c_str(), a.name.c_str(),
+                        picture ? " A double click opens it in the sprite editor." : "");
     }
     if (ImGui::BeginPopupContextItem()) {
+      if (picture && ImGui::MenuItem("Edit in the sprite editor")) openSprite(a.name);
       if (ImGui::MenuItem(("Remove " + a.name + "...").c_str())) askRemove(a.name, true);
       ImGui::EndPopup();
     }
@@ -798,6 +815,9 @@ void Ide::filesPane(const char* name, bool* open) {
                  [this](const fs::path& p) { addAsset(p.string()); });
   }
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("copy a picture, a sound or any file into the project; a right click on an asset removes it");
+  ImGui::SameLine();
+  if (ImGui::SmallButton("New sprite...")) askNewSprite();
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("draw a new sprite strip, saved as a PNG under Assets");
 
   if (romBase_ && !carriedProject_) {
     ImGui::Spacing();

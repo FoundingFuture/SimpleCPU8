@@ -121,6 +121,7 @@ simplecpu --rom game.rom --fps 60
 simplecpu --rom game.rom --max
 simplecpu --rom game.rom --microcode naive
 simplecpu --rom game.rom --crt 0.6
+simplecpu --rom game.rom --crt-effect aperture-grille
 simplecpu --rom game.rom --no-crt
 simplecpu --basic
 simplecpu --basic hello.bas --run
@@ -190,12 +191,36 @@ ROM's choice without changing the file.
 ## The screen
 
 The GPU composes 256 x 256 pixels. The display scales that to the window
-through a CRT shader with scanlines, curvature, blur, bloom and vignette.
-Each effect has its own strength from 0 to 1. The whole look has an on/off
-switch. Presentation only: the shader reads the bytes the GPU composed, and
-no program can see which effect is on. The settings belong to the person,
-not the ROM. They live in user settings and never in a project or a
-cartridge.
+through a shader, in one of nine looks:
+
+| Look | Key | What it shows |
+|---|---|---|
+| Sharp pixels | `sharp` | every pixel a hard square, no shader |
+| Sharp smooth | `sharp-smooth` | square pixels, only the edges between them blended, so any scale looks even |
+| Classic CRT | `classic` | scanlines, a little curvature, blur, bloom and vignette |
+| Shadow mask | `shadow-mask` | a round beam per row over a triad mask, after Timothy Lottes' shader |
+| Aperture grille | `aperture-grille` | vertical phosphor stripes and crisp rows, a Trinitron |
+| Slot mask | `slot-mask` | stripes broken into staggered slots, a television |
+| LCD grid | `lcd` | a thin grid between the pixels, a handheld screen |
+| Composite | `composite` | colour that bleeds along the rows, a television on a cable |
+| Smooth (Scale2x) | `smooth` | staircase edges rounded off, the pixels otherwise untouched |
+
+Each look is a small one-pass version of a well-known shader family.
+The masks come from crt-lottes and crt-royale, the curve from crt-geom.
+Sharp smooth is sharp-bilinear, and Smooth is Scale2x. Classic stays the
+default.
+
+Six strengths tune a look: scanlines, curvature, blur, bloom, vignette
+and mask. Each goes from 0 to 1, off to full. A look reads only some of them, and the
+Display menu shows only those. Choosing a look sets its preset strengths.
+A mask is drawn in the window's own pixels. So the IDE renders a pane's
+picture at the size the pane shows it.
+
+Presentation only: the shader reads the bytes the GPU composed, and no
+program can see which look is on. The settings belong to the person, not
+the ROM. The IDE keeps them in `display.txt` beside `settings.txt`.
+`simplecpu` takes `--crt-effect` and `--crt`, and F4 steps to the next
+look while it runs. They never go into a project or a cartridge.
 
 ## BASIC
 
@@ -355,7 +380,52 @@ pane both Run and CPU show, the listing and the registers, has one window
 name per level. F1 to F4 switch the level, BASIC, Project, Run and CPU,
 as does the Level menu. `--level basic|project|run|cpu` picks one on the
 command line and wins over the level a project picks.
-The CRT toggle sits in the Display menu and has no key.
+The Display menu holds the look, its strengths and the on/off switch.
+They have no key in the IDE.
+
+The sprite editor draws a sprite strip, the PNG that `__sprite` reads.
+It opens on a double click of a picture under Assets, from New sprite
+beside Add asset, or from `simplecpu-ide game/assets/ship.png`. The
+Project level docks it as a tab beside the editor. Its preview is a pane
+beside the screen. The Level menu shows and hides both.
+
+- The canvas zooms, with a grid and an onion skin of the frame before.
+  The palette is the machine's 256 colours. Index 0 is transparent and
+  drawn as a checker, as the GPU skips it.
+- A left click on the palette picks the drawing colour, a right click
+  the second colour a gradient ends on. A right click on the canvas picks
+  up the colour under it.
+- The tools: pencil, line, rectangle, ellipse, fill, gradient and roll.
+  Rectangle and ellipse draw outlined or filled. Shift with any tool
+  draws transparent, so Shift and a click clears a pixel.
+- The gradient shades the area of one colour under the click. It runs
+  from the first colour to the second, or into transparency with Shift,
+  with an optional ordered dither.
+- The roll tool drags a row sideways or a column up and down. With Shift
+  it moves the whole frame. Pixels that leave one side come back on the
+  other, so nothing is lost. Buttons roll and flip the frame by one step.
+- The frames run along the bottom, up to 16. A frame can be added at the
+  end or inserted before or after the current one. It can be duplicated,
+  moved and deleted. The frame size changes for all frames at once, up
+  to 64 x 64.
+- Undo and redo hold 200 steps. P, L, R, E, F, G and O pick the tool,
+  and X swaps the colours. `,` and `.` step the frames. Space plays and
+  pauses the preview.
+
+The preview plays the strip at its frames per second, or ping-pong,
+through the screen's own display look. Its look menu is the Display
+menu's, so a change there shows on the Screen pane too. Play on the Screen
+pane puts the preview there instead of the machine's picture, at full
+size. The sprite sits in the middle of the 256 pixel picture at 4 x, or
+as large as fits. 1 x is the size the machine draws it.
+
+Save writes the strip to the asset as an indexed PNG. Its palette is the
+machine's, index 0 fully transparent and the rest opaque. Two text chunks
+carry the frame count and the frames per second. Aseprite, GIMP and any
+other editor open the file as a plain picture. `__sprite("ship.png")`
+without a count reads the count from the chunk. A picture that is not a
+PNG opens as a new PNG beside it. Save project, Build and quitting save
+the sprite with the documents.
 
 The Run level's speed choice is the browser's ladder. Trace microcode
 comes first, then 0.5, 2, 10, 60, 1k and 100k instructions per second.

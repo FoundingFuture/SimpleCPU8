@@ -12,6 +12,7 @@
 #include "miniaudio.h"
 
 #include "assets/decoders.h"
+#include "assets/sprite.h"
 #include "devices/apu_ports.h"
 #include "devices/gpu.h"
 #include "devices/gpu_ports.h"
@@ -466,15 +467,19 @@ DecodedReport decodeRgba(const std::vector<uint8_t>& rgba, int width, int height
 std::optional<ImageAsset> imageAssetOf(const Rgba& rgba, std::string* note);
 
 std::optional<ImageAsset> loadImageFile(const std::filesystem::path& path, std::string* note) {
-  const std::optional<Rgba> rgba = decodeImageFile(path.string());
-  if (!rgba) return std::nullopt;
-  return imageAssetOf(*rgba, note);
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return std::nullopt;
+  const std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
+  return loadImageBytes(bytes, note);
 }
 
 std::optional<ImageAsset> loadImageBytes(const std::vector<uint8_t>& bytes, std::string* note) {
   const std::optional<Rgba> rgba = decodeImageBytes(bytes);
   if (!rgba) return std::nullopt;
-  return imageAssetOf(*rgba, note);
+  std::optional<ImageAsset> img = imageAssetOf(*rgba, note);
+  // A strip the sprite editor saved says how many frames it holds.
+  if (img) img->frames = sprite::pngFrames(bytes).value_or(0);
+  return img;
 }
 
 std::optional<ImageAsset> imageAssetOf(const Rgba& rgba, std::string* note) {

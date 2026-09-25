@@ -229,7 +229,9 @@ brackets empty, because the file decides the length:
 
 A width or height of 256 is written as 0, since a byte cannot hold 256.
 `__sprite` reads a horizontal strip with the frames side by side. The
-frame width is the image width divided by the count, which defaults to 1.
+frame width is the image width divided by the count. Without a count in
+the call, the PNG's `SimpleCPU-8 frames` text chunk gives it. The IDE's
+sprite editor writes that chunk. A PNG without it is one frame.
 The compiler refuses a width that does not divide, a count of zero, and a
 frame past 64 pixels a side. The file is looked up beside the source, the
 way `.image` is beside an assembly file. A missing file is a compile error

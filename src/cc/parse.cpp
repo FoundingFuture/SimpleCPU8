@@ -612,6 +612,7 @@ Initializer Parser::initializer() {
       if (eat(",")) {
         if (a.form != AssetForm::Sprite) err(word + " takes one argument, the file name");
         a.frames = static_cast<int>(constExpr());
+        a.framesGiven = true;
       }
       want(")");
       init.asset = a;

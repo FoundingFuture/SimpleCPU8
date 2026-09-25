@@ -55,9 +55,7 @@ void Ide::screenBody(float side) {
   const float width = ImGui::GetContentRegionAvail().x;
   // Center the square in the pane.
   ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, (width - side) * 0.5f));
-  // A render texture is stored upside down, so the source rectangle flips it.
-  const Rectangle src{0, 0, static_cast<float>(panes::PANE_SIDE), -static_cast<float>(panes::PANE_SIDE)};
-  rlImGuiImageRect(&panes::target().texture, static_cast<int>(side), static_cast<int>(side), src);
+  panes::screenTarget().show(side);
   // The machine gets the keyboard while the pane is focused or hovered.
   // Clicking the picture focuses the pane, so a click is how a player
   // takes the keys from the editor.

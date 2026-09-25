@@ -89,6 +89,26 @@ TEST_SUITE("an asset initializer puts a file on the cartridge") {
     CHECK(bytesOf(p, "ship") == std::vector<uint8_t>{1, 4, 2, 1, 2, 3, 4, 5, 6, 7, 8});
   }
 
+  TEST_CASE("__sprite with no count takes the count the sprite editor's PNG states") {
+    Assets a = preloaded();
+    a.images["ship.png"].frames = 2;
+    const cc::Program p = prog(R"(
+      __ROM const unsigned char ship[] = __sprite("ship.png");
+      int main(void) { return 0; }
+    )", a);
+    CHECK(bytesOf(p, "ship") == std::vector<uint8_t>{2, 2, 2, 1, 2, 5, 6, 3, 4, 7, 8});
+  }
+
+  TEST_CASE("an explicit count still wins over the PNG's") {
+    Assets a = preloaded();
+    a.images["ship.png"].frames = 2;
+    const cc::Program p = prog(R"(
+      __ROM const unsigned char ship[] = __sprite("ship.png", 1);
+      int main(void) { return 0; }
+    )", a);
+    CHECK(bytesOf(p, "ship") == std::vector<uint8_t>{1, 4, 2, 1, 2, 3, 4, 5, 6, 7, 8});
+  }
+
   TEST_CASE("__palette is the CMD_LOAD_PALETTE blob: a zero count, then 768 bytes") {
     const Assets a = preloaded();
     const cc::Program p = prog(R"(

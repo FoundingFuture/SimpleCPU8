@@ -3447,29 +3447,35 @@ std::vector<uint8_t> assetBytes(const VarDecl& v, const AssetInit& a, const Asse
       return out;
     }
     case AssetForm::Sprite: {
-      if (a.frames < 1) fail(v.pos, name + ": __sprite needs at least one frame");
+      if (a.framesGiven && a.frames < 1) fail(v.pos, name + ": __sprite needs at least one frame");
       if (a.frames > gpu::SPRITE_FRAMES_MAX) {
         fail(v.pos, name + ": __sprite takes at most " + std::to_string(gpu::SPRITE_FRAMES_MAX) + " frames");
       }
       bool blackDrawn = false;
       const ImageAsset img = onMachinePalette(find(assets->images, assets->loadImage), &blackDrawn);
       if (blackDrawn && assets->note) assets->note(name, SPRITE_BLACK_NOTE);
-      if (img.width < 1 || img.height < 1 || img.width % a.frames != 0) {
-        fail(v.pos, name + ": " + std::to_string(img.width) + " pixels wide does not divide into " +
-                        std::to_string(a.frames) + " frames for __sprite");
+      int frames = a.frames;
+      if (!a.framesGiven) {
+        // The count the PNG states, as the sprite editor saves it. A
+        // picture that states none is one frame, the whole image.
+        frames = img.frames > 0 ? img.frames : 1;
       }
-      const int fw = img.width / a.frames;
+      if (img.width < 1 || img.height < 1 || img.width % frames != 0) {
+        fail(v.pos, name + ": " + std::to_string(img.width) + " pixels wide does not divide into " +
+                        std::to_string(frames) + " frames for __sprite");
+      }
+      const int fw = img.width / frames;
       const int fh = img.height;
       if (fw > gpu::SPRITE_MAX || fh > gpu::SPRITE_MAX) {
         fail(v.pos, name + ": a frame is " + size(fw, fh) + " and a sprite is at most " +
                         std::to_string(gpu::SPRITE_MAX) + " pixels a side");
       }
-      out.push_back(static_cast<uint8_t>(a.frames));
+      out.push_back(static_cast<uint8_t>(frames));
       out.push_back(static_cast<uint8_t>(fw));
       out.push_back(static_cast<uint8_t>(fh));
       // The strip is one row-major image. Each frame comes out as its own
       // row-major block, which is how CMD_SPRITE_DEF reads them.
-      for (int f = 0; f < a.frames; f++) {
+      for (int f = 0; f < frames; f++) {
         for (int y = 0; y < fh; y++) {
           const size_t row = static_cast<size_t>(y * img.width + f * fw);
           out.insert(out.end(), img.pixels.begin() + static_cast<long>(row),

@@ -3,6 +3,9 @@
 //   simplecpu-ide                 an empty session with a sample program
 //   simplecpu-ide main.asm        open a source file
 //   simplecpu-ide game.rom        open a ROM and browse it
+//   simplecpu-ide game/assets/ship.png
+//                                 open the project and the picture in the
+//                                 sprite editor
 //   simplecpu-ide --level run     start in a level: edit, run or microcode
 //   simplecpu-ide --run           start running, --speed f60 picks the rate
 //                                 (trace, 0.5, 2, 10, 60, 1000, 100000,

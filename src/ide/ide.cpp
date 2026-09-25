@@ -99,11 +99,16 @@ std::string disassemble(const Instr& in) {
 
 std::span<const Speed> speedLadder() { return LADDER; }
 
-Ide::Ide() {
+Ide::Ide()
+    : sprite_(SpriteEditor::Host{
+          [this](const std::string& n) { return readAsset(n); },
+          [this](const std::string& n, const std::vector<uint8_t>& b) { return writeAsset(n, b); },
+          [this](std::string m) { note(std::move(m)); }}) {
   resetSections();
   registerLayoutHandler();
   customText_.reserve(1 << 15);
   settings_.load();
+  loadDisplay();
   audio_.start();
   newScratchProject();
 }
@@ -184,7 +189,19 @@ void Ide::open(const std::string& path) {
     }
     return;
   }
-  note("cannot open " + path + ": a .rom, a folder, or a .c, .h, .asm, .bas or microcode.txt");
+  if (isPicture(path)) {
+    // A picture opens its project, found from the assets folder it sits
+    // in, and then the picture in the sprite editor.
+    const fs::path file = fs::absolute(path);
+    fs::path dir = file.parent_path();
+    if (dir.filename() == "assets") dir = dir.parent_path();
+    openProject(dir.string());
+    setLevel(Level::Project);
+    openSprite(file.filename().string());
+    if (sprite_.isOpen()) focusAfterLayout_ = "###Sprite";
+    return;
+  }
+  note("cannot open " + path + ": a .rom, a folder, a picture, or a .c, .h, .asm, .bas or microcode.txt");
 }
 
 void Ide::run() {
@@ -499,6 +516,7 @@ void Ide::drawScreenOnly() {
   const int w = GetScreenWidth();
   const int h = GetScreenHeight();
   const int side = std::min(w, h);
+  screen_.setOutputDensity(GetWindowScaleDPI().x);
   screen_.upload(computer_.frame());
   screen_.draw((w - side) / 2, (h - side) / 2, side, side, display);
 }
@@ -522,13 +540,21 @@ void Ide::update() {
   computer_.pumpAudio(audio_);
   // The pane's texture is for the panes, which are not drawn full screen.
   if (screenOnly_) return;
-  BeginTextureMode(panes::target());
+  panes::PaneTarget& t = panes::screenTarget();
+  BeginTextureMode(t.texture());
   ClearBackground(BLACK);
-  if (!poweredOff_) {
+  screen_.setOutputDensity(1.0f);
+  if (sprite_.previewOnScreen()) {
+    // The sprite editor's preview plays on the Screen pane instead.
+    sprite_.previewPixels(GetTime(), previewPixels_);
+    screen_.upload(previewPixels_);
+    screen_.draw(0, 0, t.side(), t.side(), display);
+  } else if (!poweredOff_) {
     screen_.upload(computer_.frame());
-    screen_.draw(0, 0, panes::PANE_SIDE, panes::PANE_SIDE, display);
+    screen_.draw(0, 0, t.side(), t.side(), display);
   }
   EndTextureMode();
+  spritePreview();
 }
 
 // Each level owns a dockspace with a fixed id. imgui.ini keeps three
@@ -539,7 +565,7 @@ void Ide::frame() {
   // The number in the id is the layout's version. A new pane bumps it, so
   // an imgui.ini from before the pane rebuilds the level once rather than
   // leaving the newcomer floating.
-  static const ImGuiID IDS[LEVEL_COUNT] = {ImHashStr("sc8-level-basic-1"), ImHashStr("sc8-level-project-3"),
+  static const ImGuiID IDS[LEVEL_COUNT] = {ImHashStr("sc8-level-basic-1"), ImHashStr("sc8-level-project-4"),
                                            ImHashStr("sc8-level-run-2"), ImHashStr("sc8-level-cpu-4")};
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const int active = static_cast<int>(level_);
@@ -552,7 +578,8 @@ void Ide::frame() {
     buildLayout(level_, dockspace);
     // Which tab is in front is decided by focus, and every window of a
     // fresh layout asks for it. The one a person wants first wins here.
-    focusAfterLayout_ = level_ == Level::Basic     ? "Editor##basic"
+    if (focusAfterLayout_.empty())
+      focusAfterLayout_ = level_ == Level::Basic   ? "Editor##basic"
                         : level_ == Level::Project ? "Editor"
                         : level_ == Level::Run     ? "Memory##run"
                                                    : "Microcode";
@@ -574,6 +601,7 @@ void Ide::frame() {
     case Level::Project:
       filesPane("Files");
       editorPane("Editor");
+      if (spriteVisible_) spritePane();
       assemblyPane();
       messagesPane("Messages");
       screenPane("Screen##project");
@@ -605,6 +633,8 @@ void Ide::frame() {
   romSaveDialog();
   removeDialog();
   settingsDialog();
+  newSpriteDialog();
+  spriteSwitchDialog();
 }
 
 // The first run of a level has no saved layout, so the panes get one
@@ -639,11 +669,13 @@ void Ide::buildLayout(Level level, unsigned dockspace) {
       ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.22f, &bottom, &left);
       ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &rightBottom, &right);
       ImGui::DockBuilderDockWindow("Files", files);
-      ImGui::DockBuilderDockWindow("Editor", left);
+      ImGui::DockBuilderDockWindow("Sprite", left);
       ImGui::DockBuilderDockWindow("Assembly", left);
+      ImGui::DockBuilderDockWindow("Editor", left);
       ImGui::DockBuilderDockWindow("Messages", bottom);
       ImGui::DockBuilderDockWindow("Screen##project", right);
       ImGui::DockBuilderDockWindow("Manual##project", rightBottom);
+      ImGui::DockBuilderDockWindow("Sprite preview", rightBottom);
       break;
     case Level::Run:
       // The screen large in the middle, the registers and the run
@@ -743,6 +775,13 @@ void Ide::menuBar() {
     if (ImGui::MenuItem("Project", "F2", level_ == Level::Project)) setLevel(Level::Project);
     if (ImGui::MenuItem("Run", "F3", level_ == Level::Run)) setLevel(Level::Run);
     if (ImGui::MenuItem("CPU", "F4", level_ == Level::Cpu)) setLevel(Level::Cpu);
+    if (level_ == Level::Project) {
+      ImGui::Separator();
+      if (ImGui::MenuItem("Sprite editor", nullptr, spriteVisible_)) {
+        spriteVisible_ = !spriteVisible_;
+        focusSprite_ = spriteVisible_ ? 6 : 0;
+      }
+    }
     if (level_ == Level::Basic) {
       ImGui::Separator();
       if (ImGui::MenuItem("Show files", nullptr, basicShowsFiles_)) basicShowsFiles_ = !basicShowsFiles_;
@@ -815,13 +854,33 @@ void Ide::menuBar() {
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Display")) {
-    ImGui::MenuItem("CRT look", nullptr, &display.enabled);
-    ImGui::SliderFloat("Scanlines", &display.scanlines, 0.0f, 1.0f);
-    ImGui::SliderFloat("Curvature", &display.curvature, 0.0f, 1.0f);
-    ImGui::SliderFloat("Blur", &display.blur, 0.0f, 1.0f);
-    ImGui::SliderFloat("Bloom", &display.bloom, 0.0f, 1.0f);
-    ImGui::SliderFloat("Vignette", &display.vignette, 0.0f, 1.0f);
-    ImGui::MenuItem("Integer scale", nullptr, &display.integerScale);
+    bool touched = ImGui::MenuItem("Display effect on", nullptr, &display.enabled);
+    ImGui::SeparatorText("Effect");
+    for (int i = 0; i < EFFECT_COUNT; i++) {
+      const auto e = static_cast<Effect>(i);
+      if (ImGui::MenuItem(effectName(e), nullptr, display.effect == e)) {
+        display.usePreset(e);
+        display.enabled = true;
+        touched = true;
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", effectAbout(e));
+    }
+    ImGui::SeparatorText("Strengths");
+    bool any = false;
+    for (int k = 0; k < KNOB_COUNT; k++) {
+      const auto knob = static_cast<Knob>(k);
+      if (!effectUses(display.effect, knob)) continue;
+      any = true;
+      touched |= ImGui::SliderFloat(knobName(knob), &display.knob(knob), 0.0f, 1.0f);
+    }
+    if (!any) ImGui::TextDisabled("this effect has none");
+    if (ImGui::MenuItem("Back to the effect's preset")) {
+      display.usePreset(display.effect);
+      touched = true;
+    }
+    ImGui::Separator();
+    touched |= ImGui::MenuItem("Integer scale", nullptr, &display.integerScale);
+    if (touched) saveDisplay();
     ImGui::Separator();
     if (ImGui::MenuItem("Full screen (Esc returns)", "F12")) enterScreenOnly();
     ImGui::EndMenu();
@@ -873,6 +932,7 @@ void Ide::quitDialog() {
     if (filesChanged_) {
       ImGui::BulletText("files added to or removed from the project");
     }
+    if (sprite_.dirty()) ImGui::BulletText("the sprite %s", sprite_.name().c_str());
     ImGui::Spacing();
     if (ImGui::Button("Save and quit")) {
       if (projectDir_.empty() && !romPath_.empty()) {

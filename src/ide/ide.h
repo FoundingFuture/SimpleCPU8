@@ -27,6 +27,7 @@
 #include "ide/filedialog.h"
 #include "ide/guide.h"
 #include "ide/settings.h"
+#include "ide/sprite_editor.h"
 #include "project/project.h"
 #include "vm/audio.h"
 #include "vm/computer.h"
@@ -169,6 +170,37 @@ class Ide {
   std::vector<AssetEntry> assetList() const;
   void addAsset(const std::string& path);
   void removeAsset(const std::string& name);
+  // An asset's bytes, and a write of new ones, for the sprite editor. In a
+  // ROM or scratch project the write marks the project changed.
+  std::optional<std::vector<uint8_t>> readAsset(const std::string& name) const;
+  bool writeAsset(const std::string& name, const std::vector<uint8_t>& bytes);
+
+  // The sprite editor (sprite_pane.cpp). It opens on a double click of a
+  // picture under Assets, or from New sprite. Opening another sprite over
+  // unsaved changes asks first; pendingSprite_ holds what to open after.
+  void spritePane();
+  void openSprite(const std::string& name);
+  void askNewSprite();
+  static bool isPicture(const std::string& name);
+  void newSpriteDialog();
+  void spriteSwitchDialog();
+  // Render the sprite preview through the display, before the panes draw.
+  void spritePreview();
+  SpriteEditor sprite_;
+  Display previewScreen_;
+  bool spriteVisible_ = false;
+  // Frames left in which the sprite panes ask for focus. A fresh layout
+  // hands focus to every window it docks, so one frame is not enough.
+  int focusSprite_ = 0;
+  bool askNewSprite_ = false;
+  std::string newSpriteName_ = "sprite.png";
+  int newSpriteW_ = 16, newSpriteH_ = 16, newSpriteFrames_ = 1;
+  std::optional<std::string> pendingSprite_;  // an asset to open, or "" for a new sprite
+  bool askSpriteSwitch_ = false;
+  std::vector<uint8_t> previewPixels_;
+  // The display settings live in display.txt beside settings.txt.
+  void loadDisplay();
+  void saveDisplay();
   bool askRomSave_ = false;
   bool romSaveQuits_ = false;
   bool romSaveConfirmed_ = false;

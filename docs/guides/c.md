@@ -851,7 +851,7 @@ fill one from a file in `assets/`:
 | Form | File | Used by |
 |---|---|---|
 | `__image("bg.png")` | a picture, up to 256 by 256 | `image` |
-| `__sprite("ship.png", 2)` | a strip of frames side by side, each up to 64 by 64 | `sprite` |
+| `__sprite("ship.png")` or `__sprite("ship.png", 2)` | a strip of frames side by side, each up to 64 by 64 | `sprite` |
 | `__sample("ping.wav")` | a WAV, converted to 8 bit mono at 8000 Hz | `sample` |
 | `__palette("bg.png")` | the picture's 256 colours | `palette` |
 | `__file("level.bin")` | any bytes as they are | `rom_copy` |
@@ -904,6 +904,15 @@ int main(void)
     }
 }
 ```
+
+The IDE has a sprite editor for the strip. New sprite in the Files pane
+makes one from a name, a frame size and a frame count.
+A double click on a picture under Assets opens it. The editor draws with
+the machine's own 256 colours, frame by frame. A preview beside the
+screen plays the frames. Save writes the PNG into `assets/` with the
+frame count inside it, so `__sprite("ship.png")` needs no count. A count
+in the call still wins. A PNG from another editor has no count inside,
+so it is one frame unless the call gives one.
 
 `image(x, y, r)` copies a picture into the screen at a point. It is
 part of the picture afterwards, and drawing over it changes it.

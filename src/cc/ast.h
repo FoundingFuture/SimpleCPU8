@@ -81,8 +81,11 @@ enum class AssetForm { Image, Sprite, Palette, Sample, File };
 struct AssetInit {
   AssetForm form = AssetForm::File;
   std::string name;
-  // Sprite only: how many frames the strip holds, side by side.
+  // Sprite only: how many frames the strip holds, side by side. Without
+  // the count, the PNG says, as the sprite editor saves it. A picture
+  // that says nothing is one frame.
   int frames = 1;
+  bool framesGiven = false;
 };
 
 std::string assetFormName(AssetForm f);

@@ -10,6 +10,11 @@
 //                                          boot; \n is Enter
 //   simplecpu --rom game.rom --microcode naive
 //   simplecpu --rom game.rom --crt 0.6     CRT look at 60 percent
+//   simplecpu --rom game.rom --crt-effect aperture-grille
+//                                          another look: sharp, sharp-smooth,
+//                                          classic, shadow-mask,
+//                                          aperture-grille, slot-mask, lcd,
+//                                          composite or smooth
 //   simplecpu --rom game.rom --no-crt      the plain scaled picture
 //   simplecpu --rom game.rom --scale 3     a window at 3 x 256 instead of the
 //                                          whole screen
@@ -25,7 +30,7 @@
 // for a window either way, and --fullscreen the reverse.
 //
 // Keys while running: F1 toggles the CRT look, F2 and F3 turn it down and
-// up. F5 powers on again, F11 switches between the window and the screen. Quitting is the operating
+// up, F4 steps to the next look. F5 powers on again, F11 switches between the window and the screen. Quitting is the operating
 // system's own gesture: Command-Q on macOS, Alt-F4 or the close button
 // elsewhere. No key is taken from the machine, so Escape and Ctrl-C reach
 // BASIC, which uses both to break a running program.
@@ -57,7 +62,7 @@ namespace {
 int usage() {
   std::fprintf(stderr,
                "usage: simplecpu --rom FILE.rom [--fps N | --max] [--microcode naive|optimal]\n"
-               "                 [--crt S | --no-crt] [--scale N] [--window | --fullscreen] [--title T] [--seconds S]\n"
+               "                 [--crt S | --no-crt] [--crt-effect NAME] [--scale N] [--window | --fullscreen] [--title T] [--seconds S]\n"
                "       simplecpu --basic [FILE.bas [--run]]\n"
                "       ... [--type TEXT] [--screenshot FILE.png] [--stack-size BYTES]\n");
   return 2;
@@ -104,6 +109,7 @@ int main(int argc, char** argv) {
   int stackSize = STACK_SIZE;
   double seconds = 0.0;  // quit after this long, 0 for never  // -1 decides by what runs: a ROM fills the screen
   DisplaySettings display;
+  float crtStrength = -1.0f;  // --crt, applied after --crt-effect whatever the order
 
   for (int i = 1; i < argc; i++) {
     const std::string a = argv[i];
@@ -135,7 +141,18 @@ int main(int argc, char** argv) {
       typedExtra += out;
     }
     else if (a == "--microcode") microcode = next();
-    else if (a == "--crt") display.setStrength(std::stof(next()));
+    else if (a == "--crt") crtStrength = std::stof(next());
+    else if (a == "--crt-effect") {
+      const std::string name = next();
+      Effect e{};
+      if (!effectByKey(name, &e)) {
+        std::fprintf(stderr, "simplecpu: --crt-effect takes one of");
+        for (int k = 0; k < EFFECT_COUNT; k++) std::fprintf(stderr, " %s", effectKey(static_cast<Effect>(k)));
+        std::fprintf(stderr, ", not %s\n", name.c_str());
+        return 2;
+      }
+      display.usePreset(e);
+    }
     else if (a == "--no-crt") display.enabled = false;
     else if (a == "--scale") {
       scale = std::stoi(next());
@@ -238,7 +255,8 @@ int main(int argc, char** argv) {
     if (!screen.shaderReady()) std::fprintf(stderr, "simplecpu: the CRT shader did not compile, showing the plain picture\n");
 
     double owed = 0.0;
-    float strength = 0.5f;
+    float strength = crtStrength >= 0.0f ? crtStrength : 0.5f;
+    if (crtStrength >= 0.0f) display.setStrength(crtStrength);
     // Frame rates, reported when the run ends. Two of them: the host's,
     // which is how smoothly the window drew, and GPU_FRAME's, which is
     // what a program syncing on that port got and says whether the
@@ -275,6 +293,10 @@ int main(int argc, char** argv) {
       if (IsKeyPressed(KEY_F1)) display.enabled = !display.enabled;
       if (IsKeyPressed(KEY_F2)) display.setStrength(strength = std::max(0.0f, strength - 0.1f));
       if (IsKeyPressed(KEY_F3)) display.setStrength(strength = std::min(1.0f, strength + 0.1f));
+      if (IsKeyPressed(KEY_F4)) {
+        display.effect = static_cast<Effect>((static_cast<int>(display.effect) + 1) % EFFECT_COUNT);
+        display.setStrength(strength);
+      }
       if (IsKeyPressed(KEY_F5)) computer.powerOn();
       if (IsKeyPressed(KEY_F11)) {
         if (IsWindowFullscreen()) goWindow();

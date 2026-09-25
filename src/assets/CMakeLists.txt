@@ -10,7 +10,7 @@ target_include_directories(sc8_assets_vendor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR
 find_package(Threads REQUIRED)
 target_link_libraries(sc8_assets_vendor PUBLIC stb miniaudio Threads::Threads ${CMAKE_DL_LIBS})
 
-add_library(sc8_assets STATIC assets.cpp)
+add_library(sc8_assets STATIC assets.cpp sprite.cpp)
 
 target_include_directories(sc8_assets PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(sc8_assets
