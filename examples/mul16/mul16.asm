@@ -110,34 +110,35 @@ done:   HLT
 ; bits, so nothing is lost and there is no carry left over at the top.
 ;
 ; Low bit first, as in mul8, over four bytes. The multiplier starts in the
-; product's low word, already shifted once, and its bits leave through C
-; at the bottom while the product's bits come in at the top. A set bit adds
-; the multiplicand into the high word, and the carry out of that add is
-; the bit ROR brings in at the top of p0.
+; product's low word, and its bits are tested at the bottom while the
+; product's bits come in at the top. A set bit adds the multiplicand into
+; the high word, and the carry out of that add is the bit ROR brings in at
+; the top of p0. A clear bit brings in 0, with SHR.
+; DESIGN: the bit is tested with TST rather than shifted out into C. The
+; pass counter is an address add, which sets C, so C cannot carry the
+; multiplier's next bit from one pass to the next.
 mul16:  LD A <- 0
         LD [p0] <- A
         LD [p1] <- A
         LD A <- [mp0]
-        SHR A                          ; the multiplier's bit 0 walks down...
         LD [p2] <- A
         LD A <- [mp1]
-        ROR A                          ; ...and out into C
         LD [p3] <- A
-        LD D2 <- $FFF0                 ; -16 passes, and D2 leaves C alone
+        LD D2 <- $FFF0                 ; -16 passes
 
-m16lp:  JNC m16sh
+m16lp:  LD A <- [p3]
+        TST A, 1                       ; the multiplier's next bit
+        JZ m16no
         LD A <- [p1]                   ; the bit was set: add the multiplicand
         ADD A <- [mc1]
         LD [p1] <- A
         LD A <- [p0]
         ADC A <- [mc0]                 ; C = the carry out of the high word
-        LD [p0] <- A
-
-        ; product >>= 1, C in at the top, the next multiplier bit out at
-        ; the bottom
-m16sh:  LD A <- [p0]
-        ROR A
-        LD [p0] <- A
+        ROR A                          ; product >>= 1, C in at the top
+        JMP m16lo
+m16no:  LD A <- [p0]
+        SHR A                          ; product >>= 1, 0 in at the top
+m16lo:  LD [p0] <- A
         LD A <- [p1]
         ROR A
         LD [p1] <- A

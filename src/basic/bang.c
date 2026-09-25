@@ -8,7 +8,8 @@
  * nothing. The built-in storage driver runs after it, then the error.
  *
  * The compiler cannot call through a pointer, so the call is inline
- * assembly. The C frame pointer is put back from __sp after it.
+ * assembly. The routine keeps D3, the C frame pointer, as every routine
+ * called from C does.
  */
 
 /* The vector's power-on value. The routine sits inside bang_init because
@@ -39,7 +40,6 @@ static unsigned char bang_call(char *text)
     asm("JSR D2");
     asm("LD D1 <- $0004");
     asm("LD [D1] <- A");
-    asm("LD D1 <- [__sp]");
     return peek(SYS_RESULT);
 }
 

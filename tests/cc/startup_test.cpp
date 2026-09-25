@@ -46,8 +46,8 @@ TEST_SUITE("the entry point") {
       unsigned int sp;
       int main(void) { int a; int b; a = 1; b = 2; sp = a + b; return 0; }
     )");
-    // __sp is the first two bytes of the zero page, and it is back at the top.
-    CHECK(((r.m->ram[0] << 8) | r.m->ram[1]) == cc::C_STACK_TOP);
+    // D3 is the heap stack pointer, and it is back at the top.
+    CHECK(r.m->d3 == cc::C_STACK_TOP);
   }
 
   // halt() is still there, for stopping early from somewhere deep. It is not

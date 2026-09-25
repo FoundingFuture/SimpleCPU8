@@ -261,8 +261,8 @@ TEST_SUITE("what the compiler refuses, with the alternative named") {
     CHECK(has(refuses("int main(void) { break; }"), "break"));
   }
 
-  TEST_CASE("refuses a frame bigger than [D1+n] can reach, and says why") {
-    CHECK(has(refuses("int main(void) { unsigned char big[300]; big[0] = 1; return 0; }"), "[D1+n]"));
+  TEST_CASE("refuses a frame bigger than [D3+n] can reach, and says why") {
+    CHECK(has(refuses("int main(void) { unsigned char big[300]; big[0] = 1; return 0; }"), "[D3+n]"));
   }
 
   TEST_CASE("refuses a long, which the coprocessor could do and the compiler does not") {

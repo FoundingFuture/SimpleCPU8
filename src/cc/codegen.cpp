@@ -165,8 +165,9 @@ int intBytes(const std::string& length) {
 
 class Gen {
  public:
-  Gen(const Unit& unit, bool softMul, const Profile* profile, int zpReserve, const Assets* assets)
-      : unit_(hoistStatics(unit)), softMul_(softMul), profile_(profile), zpReserve_(zpReserve) {
+  Gen(const Unit& unit, bool softMul, const Profile* profile, int zpReserve, const Assets* assets, int heapStackSize)
+      : unit_(hoistStatics(unit)), softMul_(softMul), profile_(profile), zpReserve_(zpReserve),
+        heapStackSize_(heapStackSize) {
     for (const RomEntry& e : layoutRom(unit.vars, assets)) romPlan_[e.name] = e;
   }
 
@@ -240,6 +241,16 @@ class Gen {
   const Profile* profile_;
   // Bytes at the start of the zero page the program keeps for itself.
   int zpReserve_;
+  // The heap stack's size, 0 for all the free RAM. See stackPlan().
+  int heapStackSize_;
+  // The call graph the heap stack check is planned from: who each function
+  // calls directly, and how many bytes its frame moves D3 by.
+  std::map<std::string, std::set<std::string>> callees_;
+  std::map<std::string, int> frameOf_;
+  std::vector<std::string> fnOrder_;
+  std::string curFunc_;
+  // Every inline assembly line, for the functions it names.
+  std::vector<std::string> asmText_;
 
   std::vector<std::string> out_;
   std::map<std::string, Sym> globals_;
@@ -319,6 +330,10 @@ class Gen {
   // ---- the whole unit --------------------------------------------------------
 
   void reset() {
+    callees_.clear();
+    asmText_.clear();
+    frameOf_.clear();
+    fnOrder_.clear();
     romSyms_.clear();
     romOrder_.clear();
     romItems_.clear();
@@ -377,9 +392,193 @@ class Gen {
     }
   }
 
+  static std::string checkLabel(const std::string& f) { return "__hs_" + f; }
+
+  // The last byte of the program's .ram image, the heap stack's lowest
+  // possible floor: the reservations and globals, then the strings, the
+  // coprocessor block, printf's arguments and the double temps after them.
+  int ramEnd() const {
+    int end = globalBase_;
+    for (const ZpEntry& g : allGlobals_) end = std::max(end, g.addr + g.size);
+    for (const StrData& s : stringData_) end += static_cast<int>(s.bytes.size());
+    if (!softMul_) end += blockSize(runtimeUsed_);
+    if (printfUsed_) end += std::max(printfBytes_, 1);
+    if (doubleUsed_) end += (maxDouble_ + 3) * DSIZE + DSIZE + static_cast<int>(dlitData_.size()) * DSIZE;
+    return end;
+  }
+
+  // Which functions check the heap stack at entry, and what they check
+  // against. Every function's prologue carries the two check lines. This
+  // keeps them where a check can do something the compiler cannot:
+  //  - a function that can recurse, since its depth is only known at run time;
+  //  - a function called from assembly, or named anywhere but a JSR, since
+  //    the compiler cannot see who calls it or from how deep;
+  //  - a function main does not reach through calls, for the same reason.
+  // Everything else is on a fixed call chain whose depth is summed here. A
+  // checked function tests for its own frame plus the deepest unchecked
+  // chain below it, and main's chain is tested now, when it compiles.
+  // Returns the .equ lines, and rewrites the unused checks as a comment.
+  std::vector<std::string> stackPlan(std::vector<std::string>& lines, bool& anyChecked) {
+    const int top = C_STACK_TOP;
+    const int end = ramEnd();
+    const int floor = heapStackSize_ > 0 ? top - heapStackSize_ : end;
+    const Pos at{unit_.file, 1};
+    if (heapStackSize_ > 0 && floor < end) {
+      fail(at, "a heap stack of " + S(heapStackSize_) + " bytes reaches down to " + hexWord(floor) +
+                   ", and the program's data ends at " + hexWord(end) + ". Ask for at most " + S(top - end) +
+                   " bytes.");
+    }
+    // Named anywhere but its own label, its end label, its check or a JSR
+    // the compiler wrote. Inline assembly counts whatever it says.
+    std::set<std::string> named;
+    auto scanLine = [&](const std::string& raw, bool fromAsm) {
+      std::string t = raw.substr(0, raw.find(';'));
+      const size_t a = t.find_first_not_of(' ');
+      if (a == std::string::npos) return;
+      t = t.substr(a);
+      if (!fromAsm && t.rfind("JSR ", 0) == 0 && frameOf_.count(t.substr(4))) return;
+      if (t.find("__hs_") != std::string::npos) return;
+      for (size_t i = 0; i < t.size();) {
+        if (t[i] == '_' || std::isalpha(static_cast<unsigned char>(t[i]))) {
+          size_t n = 1;
+          while (i + n < t.size() && (t[i + n] == '_' || std::isalnum(static_cast<unsigned char>(t[i + n])))) n++;
+          const std::string w = t.substr(i, n);
+          const bool isLabel = i == 0 && i + n < t.size() && t[i + n] == ':';
+          if (!isLabel && frameOf_.count(w)) named.insert(w);
+          i += n;
+        } else {
+          i++;
+        }
+      }
+    };
+    for (const std::string& l : lines) scanLine(l, false);
+    for (const std::string& a : asmText_) scanLine(a, true);
+    // Reached from main through calls.
+    std::set<std::string> reached;
+    std::vector<std::string> todo = {"main"};
+    while (!todo.empty()) {
+      const std::string f = todo.back();
+      todo.pop_back();
+      if (!frameOf_.count(f) || !reached.insert(f).second) continue;
+      for (const std::string& c : callees_[f]) todo.push_back(c);
+    }
+    // In a cycle: Tarjan's strongly connected components.
+    std::set<std::string> cyclic;
+    {
+      std::map<std::string, int> index, low;
+      std::vector<std::string> stack;
+      std::set<std::string> onStack;
+      int next = 0;
+      std::function<void(const std::string&)> visit = [&](const std::string& v) {
+        index[v] = low[v] = next++;
+        stack.push_back(v);
+        onStack.insert(v);
+        for (const std::string& w : callees_[v]) {
+          if (!frameOf_.count(w)) continue;
+          if (!index.count(w)) {
+            visit(w);
+            low[v] = std::min(low[v], low[w]);
+          } else if (onStack.count(w)) {
+            low[v] = std::min(low[v], index[w]);
+          }
+        }
+        if (low[v] != index[v]) return;
+        std::vector<std::string> comp;
+        std::string w;
+        do {
+          w = stack.back();
+          stack.pop_back();
+          onStack.erase(w);
+          comp.push_back(w);
+        } while (w != v);
+        if (comp.size() > 1 || callees_[v].count(v)) cyclic.insert(comp.begin(), comp.end());
+      };
+      for (const std::string& f : fnOrder_) if (!index.count(f)) visit(f);
+    }
+    std::set<std::string> checked;
+    for (const std::string& f : fnOrder_) {
+      if (cyclic.count(f) || named.count(f) || !reached.count(f)) checked.insert(f);
+    }
+    // The deepest a call to an unchecked function takes D3, counting its
+    // frame, its arguments and the unchecked chain under it.
+    std::map<std::string, int> deep;
+    std::function<int(const std::string&)> depth = [&](const std::string& f) -> int {
+      auto it = deep.find(f);
+      if (it != deep.end()) return it->second;
+      int below = 0;
+      for (const std::string& c : callees_[f]) {
+        if (frameOf_.count(c) && !checked.count(c)) below = std::max(below, depth(c));
+      }
+      return deep[f] = frameOf_[f] + below;
+    };
+    auto belowOf = [&](const std::string& f) {
+      int below = 0;
+      for (const std::string& c : callees_[f]) {
+        if (frameOf_.count(c) && !checked.count(c)) below = std::max(below, depth(c));
+      }
+      return below;
+    };
+    if (frameOf_.count("main") && !checked.count("main") && depth("main") > top - floor) {
+      fail(at, "main's calls need " + S(depth("main")) + " bytes of heap stack, and it has " + S(top - floor) +
+                   ". Give it more with --heap-stack-size.");
+    }
+    std::vector<std::string> equ;
+    for (const std::string& f : fnOrder_) {
+      if (!checked.count(f)) continue;
+      const int value = floor + belowOf(f);
+      if (value > 0xffff) fail(at, f + "'s calls need more heap stack than there is RAM.");
+      equ.push_back(".equ " + checkLabel(f) + ", " + S(value));
+    }
+    anyChecked = !equ.empty();
+    // The unused checks become a note, line for line, so every mark into
+    // the body still points at its line.
+    for (size_t i = 0; i + 1 < lines.size(); i++) {
+      const std::string& l = lines[i];
+      const size_t p = l.find("LD D2 <- D3-__hs_");
+      if (p == std::string::npos) continue;
+      const std::string f = l.substr(p + 17);
+      if (checked.count(f)) continue;
+      lines[i] = "        ; heap stack: this call chain was checked before it began";
+      if (lines[i + 1].find("JNC __stack_overflow") != std::string::npos) lines[i + 1] = "";
+    }
+    return equ;
+  }
+
+  // Where a failed check ends. The C runtime says so on the screen and
+  // stops the machine.
+  static std::vector<std::string> overflowRoutine() {
+    std::vector<std::string> r = {
+        "",
+        "; The heap stack ran into the program's data. Say so, and stop.",
+        "__stack_overflow:",
+        "        OUT GPU_TEXT_COLOR, $FF",
+        "        OUT GPU_TEXT_BG, $E0",
+        "        OUT GPU_CMD, CMD_TEXT_STYLE",
+        "        OUT GPU_TEXT_COL, 0",
+        "        OUT GPU_TEXT_ROW, 0",
+        "        OUT GPU_CMD, CMD_TEXT_AT",
+    };
+    for (const char c : std::string("HEAP STACK OVERFLOW")) {
+      r.push_back("        OUT GPU_TEXT_CHAR, " + S(static_cast<int>(c)));
+      r.push_back("        OUT GPU_CMD, CMD_TEXT_CHAR");
+    }
+    r.push_back("        HLT");
+    return r;
+  }
+
+  static std::string hexWord(int v) {
+    static const char* h = "0123456789ABCDEF";
+    std::string s = "$";
+    for (int k = 12; k >= 0; k -= 4) s += h[(v >> k) & 15];
+    return s;
+  }
+
   // Lays the whole file out: entry, code, runtime, then .ram in the order
   // that decides which variables are in the zero page.
-  Compiled assemble(const std::vector<std::string>& bodyLines) {
+  Compiled assemble(const std::vector<std::string>& bodyIn) {
+    std::vector<std::string> bodyLines = bodyIn;
+    bool anyChecked = false;
+    const std::vector<std::string> equ = stackPlan(bodyLines, anyChecked);
     std::vector<ZpEntry> zpg;
     for (const ZpEntry& z : zpGlobals_) if (z.addr < ZERO_PAGE_SIZE) zpg.push_back(z);
     zpGlobals_ = zpg;
@@ -388,9 +587,13 @@ class Gen {
     head.push_back("; The assembly below is the program. Every block says which C");
     head.push_back("; line it came from, so the two panes read side by side.");
     head.push_back("");
+    head.insert(head.end(), equ.begin(), equ.end());
+    if (!equ.empty()) head.push_back("");
     head.push_back("__start:");
-    head.push_back("        LD D2 <- " + S(C_STACK_TOP));
-    head.push_back("        LD [" + S(ZP_SP) + "] <- D2");
+    // D3 is the heap stack pointer. It has no constant load, so the top
+    // goes through D1.
+    head.push_back("        LD D1 <- " + S(C_STACK_TOP));
+    head.push_back("        LD D3 <- D1");
     head.push_back("        JSR main");
     head.push_back("        HLT");
 
@@ -411,7 +614,6 @@ class Gen {
     // The system page comes first, so its addresses are the ones the
     // program was written against. The compiler never touches it.
     if (zpReserve_ > 0) reserve("__sys", zpReserve_, "the system page, the program's own");
-    reserve(ZP_SP, 2, "the software stack pointer");
     reserve(ZP_RET, 2, "the return value");
     reserve(ZP_CMP, 1, "a word compare's scratch byte");
     reserve(ZP_RA, 2, "runtime operand A");
@@ -453,6 +655,10 @@ class Gen {
     std::vector<std::string> all = head;
     all.push_back("");
     all.insert(all.end(), bodyLines.begin(), bodyLines.end());
+    if (anyChecked) {
+      const std::vector<std::string> ovf = overflowRoutine();
+      all.insert(all.end(), ovf.begin(), ovf.end());
+    }
     all.insert(all.end(), rt.begin(), rt.end());
     all.push_back("");
     all.insert(all.end(), ram.begin(), ram.end());
@@ -626,7 +832,7 @@ class Gen {
     frameSize_ = locals + saveBytes_ + dSaveBytes_ + argBytes_;
     if (frameSize_ > MAX_FRAME) {
       fail(f.pos, f.name + " needs a frame of " + S(frameSize_) + " bytes and a frame reaches " + S(MAX_FRAME) +
-                      ". A local reaches its frame through [D1+n], and n is one byte. Move the big one to a global.");
+                      ". A local reaches its frame through [D3+n], and n is one byte. Move the big one to a global.");
     }
   }
 
@@ -783,7 +989,7 @@ class Gen {
       const CType want = f.params[i].type;
       const int size = want.ptr > 0 ? 2 : std::max(sizeOf(want), 1);
       const Side v = leaves[i] ? *leaves[i] : sideOf(slot + static_cast<int>(i));
-      const std::string place = "[D1+" + S(offsets[i]) + "]";
+      const std::string place = "[D3+" + S(offsets[i]) + "]";
       if (size == 1) {
         op("LD A <- " + v.lo);
         op("LD " + place + " <- A");
@@ -794,7 +1000,7 @@ class Gen {
         op("LD A <- " + v.hi);
         op("LD " + place + " <- A");
         op("LD A <- " + v.lo);
-        op("LD [D1+" + S(offsets[i] + 1) + "] <- A");
+        op("LD [D3+" + S(offsets[i] + 1) + "] <- A");
       }
     }
 
@@ -898,14 +1104,18 @@ class Gen {
     e("; " + typeName(f.ret) + " " + f.name + "(" + sig + ")");
     e("; " + f.pos.file + ":" + S(f.pos.line));
     lab(f.name);
-    // The frame is the space below __sp. D1 takes its base, and __sp moves
-    // down past it, through the address adder.
+    // The frame is the space below D3, and D3 moves down past it through
+    // the address adder. D3 is then the frame's base for the whole body.
     const int own = localBytes_ + saveBytes_ + dSaveBytes_;
-    op("LD D1 <- [" + S(ZP_SP) + "]");
-    if (own > 0) {
-      op("LD D1 <- D1-" + S(own));
-      op("LD [" + S(ZP_SP) + "] <- D1");
-    }
+    if (own > 0) op("LD D3 <- D3-" + S(own));
+    // The heap stack check. stackPlan() keeps it only where it is needed:
+    // in a function that can recurse, or that is called from assembly.
+    curFunc_ = f.name;
+    frameOf_[f.name] = frameSize_;
+    fnOrder_.push_back(f.name);
+    callees_[f.name];
+    op("LD D2 <- D3-" + checkLabel(f.name));
+    op("JNC __stack_overflow");
 
     genStmt(f.body);
 
@@ -928,14 +1138,11 @@ class Gen {
     return false;
   }
 
-  // D1 is still the frame base here: every call puts it back. The frame
+  // D3 is still the frame base here: every callee puts it back. The frame
   // and the arguments the caller wrote below it go in one step. A return
-  // writes this in place, which costs two lines and saves a jump.
+  // writes this in place, which costs a line and saves a jump.
   void epilogue() {
-    if (frameSize_ > 0) {
-      op("LD D1 <- D1+" + S(frameSize_));
-      op("LD [" + S(ZP_SP) + "] <- D1");
-    }
+    if (frameSize_ > 0) op("LD D3 <- D3+" + S(frameSize_));
     op("RET");
   }
 
@@ -1013,7 +1220,7 @@ class Gen {
             bytes.push_back(0);
             for (size_t i = 0; i < bytes.size(); i++) {
               op("LD A <- " + S(bytes[i]));
-              op("LD [D1+" + S(sym.offset + static_cast<int>(i)) + "] <- A");
+              op("LD [D3+" + S(sym.offset + static_cast<int>(i)) + "] <- A");
             }
             return;
           }
@@ -1202,6 +1409,7 @@ class Gen {
         e(std::string("        ") + BARRIER_MARK);
         e("        " + s.text);
         e(std::string("        ") + BARRIER_MARK);
+        asmText_.push_back(s.text);
         return;
     }
   }
@@ -1246,7 +1454,7 @@ class Gen {
   }
 
   // A value the instructions can name directly, with no evaluation into a
-  // temp: a constant, a local at [D1+n], or a global in the zero page. The
+  // temp: a constant, a local at [D3+n], or a global in the zero page. The
   // ALU takes all three as its operand. width is the width the value is
   // used at. A byte used as a word needs its high byte made: 0 for an
   // unsigned one, a sign extension for a signed one, which is code, so a
@@ -1266,7 +1474,7 @@ class Gen {
     const bool frame = s->where == Sym::Where::Frame;
     if (!frame && !inZeroPage(*s)) return std::nullopt;
     auto at = [&](int k) {
-      if (frame) return "[D1+" + S(s->offset + k) + "]";
+      if (frame) return "[D3+" + S(s->offset + k) + "]";
       return k ? "[" + s->label + "+" + S(k) + "]" : "[" + s->label + "]";
     };
     const int size = s->type.ptr > 0 ? 2 : sizeOf(s->type);
@@ -1527,21 +1735,21 @@ class Gen {
   void storeFrame(int offset, int size, int slot) {
     if (size == 1) {
       op("LD A <- " + lo(slot));
-      op("LD [D1+" + S(offset) + "] <- A");
+      op("LD [D3+" + S(offset) + "] <- A");
       return;
     }
     op("LD D2 <- " + word(slot));
-    op("LD [D1+" + S(offset) + "] <- D2");
+    op("LD [D3+" + S(offset) + "] <- D2");
   }
 
   void loadFrame(int offset, int size, int slot) {
     use(slot);
     if (size == 1) {
-      op("LD A <- [D1+" + S(offset) + "]");
+      op("LD A <- [D3+" + S(offset) + "]");
       op("LD " + lo(slot) + " <- A");
       return;
     }
-    op("LD D2 <- [D1+" + S(offset) + "]");
+    op("LD D2 <- [D3+" + S(offset) + "]");
     op("LD " + word(slot) + " <- D2");
   }
 
@@ -1789,8 +1997,8 @@ class Gen {
       op("LD " + word(slot) + " <- D2");
       return;
     }
-    // A frame address is D1 plus the offset, which the address adder makes.
-    op("LD D2 <- D1+" + S(s.offset));
+    // A frame address is D3 plus the offset, which the address adder makes.
+    op("LD D2 <- D3+" + S(s.offset));
     op("LD " + word(slot) + " <- D2");
   }
 
@@ -1811,11 +2019,11 @@ class Gen {
     const Sym* s = find(e.name);
     if (!s || romSyms_.count(e.name)) return "";
     if (s->type.arrayLen) {
-      if (s->where == Sym::Where::Frame) return "LD D2 <- D1+" + S(s->offset);
+      if (s->where == Sym::Where::Frame) return "LD D2 <- D3+" + S(s->offset);
       return "LD D2 <- " + s->label;
     }
     if (s->type.ptr == 0 && sizeOf(s->type) != 2) return "";
-    if (s->where == Sym::Where::Frame) return "LD D2 <- [D1+" + S(s->offset) + "]";
+    if (s->where == Sym::Where::Frame) return "LD D2 <- [D3+" + S(s->offset) + "]";
     return "LD D2 <- [" + s->label + "]";
   }
 
@@ -2067,7 +2275,7 @@ class Gen {
       if (s.type.arrayLen) fail(e.pos, s.name + " is an array and cannot be assigned");
       const bool frame = s.where == Sym::Where::Frame;
       auto destAt = [&](int k) {
-        if (frame) return "[D1+" + S(s.offset + k) + "]";
+        if (frame) return "[D3+" + S(s.offset + k) + "]";
         return k ? "[" + s.label + "+" + S(k) + "]" : "[" + s.label + "]";
       };
       const int size = target.ptr > 0 ? 2 : sizeOf(target);
@@ -2695,12 +2903,9 @@ class Gen {
     for (int i = 0; i < slot; i++) spill(i, true);
     for (int i = 0; i < dLive_; i++) spillDouble(i, true);
     if (bytes > 0) {
-      // __sp is D1 between calls, so the arguments' space starts below it.
-      op("LD D2 <- D1-" + S(bytes));
-      op("LD [" + S(ZP_SP) + "] <- D2");
-      // Bytes and frame words go through A first, while D1 is still the
-      // frame. A word from a temp or a constant then goes through D1, whole:
-      // the call is next, and D1 is loaded again after it.
+      // The arguments go below the frame, through D2, while D3 is still
+      // the frame. A byte goes through A. A word goes through D1, whole.
+      op("LD D2 <- D3-" + S(bytes));
       std::vector<size_t> viaD1;
       for (size_t i = 0; i < e.args.size(); i++) {
         const CType pt = i < f.params.size() ? f.params[i].type : T(BaseType::Int);
@@ -2713,7 +2918,7 @@ class Gen {
           op("LD D2 <- D2+" + S(at));
           op("LD " + word(slot) + " <- D2");
           moveDyn(emitter(), Where::zp(tempLabel(slot)), Where::at(slotAt(*dOf[i])));
-          op("LD D2 <- [" + S(ZP_SP) + "]");
+          op("LD D2 <- D3-" + S(bytes));
           continue;
         }
         const Side v = leafOf[i] ? *leafOf[i] : sideOf(si);
@@ -2722,8 +2927,8 @@ class Gen {
         } else if (size == 1) {
           op("LD A <- " + v.lo);
           op("LD [D2+" + S(at) + "] <- A");
-        } else if (leafOf[i] && !leafOf[i]->imm && (v.lo.find("D1") != std::string::npos || v.hi == "0")) {
-          // A frame word, or an unsigned byte passed as a word.
+        } else if (leafOf[i] && !leafOf[i]->imm && v.hi == "0") {
+          // An unsigned byte passed as a word.
           op("LD A <- " + v.hi);
           op("LD [D2+" + S(at) + "] <- A");
           op("LD A <- " + v.lo);
@@ -2746,9 +2951,10 @@ class Gen {
         }
         op("LD [D2+" + S(at) + "] <- D1");
       }
+      op("LD D3 <- D3-" + S(bytes));
     }
+    callees_[curFunc_].insert(name);
     op("JSR " + name);
-    op("LD D1 <- [" + S(ZP_SP) + "]");
     for (int i = 0; i < slot; i++) spill(i, false);
     for (int i = 0; i < dLive_; i++) spillDouble(i, false);
     if (sizeOf(f.ret) == 1 && f.ret.ptr == 0) {
@@ -2769,7 +2975,7 @@ class Gen {
     const int at = localBytes_ + saveBytes_ + i * DSIZE;
     const int scratch = maxSlot_ + 1;
     use(scratch);
-    op("LD " + word(scratch) + " <- D1");
+    op("LD " + word(scratch) + " <- D3");
     if (at != 0) {
       op("LD A <- " + lo(scratch));
       op("ADD A <- " + S(at & 0xff));
@@ -2787,9 +2993,9 @@ class Gen {
     const int at = localBytes_ + i * 2;
     if (out) {
       op("LD D2 <- " + word(i));
-      op("LD [D1+" + S(at) + "] <- D2");
+      op("LD [D3+" + S(at) + "] <- D2");
     } else {
-      op("LD D2 <- [D1+" + S(at) + "]");
+      op("LD D2 <- [D3+" + S(at) + "]");
       op("LD " + word(i) + " <- D2");
     }
   }
@@ -3390,12 +3596,12 @@ std::vector<int> templateArgWidths(const std::vector<uint8_t>& tmpl) {
 
 Compiled compileUnit(const std::string& src, const std::string& file) {
   const Unit unit = parse(src, file);
-  return Gen(unit, false, nullptr, 0, nullptr).compile();
+  return Gen(unit, false, nullptr, 0, nullptr, 0).compile();
 }
 
 Compiled compileUnitTree(const Unit& unit, bool softMul, const Profile* profile, int zpReserve,
-                         const Assets* assets) {
-  return Gen(unit, softMul, profile, zpReserve, assets).compile();
+                         const Assets* assets, int heapStackSize) {
+  return Gen(unit, softMul, profile, zpReserve, assets, heapStackSize).compile();
 }
 
 }  // namespace sc8::cc

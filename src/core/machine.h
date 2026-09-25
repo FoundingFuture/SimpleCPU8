@@ -202,7 +202,7 @@ class Machine {
   AluOut alu(AluOp op) const;
   uint16_t effectiveAddress(const Row& row);
   uint16_t stackAddress(const Row& row) const;
-  bool eaWrapped_ = false;  // the last sum left 0 to $FFFF, for EA_FLAGS
+  bool eaCarry_ = false;  // the last sum carried out of bit 15, for EA_FLAGS
   void finishInstruction();
   void rebuildDispatch();
 

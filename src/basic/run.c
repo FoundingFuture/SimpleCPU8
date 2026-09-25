@@ -458,10 +458,10 @@ static unsigned char statement(void)
      * PEEK(4) reads it. JSR is the same word, spelled the way the machine
      * spells it. JMP n goes there and never comes back. The slot is
      * parked at SYS_CALL first, because inline assembly cannot name a C
-     * local. The frame pointer is put back from __sp after the call, as
-     * bang.c does. A name in place of the number is what a project build
-     * resolves to a slot before the program reaches the ROM. Here it is a
-     * syntax error, the way any unknown word in an expression is.
+     * local. The routine keeps D3, the C frame pointer, as bang.c says.
+     * A name in place of the number is what a project build resolves to a
+     * slot before the program reaches the ROM. Here it is a syntax error,
+     * the way any unknown word in an expression is.
      */
     if (lx_is("CALL") || lx_is("JSR")) {
         lx_next();
@@ -475,7 +475,6 @@ static unsigned char statement(void)
             asm("JSR D2");
             asm("LD D1 <- $0004");
             asm("LD [D1] <- A");
-            asm("LD D1 <- [__sp]");
             return 1;
         }
     }

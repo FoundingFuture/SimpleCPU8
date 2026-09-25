@@ -7,12 +7,15 @@
 //   -D NAME[=VALUE]  a preprocessor definition, as on any cc command line
 //   -msoft-mul       multiply, divide and shift on the CPU, not the ACP
 //   -zp-reserve N    leave the first N bytes of the zero page to the program
+//   --heap-stack-size N  the C stack's size in RAM, as 4096 or 4K. The
+//                    default is all the RAM the program's data leaves
 //   --rom-header f   also write ROM.h, the cartridge map, to f
 //
 // __image, __sprite, __palette, __sample and __file name a file beside the
 // first source file.
 
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -54,6 +57,18 @@ int main(int argc, char** argv) {
       opts.zpReserve = std::stoi(argv[++i]);
       continue;
     }
+    if (a == "--heap-stack-size" && i + 1 < argc) {
+      const std::string v = argv[++i];
+      char* end = nullptr;
+      const long n = std::strtol(v.c_str(), &end, 0);
+      const long bytes = (*end == 'K' || *end == 'k') ? n * 1024 : n;
+      if (end == v.c_str() || bytes < 1 || bytes > 65535) {
+        std::fprintf(stderr, "--heap-stack-size takes a number of bytes, as 4096 or 4K\n");
+        return 2;
+      }
+      opts.heapStackSize = static_cast<int>(bytes);
+      continue;
+    }
     if (a == "-msoft-mul") {
       opts.defines["SOFT_MUL"] = "1";
       continue;
@@ -73,7 +88,8 @@ int main(int argc, char** argv) {
     inputs.push_back({a, std::string(std::istreambuf_iterator<char>(in), {})});
   }
   if (inputs.empty()) {
-    std::fprintf(stderr, "usage: simplecpu-cc <file.c>... [-o out.asm] [-D NAME[=VALUE]] [-msoft-mul] [-zp-reserve N] [--rom-header ROM.h]\n");
+    std::fprintf(stderr, "usage: simplecpu-cc <file.c>... [-o out.asm] [-D NAME[=VALUE]] [-msoft-mul] [-zp-reserve N]\n"
+                         "                   [--heap-stack-size BYTES] [--rom-header ROM.h]\n");
     return 2;
   }
   const fs::path dir = fs::path(inputs.front().path).parent_path();

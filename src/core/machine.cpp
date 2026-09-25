@@ -296,14 +296,14 @@ uint16_t Machine::effectiveAddress(const Row& row) {
   else if (has(row, S::ADDR_D2)) base = d2;
   else if (has(row, S::ADDR_D3)) base = d3;
   else if (has(row, S::ADDR_A)) base = acc;
-  // Signed, so the sum can say whether it wrapped. A sixteen bit offset is
-  // two's complement: $FFF4 is -12, which is how D3-12 is written.
-  long ea = static_cast<long>(base);
+  // The adder is sixteen bits wide and every input is unsigned. D3-12 is
+  // D3 plus $FFF4, which carries out of bit 15 unless D3 was below 12.
+  unsigned ea = base;
   if (has(row, S::EA_OFF_OP8)) ea += irOperand & 0xff;
-  if (has(row, S::EA_OFF_OP16)) ea += static_cast<int16_t>(irOperand);
+  if (has(row, S::EA_OFF_OP16)) ea += irOperand;
   if (has(row, S::EA_OFF_A)) ea += acc;
   if (has(row, S::EA_CIN)) ea += 1;
-  eaWrapped_ = ea < 0 || ea > 0xffff;
+  eaCarry_ = ea > 0xffff;
   // No address is illegal. The adder masks to 16 bits and RAM is 64KB, so a
   // pointer walked off the end wraps to zero.
   ea &= 0xffff;
@@ -420,12 +420,13 @@ bool Machine::executeRow(const Row& row, const RowInfo& info) {
       case S::D1_LOAD_EA: writes.push(T::D1, ea); break;
       case S::D2_LOAD_EA: writes.push(T::D2, ea); break;
       case S::D3_LOAD_EA: writes.push(T::D3, ea); break;
-      // Z from the sum, C when it wrapped past either end of memory. After
-      // LD D2 <- D3-FLOOR, C set means D3 was below FLOOR, as after CMP.
+      // Z from the sum, C from the adder's carry out of bit 15. A negative
+      // offset is a large one, so after LD D2 <- D3-FLOOR, C clear means D3
+      // was below FLOOR: the carry is the inverse of a borrow.
       case S::EA_FLAGS: {
         Flags f = flags;
         f.z = ea == 0;
-        f.c = eaWrapped_;
+        f.c = eaCarry_;
         writes.pushFlags(f);
         break;
       }

@@ -375,7 +375,8 @@ void Preprocessor::file(const std::string& src, const std::string& fileName) {
       if (!seen) included_.push_back(name);
       file(*text2, name);
     } else if (dir == "pragma") {
-      // pragma once is unnecessary: a header guards itself
+      // pragma once is unnecessary: a header guards itself. #pragma
+      // heap_stack_size is read by the driver, which sees every file.
     } else if (dir == "error") {
       if (live()) throw CcError(fileName, lineNo, trim(rest).empty() ? "#error" : trim(rest));
     } else {

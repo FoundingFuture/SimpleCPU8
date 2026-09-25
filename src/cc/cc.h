@@ -49,6 +49,10 @@ struct CcOptions {
   // BASIC reaches them by instruction slot, with CALL. main belongs to the
   // host, so a main in one of these files is refused.
   std::set<std::string> keepAllFrom;
+  // The heap stack's size in bytes: the C stack in RAM, under D3, that holds
+  // parameters and locals. 0 gives it every byte between the program's
+  // data and the text screen.
+  int heapStackSize = 0;
 };
 
 struct Program : Compiled {

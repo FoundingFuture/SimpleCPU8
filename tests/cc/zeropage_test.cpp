@@ -40,15 +40,16 @@ int temps(const std::string& src) {
 }  // namespace
 
 TEST_SUITE("the compiler's own reservations come first") {
-  TEST_CASE("puts the stack pointer at the very bottom") {
+  TEST_CASE("puts the return word at the very bottom: the stack pointer is D3, not a zero page word") {
     const std::vector<cc::ZpEntry> map = zp("int main(void){return 0;}");
-    CHECK(map[0].name == "__sp");
+    CHECK(map[0].name == "__ret");
     CHECK(map[0].addr == 0);
+    CHECK(entry(map, "__sp") == nullptr);
   }
 
   TEST_CASE("reserves the return word, the compare byte and the runtime operands") {
     const std::vector<cc::ZpEntry> map = zp("int main(void){return 0;}");
-    for (const char* n : {"__sp", "__ret", "__cmp", "__ra", "__rb"}) CHECK_MESSAGE(entry(map, n) != nullptr, n);
+    for (const char* n : {"__ret", "__cmp", "__ra", "__rb"}) CHECK_MESSAGE(entry(map, n) != nullptr, n);
   }
 
   TEST_CASE("reserves one temp slot per level of the deepest expression") {
@@ -273,8 +274,8 @@ TEST_SUITE("a system page ahead of the compiler") {
     CHECK(p.zeroPage[0].name == "__sys");
     CHECK(p.zeroPage[0].addr == 0);
     CHECK(p.zeroPage[0].size == 32);
-    const cc::ZpEntry* sp = entry(p.zeroPage, "__sp");
-    REQUIRE(sp);
-    CHECK(sp->addr == 32);
+    const cc::ZpEntry* ret = entry(p.zeroPage, "__ret");
+    REQUIRE(ret);
+    CHECK(ret->addr == 32);
   }
 }

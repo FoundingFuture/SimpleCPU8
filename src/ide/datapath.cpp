@@ -119,7 +119,7 @@ const Card CARDS[] = {
      "the addressing math is done. The EA adder computes it fresh, every cycle, from three ingredients: a "
      "base, an optional offset, and an optional carry-in. D1_LOAD_EA, D2_LOAD_EA and D3_LOAD_EA keep the sum "
      "in a D register instead, which is how LD D1 <- D1+8 steps a pointer by any amount. EA_FLAGS sets Z from "
-     "the sum and C when it wrapped past either end of memory."},
+     "the sum and C from the adder's carry out of bit 15."},
     {"D1", "D1 · pointer register", "register · remembers across cycles",
      "A 16 bit pointer register. It can load whole from the operand (D1_LOAD_OP16), or one byte half at a "
      "time from RAM or the stack, high half then low half, matching the machine's big-endian words."},

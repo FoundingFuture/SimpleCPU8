@@ -94,29 +94,35 @@ done:   HLT
 ; mul8: [prodhi][prodlo] = [mcand] * [mplier]. Both operands survive the
 ; call, so the caller can still print them.
 ;
-; Low bit first. SHR drops the multiplier's bit 0 into C. When it is set,
-; the multiplicand goes into the product's high byte, and the carry out of
-; that add lands in C. ROR brings C back in at the top of the high byte, and
-; the high byte's bit 0 comes out into C. A second ROR walks it into the
-; top of the low byte, which still holds the multiplier's unused bits, and
-; the next multiplier bit comes out into C for the next pass. Eight passes
-; and the multiplier is gone, the product in its place.
+; Low bit first. TST reads the multiplier's bit 0. When it is set, the
+; multiplicand goes into the product's high byte, and the carry out of that
+; add lands in C. ROR brings C back in at the top of the high byte, and the
+; high byte's bit 0 comes out into C. A second ROR walks it into the top of
+; the low byte, which still holds the multiplier's unused bits. When the bit
+; is clear, SHR brings in 0 instead. Eight passes and the multiplier is
+; gone, the product in its place.
 ;
 ; The pass count is D2 counting up from -8. LD D2 <- D2+1 sets Z when it
-; reaches zero and leaves C alone, which a SUB would not.
+; reaches zero. It also sets C, which is why the next multiplier bit is
+; tested with TST rather than carried from one pass to the next in C.
 mul8:   LD A <- [mplier]
-        SHR A                          ; C = bit 0 of the multiplier
         LD [prodlo] <- A
-        LD D2 <- $FFF8                 ; -8
-        LD A <- 0                      ; the high byte builds in A
-m8lp:   JNC m8sh
-        ADD A <- [mcand]               ; C = the carry out
-m8sh:   ROR A                          ; which comes back in at the top
+        LD A <- 0
         LD [prodhi] <- A
+        LD D2 <- $FFF8                 ; -8
+m8lp:   LD A <- [prodlo]
+        TST A, 1                       ; the multiplier's next bit
+        JZ m8no
+        LD A <- [prodhi]
+        ADD A <- [mcand]               ; C = the carry out
+        ROR A                          ; which comes back in at the top
+        JMP m8lo
+m8no:   LD A <- [prodhi]
+        SHR A                          ; 0 in at the top
+m8lo:   LD [prodhi] <- A
         LD A <- [prodlo]
         ROR A                          ; a product bit in, a multiplier bit out
         LD [prodlo] <- A
-        LD A <- [prodhi]               ; a load leaves C alone
         LD D2 <- D2+1
         JNZ m8lp
         RET

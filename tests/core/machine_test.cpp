@@ -303,33 +303,40 @@ TEST_SUITE("compare, test, shift and address arithmetic") {
     m = runBoth({ins("LD D1 <- imm16", 8), ins("LD D1 <- D1+n", 0xfff8)});
     CHECK_EQ(m.d1, 0);
     CHECK(m.flags.z);
-    // The sum wraps at 16 bits, and C says it wrapped.
+    // The sum wraps at 16 bits, and C is the carry out of bit 15.
     m = runBoth({ins("LD D2 <- imm16", 0xffff), ins("LD D2 <- D2+n", 2)});
     CHECK_EQ(m.d2, 1);
     CHECK(m.flags.c);
   }
 
-  TEST_CASE("an address add sets C when it wraps past either end, and clears it otherwise") {
-    // Below zero: $0008 - 12.
-    Machine m = runBoth({ins("LD D1 <- imm16", 8), ins("LD D2 <- D1+n", 0xfff4)});
+  TEST_CASE("an address add sets C from the carry out of bit 15") {
+    // $0008 - 12 is $0008 + $FFF4, which does not carry: it went below zero.
+    Machine m = runBoth({ins("LD A <- imm8", 0xff), ins("ADD A <- imm8", 1), ins("LD D1 <- imm16", 8),
+                         ins("LD D2 <- D1+n", 0xfff4)});
     CHECK_EQ(m.d2, 0xfffc);
-    CHECK(m.flags.c);
-    // Not below: C is cleared even when it was set before.
-    m = runBoth({ins("LD A <- imm8", 0xff), ins("ADD A <- imm8", 1), ins("LD D1 <- imm16", 12),
-                 ins("LD D2 <- D1+n", 0xfff4)});
+    CHECK(!m.flags.c);
+    // $000C - 12 carries, and lands on zero.
+    m = runBoth({ins("LD D1 <- imm16", 12), ins("LD D2 <- D1+n", 0xfff4)});
     CHECK_EQ(m.d2, 0);
     CHECK(m.flags.z);
-    CHECK(!m.flags.c);
+    CHECK(m.flags.c);
     // N and V are left alone.
     m = runBoth({ins("LD A <- imm8", 0x7f), ins("ADD A <- imm8", 1), ins("LD D1 <- imm16", 1), ins("LD D1 <- D1+n", 1)});
     CHECK(m.flags.n);
     CHECK(m.flags.v);
   }
 
-  TEST_CASE("the stack check: D3 minus the floor sets C when D3 is below it") {
-    for (const auto& [d3, below] : {std::pair<uint16_t, bool>{0x2000, false}, {0x1fff, true}, {0x2001, false}}) {
-      Machine m = runBoth({ins("LD D1 <- imm16", d3), ins("LD D3 <- D1+n", 0), ins("LD D2 <- D3+n", 0xe000)});
-      CHECK_EQ(m.flags.c, below);
+  TEST_CASE("the stack check: D3 minus the floor clears C when D3 is below it") {
+    // Floors either side of $8000, where a sixteen bit offset turns negative.
+    for (const uint16_t floor : {uint16_t{0x2000}, uint16_t{0xEAC0}}) {
+      for (const int delta : {-1, 0, 1}) {
+        const auto d3 = static_cast<uint16_t>(floor + delta);
+        Machine m = runBoth({ins("LD D1 <- imm16", d3), ins("LD D3 <- D1+n", 0),
+                             ins("LD D2 <- D3+n", static_cast<uint16_t>(0x10000 - floor))});
+        CAPTURE(floor);
+        CAPTURE(delta);
+        CHECK_EQ(m.flags.c, delta >= 0);
+      }
     }
   }
 }

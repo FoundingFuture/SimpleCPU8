@@ -194,15 +194,18 @@ Line parse(const std::string& raw) {
 }
 
 // A memory operand or an immediate whose value can be remembered: a zero
-// page label, a temp, or a frame slot [D1+n]. Not a pointer's target and
-// not a post-increment, which move.
+// page label, a temp, or a frame slot [D3+n]. Not a pointer's target and
+// not a post-increment, which move. D3 moves only in lines this pass treats
+// as barriers, so a frame slot names one byte between them.
 std::string keyOf(const std::string& operand) {
   if (operand.empty()) return "";
   if (operand.front() != '[') return "#" + operand;
   if (operand.back() != ']') return "";
   const std::string inner = operand.substr(1, operand.size() - 2);
-  if (inner == "A" || inner.find("D2") != std::string::npos || inner.find("+A") != std::string::npos) return "";
-  if (inner.find("D1") != std::string::npos && inner.rfind("D1+", 0) != 0) return "";
+  if (inner == "A" || inner.find("D1") != std::string::npos || inner.find("D2") != std::string::npos ||
+      inner.find("+A") != std::string::npos) {
+    return "";
+  }
   return operand;
 }
 
@@ -412,7 +415,7 @@ class Pass {
         if (l.writesA || l.setsZ || l.setsN) flagsMatchA = l.writesA && l.setsZ && l.setsN;
         if (!l.wordStore.empty()) {
           const std::string base = baseOf(l.wordStore);
-          if (isTempBase(base) || (keyOf(l.wordStore) == l.wordStore && base.rfind("D1", 0) != 0)) {
+          if (isTempBase(base) || (keyOf(l.wordStore) == l.wordStore && base.rfind("D3", 0) != 0)) {
             dropIf([&](const std::string& k) { return baseOf(k) == base; });
           } else {
             dropIf([](const std::string& k) { return k[0] == '[' && !isTempBase(baseOf(k)); });
@@ -455,7 +458,12 @@ class Pass {
     auto wordKey = [](const std::string& operand) -> std::string {
       if (operand.empty()) return "";
       if (operand.front() != '[') {
-        if (operand.find("D1") != std::string::npos || operand.find("D2") != std::string::npos) return "";
+        // An address add sets C as well as Z, and a check reads it, so it is
+        // never taken for a known value.
+        if (operand.find("D1") != std::string::npos || operand.find("D2") != std::string::npos ||
+            operand.find("D3") != std::string::npos) {
+          return "";
+        }
         return "#" + operand;
       }
       return keyOf(operand);
@@ -466,7 +474,10 @@ class Pass {
       if (x.find("D2") != std::string::npos || x.find("[A]") != std::string::npos) {
         dropIf([](const std::string& k) { return k[0] == '[' && !isTempBase(baseOf(k)); });
       } else if (base.rfind("D1", 0) == 0) {
-        dropIf([](const std::string& k) { return k.find("D1") != std::string::npos; });
+        // Through a pointer: any byte but a temp may be the one.
+        dropIf([](const std::string& k) { return k[0] == '[' && !isTempBase(baseOf(k)); });
+      } else if (base.rfind("D3", 0) == 0) {
+        dropIf([](const std::string& k) { return k.find("D3") != std::string::npos; });
       } else {
         dropIf([&](const std::string& k) { return baseOf(k) == base; });
       }

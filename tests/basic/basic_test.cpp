@@ -997,8 +997,7 @@ TEST_SUITE("USR") {
     TempProject p;
     p.write("plus.asm",
             ".org $F000\n"
-            "PLUS1:  LD D1 <- [__sp]\n"
-            "        LD A <- [D1+1]\n"
+            "PLUS1:  LD A <- [D3+1]\n"
             "        INC A\n"
             "        LD [__ret+1] <- A\n"
             "        LD A <- 0\n"

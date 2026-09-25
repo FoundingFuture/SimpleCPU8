@@ -123,29 +123,26 @@ static int fn_call(void)
         lx_next();
         if (err) return 0;
         if (width < 0 || width > 2) { rt_error(E_USRWIDTH); return 0; }
-        /* Save __sp on the machine stack, make six bytes of room on the
-         * software stack and copy the three words into it. */
-        asm("LD D2 <- [__sp]");
+        /* D3 is saved on the machine stack. A C function drops its own
+         * parameters on return and an assembly routine drops none, so D3
+         * comes back from there rather than by arithmetic. Then six bytes
+         * of room below it, and the three words copied in. The routine
+         * finds them at [D3+0]. */
+        asm("LD D2 <- D3");
         asm("PUSHW D2");
-        asm("LD A <- [__sp+1]");
-        asm("ADD A <- 250");
-        asm("LD [__sp+1] <- A");
-        asm("LD A <- [__sp]");
-        asm("ADC A <- 255");
-        asm("LD [__sp] <- A");
-        asm("LD D2 <- [__sp]");
+        asm("LD D3 <- D3-6");
         asm("LD A <- [$001A]");
-        asm("LD [D2+0] <- A");
+        asm("LD [D3+0] <- A");
         asm("LD A <- [$001B]");
-        asm("LD [D2+1] <- A");
+        asm("LD [D3+1] <- A");
         asm("LD A <- [$001C]");
-        asm("LD [D2+2] <- A");
+        asm("LD [D3+2] <- A");
         asm("LD A <- [$001D]");
-        asm("LD [D2+3] <- A");
+        asm("LD [D3+3] <- A");
         asm("LD A <- [$001E]");
-        asm("LD [D2+4] <- A");
+        asm("LD [D3+4] <- A");
         asm("LD A <- [$001F]");
-        asm("LD [D2+5] <- A");
+        asm("LD [D3+5] <- A");
         asm("LD D2 <- [$0018]");
         asm("JSR D2");
         /* The answer out of the return cells, then the stack back. */
@@ -154,8 +151,7 @@ static int fn_call(void)
         asm("LD A <- [__ret+1]");
         asm("LD [$001B] <- A");
         asm("POPW D2");
-        asm("LD [__sp] <- D2");
-        asm("LD D1 <- [__sp]");
+        asm("LD D3 <- D2");
         if (width == 0) return 0;
         if (width == 1) return peek(SYS_USR + 1);
         return (peek(SYS_USR) << 8) | peek(SYS_USR + 1);

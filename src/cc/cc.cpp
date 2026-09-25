@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <functional>
 #include <set>
+#include <sstream>
 
 #include "cc/headers.h"
 #include "cc/libs.h"
@@ -457,8 +458,33 @@ Program compileProgram(const std::vector<SourceFile>& files, const CcOptions& op
   merged.builds = m.builds;
   merged.included = m.included;
 
+  // #pragma heap_stack_size N in any source asks for N bytes, so a project
+  // carries its own size into the ROM. The command line's wins.
+  int heapStack = opts.heapStackSize;
+  if (heapStack == 0) {
+    for (const SourceFile& f : chosen) {
+      std::istringstream in(f.text);
+      std::string line;
+      int lineNo = 0;
+      while (std::getline(in, line)) {
+        lineNo++;
+        std::istringstream words(line);
+        std::string hash, name;
+        long value = 0;
+        words >> hash;
+        if (hash == "#pragma") words >> name;
+        else if (hash == "#") words >> hash >> name;
+        if (hash != "#pragma" && hash != "pragma") continue;
+        if (name != "heap_stack_size") continue;
+        if (!(words >> value) || value < 1 || value > 65535) {
+          throw CcError(f.name, lineNo, "#pragma heap_stack_size takes a number of bytes, 1 to 65535");
+        }
+        heapStack = static_cast<int>(value);
+      }
+    }
+  }
   const Compiled out = compileUnitTree(merged, plan.softMul || opts.defines.count("SOFT_MUL") > 0, opts.profile,
-                                       opts.zpReserve, opts.assets);
+                                       opts.zpReserve, opts.assets, heapStack);
   Program p;
   static_cast<Compiled&>(p) = out;
   for (const SourceFile& f : chosen) p.files.push_back(f.name);
