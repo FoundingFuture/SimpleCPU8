@@ -9,18 +9,22 @@
         LD [y] <- A
 yloop:  LD A <- [y]
         OUTA GPU_Y
-; x lives in A for the whole row. OUT and OUTA leave A alone, so nothing
-; stores it and nothing loads it back.
         LD A <- 0
-xloop:  OUTA GPU_X
+        LD [x] <- A
+xloop:  LD A <- [x]
+        OUTA GPU_X
         OUTA GPU_PIXEL      ; color = x, one band per palette entry
         OUT GPU_CMD, CMD_PLOT
+        LD A <- [x]
         INC A
-        JNZ xloop           ; x wrapped: this row is done
-        LD A <- [y]
+        LD [x] <- A
+        JZ nextrow          ; x wrapped: this row is done
+        JMP xloop
+nextrow: LD A <- [y]
         INC A
         LD [y] <- A
-        JNZ yloop           ; y wrapped: the screen is full
+        JZ recolor          ; y wrapped: the screen is full
+        JMP yloop
 
 ; Grayscale: entry i becomes (i, i, i). A palette is 768 bytes, so it moves
 ; through memory rather than a byte at a time through a port. Build it with
@@ -31,12 +35,17 @@ xloop:  OUTA GPU_X
 ; RAM, and now it can.
 recolor: OUT GPU_CMD_MOD, 0   ; back to clearing, now the gradient is done
         LD D1 <- palbuf
-        LD A <- 0           ; i, kept in A the same way
-ploop:  LD [D1]+ <- A       ; red
+        LD A <- 0
+        LD [i] <- A
+ploop:  LD A <- [i]
+        LD [D1]+ <- A       ; red
         LD [D1]+ <- A       ; green
         LD [D1]+ <- A       ; blue
+        LD A <- [i]
         INC A
-        JNZ ploop
+        LD [i] <- A
+        JZ install
+        JMP ploop
 
 install: OUT GPU_MAP, MAP_PALETTE_IN
         OUT GPU_MAP_HI, palbuf >> 8
@@ -46,6 +55,8 @@ install: OUT GPU_MAP, MAP_PALETTE_IN
 done:   HLT
 
 .ram
+x: db 0
 y: db 0
+i: db 0
 ; 768 bytes for the palette, named without storing anything there.
 palbuf: .addr($1000)

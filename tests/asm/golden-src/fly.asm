@@ -41,8 +41,9 @@ rloop:  LD A <- [ri]
         LD A <- [ri]
         ADD A <- 1
         LD [ri] <- A
-        CMP A, 4
-        JNZ rloop
+        SUB A <- 4
+        JZ rdone
+        JMP rloop
 rdone:
 
 ; ---- one mesh, eight placements ----
@@ -80,23 +81,23 @@ rdone:
 loop:   IN IO_CONTROLLER -> A
         LD [pad] <- A
 
-        TST A, BTN_LEFT
+        AND A <- BTN_LEFT
         JZ nleft
         JSR yawleft
 nleft:  LD A <- [pad]
-        TST A, BTN_RIGHT
+        AND A <- BTN_RIGHT
         JZ nright
         JSR yawright
 nright: LD A <- [pad]
-        TST A, BTN_UP
+        AND A <- BTN_UP
         JZ nup
         JSR forward
 nup:    LD A <- [pad]
-        TST A, BTN_DOWN
+        AND A <- BTN_DOWN
         JZ ndown
         JSR backward
 ndown:  LD A <- [pad]
-        TST A, BTN_FIRE
+        AND A <- BTN_FIRE
         JZ nfire
         JSR riseup
 nfire:
@@ -130,41 +131,57 @@ hud:    LD A <- [cyaw]
         RET
 
 ; Turning is one 16-bit add to the camera's yaw. It wraps at a full turn on
-; its own, because the field is exactly 16 bits wide. A D register adds a
-; whole word through the address adder in one instruction, so the word goes
-; into D2, takes the step and goes back. The step is 400, and D2-400 is the
-; turn the other way.
-yawleft: LD D2 <- [cyaw]
-        LD D2 <- D2-400
-        LD [cyaw] <- D2
+; its own, because the field is exactly 16 bits wide.
+; 400 is 0x0190, and ADD takes a byte, so the step is split across the carry
+; chain: the low byte takes 0x90 and the high byte takes 1 plus the borrow.
+yawleft: LD A <- [cyaw+1]
+        SUB A <- $90
+        LD [cyaw+1] <- A
+        LD A <- [cyaw]
+        SBC A <- 1
+        LD [cyaw] <- A
         RET
 
-yawright: LD D2 <- [cyaw]
-        LD D2 <- D2+400
-        LD [cyaw] <- D2
+yawright: LD A <- [cyaw+1]
+        ADD A <- $90
+        LD [cyaw+1] <- A
+        LD A <- [cyaw]
+        ADC A <- 1
+        LD [cyaw] <- A
         RET
 
 ; Moving straight along -Z is enough to show the world go by, and it keeps
 ; this demo about the renderer rather than about trigonometry on the CPU.
-forward: LD D2 <- [cz]
-        LD D2 <- D2-24
-        LD [cz] <- D2
+forward: LD A <- [cz+1]
+        SUB A <- 24
+        LD [cz+1] <- A
+        LD A <- [cz]
+        SBC A <- 0
+        LD [cz] <- A
         RET
 
-backward: LD D2 <- [cz]
-        LD D2 <- D2+24
-        LD [cz] <- D2
+backward: LD A <- [cz+1]
+        ADD A <- 24
+        LD [cz+1] <- A
+        LD A <- [cz]
+        ADC A <- 0
+        LD [cz] <- A
         RET
 
-riseup: LD D2 <- [cy]
-        LD D2 <- D2+8
-        LD [cy] <- D2
+riseup: LD A <- [cy+1]
+        ADD A <- 8
+        LD [cy+1] <- A
+        LD A <- [cy]
+        ADC A <- 0
+        LD [cy] <- A
         RET
 
 waitframe: IN GPU_FRAME -> A
-        CMP A, [flast]
+        LD [fnow] <- A
+        SUB A <- [flast]
         JZ waitframe
-        LD [flast] <- A           ; CMP kept the frame in A
+        LD A <- [fnow]
+        LD [flast] <- A
         RET
 
 .ram
@@ -225,6 +242,7 @@ ramps:  db 96,255,160                  ; ramp 1, green
 pad:    db 0
 ri:     db 0
 args:   db 0, 0, 0, 0
+fnow:   db 0
 flast:  db 0
 
 .data

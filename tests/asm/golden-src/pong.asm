@@ -73,7 +73,7 @@ loop:   JSR pad
 ; --- the player's paddle, clamped to the court.
 pad:    IN IO_CONTROLLER -> A
         LD [pd] <- A
-        TST A, BTN_UP
+        AND A <- BTN_UP
         JZ pnu
         LD A <- [ly]
         JZ pnu                         ; already at the top
@@ -84,7 +84,8 @@ pnu:    LD A <- [pd]
         JZ pnd
         LD A <- [ly]
         SUB A <- 220
-        JNC pnd
+        JC pdok
+        JMP pnd
 pdok:   LD A <- [ly]
         ADD A <- 2
         LD [ly] <- A
@@ -94,7 +95,7 @@ pnd:    RET
 ; enough to beat and fast enough to be worth playing.
 ; SUB sets C as the borrow, so a borrow here means the ball is above.
 ai:     LD A <- [by]
-        CMP A, [ry]
+        SUB A <- [ry]
         JC aiup
         LD A <- [ry]
         SUB A <- 220
@@ -124,7 +125,7 @@ angle:  LD A <- [by]
         SUB A <- [pyt]
         SUB A <- 15
         LD [aoff] <- A
-        TST A, $80
+        AND A <- $80
         JZ adown
         LD A <- 0                      ; above the centre: it leaves upward
         SUB A <- [aoff]
@@ -137,10 +138,10 @@ adown:  LD A <- [aoff]
         LD A <- 0
         LD [aup] <- A
 azone:  LD A <- [amag]
-        CMP A, 7
+        SUB A <- 7
         JC amid
         LD A <- [amag]
-        CMP A, 15
+        SUB A <- 15
         JC aouter
         LD A <- 3                      ; the very end: steepest and fastest
         LD [ady] <- A
@@ -181,7 +182,7 @@ ball:   LD A <- [bdy]
         LD A <- [by]
         ADD A <- [bt]
         LD [by] <- A
-        CMP A, 251
+        SUB A <- 251
         JC bxmove
         LD A <- 0                      ; off the top or the bottom: turn round
         SUB A <- [bt]
@@ -211,7 +212,7 @@ bounce: OUT GPU_SPRITE, 1
         OUT GPU_SPRITE_B, 2
         OUT GPU_CMD, CMD_HIT_TEST
         IN GPU_HIT -> A
-        TST A, $FF                   ; IN sets no CPU flag, so mask first
+        AND A <- $FF                   ; IN sets no CPU flag, so mask first
         JZ bnol
         LD A <- [ly]                   ; where on the paddle it landed
         LD [pyt] <- A
@@ -227,7 +228,7 @@ bnol:   OUT GPU_SPRITE, 1
         OUT GPU_SPRITE_B, 3
         OUT GPU_CMD, CMD_HIT_TEST
         IN GPU_HIT -> A
-        TST A, $FF
+        AND A <- $FF
         JZ bnor
         LD A <- [ry]
         LD [pyt] <- A
@@ -245,7 +246,7 @@ bnor:
         SUB A <- 250
         JC bdone
         LD A <- [bdx]
-        TST A, $80                   ; the sign: set means it went left
+        AND A <- $80                   ; the sign: set means it went left
         JZ pscore
         LD A <- [cpu]
         ADD A <- 1
@@ -303,9 +304,11 @@ hud:    OUT GPU_CMD, CMD_TEXT_CLEAR
         RET
 
 waitframe: IN GPU_FRAME -> A
-        CMP A, [flast]
+        LD [fnow] <- A
+        SUB A <- [flast]
         JZ waitframe
-        LD [flast] <- A           ; CMP kept the frame in A
+        LD A <- [fnow]
+        LD [flast] <- A
         RET
 
 .ram
@@ -331,6 +334,7 @@ pd:     db 0
 args:
 you:    db 0
 cpu:    db 0
+fnow:   db 0
 flast:  db 0
 
 .data

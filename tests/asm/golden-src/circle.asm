@@ -21,8 +21,9 @@ fjloop: LD A <- [qd]
         LD [fqq] <- A
         JSR flook
         LD [sx] <- A
-        CMP A, 128
-        JNC fnext
+        SUB A <- 128
+        JC fdraw
+        JMP fnext
 fdraw:  LD A <- [qd]
         LD [fqq] <- A
         JSR flook
@@ -34,12 +35,14 @@ fdraw:  LD A <- [qd]
 fnext:  LD A <- [ang]
         ADD A <- 1
         LD [ang] <- A
-        JNZ fjloop
+        JZ fqnext
+        JMP fjloop
 fqnext: LD A <- [qd]
         ADD A <- 1
         LD [qd] <- A
-        CMP A, 4
-        JNZ fqloop
+        SUB A <- 4
+        JZ coarse
+        JMP fqloop
 
 ; coarse ring: 256 steps over the whole turn, plot only the right half
 coarse: LD A <- 0
@@ -48,7 +51,7 @@ cloop:  LD A <- [ang]
         ADD A <- 64
         JSR sinq
         LD [sx] <- A
-        CMP A, 128
+        SUB A <- 128
         JC cnext
         LD A <- [ang]
         JSR sinq
@@ -60,7 +63,8 @@ cloop:  LD A <- [ang]
 cnext:  LD A <- [ang]
         ADD A <- 1
         LD [ang] <- A
-        JNZ cloop
+        JZ paths
+        JMP cloop
 
 ; the 64 point circle as a path, three scales
 ; The blob leads with its point count, so each draw says only where to read.
@@ -99,51 +103,62 @@ ringat: OUT GPU_X, 128
 ; with the quarter point: sin = 1 or -1.
 flook:  LD A <- [fqq]
         JZ f0
-        CMP A, 1               ; CMP keeps the quadrant in A for the next test
+        SUB A <- 1
         JZ f1
-        CMP A, 2
+        SUB A <- 1
         JZ f2
         LD A <- [ang]
         JZ f3z
         LD A <- 0
         SUB A <- [ang]
         JSR lk2
-        XOR A <- $FF           ; negate: 256 - x is the inverse plus one
-        INC A
+        LD [t3] <- A
+        LD A <- 0
+        SUB A <- [t3]
         RET
 f3z:    LD A <- 1
         RET
 f2:     LD A <- [ang]
         JSR lk2
-        XOR A <- $FF
-        INC A
+        LD [t3] <- A
+        LD A <- 0
+        SUB A <- [t3]
         RET
 f1:     LD A <- [ang]
         JZ f1z
         LD A <- 0
         SUB A <- [ang]
-        JMP lk2                ; lk2 returns for us
+        JSR lk2
+        RET
 f1z:    LD A <- 255
         RET
 f0:     LD A <- [ang]
+        JSR lk2
+        RET
 lk2:    LD D1 <- qsin2
         LD A <- [D1+A]
         RET
 
 ; --- coarse lookup: sin of angle A in 256ths of a turn, from the
 ; 65 byte quarter table. Same folds, one byte of angle.
-sinq:   CMP A, 128
-        JC posq                ; the first half is posq itself
+sinq:   LD [st] <- A
         SUB A <- 128
+        JC spos
         JSR posq
-        XOR A <- $FF           ; the second half is its negative
-        INC A
+        LD [t2] <- A
+        LD A <- 0
+        SUB A <- [t2]
         RET
-posq:   CMP A, 65
-        JC plook               ; the first quarter reads the table directly
-        LD [t3] <- A
-        LD A <- 128            ; the second one reads it backwards
+spos:   LD A <- [st]
+        JSR posq
+        RET
+posq:   LD [t3] <- A
+        SUB A <- 65
+        JC pdir
+        LD A <- 128
         SUB A <- [t3]
+        JMP plook
+pdir:   LD A <- [t3]
 plook:  LD D1 <- qsin
         LD A <- [D1+A]
         RET
@@ -153,6 +168,8 @@ ang:    db 0
 qd:     db 0
 fqq:    db 0
 sx:     db 0
+st:     db 0
+t2:     db 0
 t3:     db 0
 qsin:   db sin(0), sin(0.00390625), sin(0.0078125), sin(0.01171875), sin(0.015625), sin(0.01953125), sin(0.0234375), sin(0.02734375)
         db sin(0.03125), sin(0.03515625), sin(0.0390625), sin(0.04296875), sin(0.046875), sin(0.05078125), sin(0.0546875), sin(0.05859375)

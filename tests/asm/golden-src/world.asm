@@ -103,9 +103,11 @@ loop:   LD D1 <- spin                  ; the yaw of object 0
 ; than counting instructions, and the animation runs at the same speed
 ; whatever the CPU speed is.
 waitframe: IN GPU_FRAME -> A
-        CMP A, [flast]
+        LD [fnow] <- A
+        SUB A <- [flast]
         JZ waitframe
-        LD [flast] <- A           ; CMP kept the frame in A
+        LD A <- [fnow]
+        LD [flast] <- A
         RET
 
 .ram
@@ -140,6 +142,7 @@ obj1:   db 1
 spin2:  dw 0
         dw 0, 0
 
+fnow:   db 0
 flast:  db 0
 
 .data

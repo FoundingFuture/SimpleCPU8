@@ -31,8 +31,9 @@ poles:  LD D1 <- pegx
         LD A <- [dp]
         ADD A <- 1
         LD [dp] <- A
-        CMP A, 3
-        JNZ poles
+        SUB A <- 3
+        JZ base
+        JMP poles
 base:   OUT GPU_X, 10
         OUT GPU_Y, 232
         OUT GPU_CMD, CMD_MOVE_TO
@@ -57,7 +58,8 @@ setup:  LD A <- 0
         LD A <- [ds]
         SUB A <- 1
         LD [ds] <- A
-        JNZ setup
+        JZ solve
+        JMP setup
 
 ; Solve peg 0 -> peg 2, and that is the whole program. 63 moves, which is
 ; 2^6 - 1 and the fewest there are.
@@ -74,7 +76,8 @@ solve:  JSR hanoi
 ; Arguments live in the zero page; each level saves them on the stack.
 hanoi:  LD A <- [hn]
         JZ hret
-        PUSHB A                        ; the test left n in A
+        LD A <- [hn]
+        PUSHB A
         LD A <- [hfrom]
         PUSHB A
         LD A <- [hto]
@@ -168,15 +171,20 @@ move:   LD A <- [hfrom]
         IN GPU_FRAME
         LD [fr] <- A
 mwait:  IN GPU_FRAME
-        CMP A, [fr]
+        SUB A <- [fr]
         JZ mwait
         RET
 
-; D1 := address of cnts[A]. The address adder adds A to the base in one
-; step, where walking the pointer took A steps.
-seek:   LD D1 <- cnts
-        LD D1 <- D1+A
-        RET
+; D1 := address of cnts[A], by walking the pointer A steps
+seek:   LD [tmp] <- A
+        LD D1 <- cnts
+        LD A <- [tmp]
+        JZ sdone
+sloop:  INC D1
+        SUB A <- 1
+        JZ sdone
+        JMP sloop
+sdone:  RET
 
 ; draw one rect in the current color. Peg in dp, level in dl, size in ds.
 ; ds 0 is the 5 pixel pole segment, sizes 1..6 come from the width table.

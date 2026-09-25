@@ -69,7 +69,7 @@ main:   ; a green voice meter, redrawn each pass
         OUT GPU_Y, 118
         OUT GPU_CMD, CMD_MOVE_TO
         LD A <- [nv]
-        SHL A
+        ADD A <- [nv]
         ADD A <- [nv]         ; nv times three
         ADD A <- 8
         LD [t9] <- A
@@ -82,13 +82,14 @@ main:   ; a green voice meter, redrawn each pass
 
         ; fire restarts the tune
         IN A <- IO_CONTROLLER
-        TST A, $70
+        AND A <- $70
         JZ nofire
         OUT APU_CMD, CMD_PLAY
 nofire: ; replay automatically when the tune ends
         IN A <- APU_STATUS
-        TST A, $FF
-        JNZ main
+        AND A <- $FF
+        JZ replay
+        JMP main
 replay: OUT APU_CMD, CMD_PLAY
         JMP main
 

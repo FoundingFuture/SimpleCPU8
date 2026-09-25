@@ -45,7 +45,8 @@ defi:   LD A <- [ii]
         INC A
         LD [ii] <- A
         SUB A <- 97
-        JNZ defi
+        JZ defcan
+        JMP defi
 
 ; --- cannon sprite 19
 defcan: OUT GPU_SPRITE, 100
@@ -111,26 +112,28 @@ defcan: OUT GPU_SPRITE, 100
 
 ; =========================== main loop ===========================
 main:   IN GPU_FRAME
-        CMP A, [fr]
+        SUB A <- [fr]
         JZ main
-        LD [fr] <- A          ; CMP kept the frame in A
+        IN GPU_FRAME
+        LD [fr] <- A
 
         IN A <- IO_CONTROLLER
         LD [inp] <- A
-        TST A, BTN_LEFT
+        AND A <- BTN_LEFT
         JZ nol
         LD A <- [canx]
         SUB A <- 3
         JC nol
         LD [canx] <- A
 nol:    LD A <- [inp]
-        TST A, BTN_RIGHT
+        AND A <- BTN_RIGHT
         JZ nor
         LD A <- [canx]
         ADD A <- 3
         LD [t0] <- A
-        CMP A, 249
-        JNC nor
+        SUB A <- 249
+        JC dor
+        JMP nor
 dor:    LD A <- [t0]
         LD [canx] <- A
 nor:    OUT GPU_SPRITE, 100
@@ -145,9 +148,11 @@ nor:    OUT GPU_SPRITE, 100
         LD [t0] <- A
         JZ nofire
         LD A <- [pf]
-        JNZ nofire
+        JZ dofire
+        JMP nofire
 dofire: LD A <- [pba]
-        JNZ nofire
+        JZ spawnb
+        JMP nofire
 spawnb: LD A <- 1
         LD [pba] <- A
         LD A <- [canx]
@@ -171,7 +176,7 @@ nofire: LD A <- [t0]
         LD A <- [pby]
         SUB A <- 6
         LD [pby] <- A
-        CMP A, 10
+        SUB A <- 10
         JC pbgone
         OUT GPU_SPRITE, 101
         LD A <- [pbx]
@@ -190,7 +195,7 @@ noplayer:
         LD A <- [movet]
         INC A
         LD [movet] <- A
-        CMP A, 6
+        SUB A <- 6
         JC nostep
         LD A <- 0
         LD [movet] <- A
@@ -227,7 +232,8 @@ nostep:
         LD A <- [by]
         ADD A <- [maxcy]
         SUB A <- 240
-        JNC youlose
+        JC notfloor
+        JMP youlose
 notfloor:
 
         JSR ibfire
@@ -262,7 +268,8 @@ awalk:  INC D1
         LD A <- [t1]
         SUB A <- 1
         LD [t1] <- A
-        JNZ awalk
+        JZ akill
+        JMP awalk
 akill:  LD A <- 0
         LD [D1] <- A
         OUT APU_TRACK, 2        ; the explosion, on a track of its own
@@ -288,7 +295,8 @@ nopcol:
         IN GPU_HIT -> A
         LD [t0] <- A         ; save it: the AND below destroys A
         AND A <- 1           ; group 0, an invader reached you
-        JNZ youlose
+        JZ canbomb
+        JMP youlose
 canbomb: LD A <- [t0]
         AND A <- 8           ; group 3, a bomb
         JZ nocancol
@@ -297,7 +305,7 @@ canbomb: LD A <- [t0]
         OUT GPU_GROUP_B, 8
         OUT GPU_CMD, CMD_HIT_IN_GROUP
         IN GPU_HIT -> A
-        CMP A, 102
+        SUB A <- 102
         JZ hitib0
         LD A <- 0
         LD [ib1a] <- A
@@ -331,13 +339,15 @@ eloop:  LD D1 <- alive
         LD A <- [ei]
         LD A <- [D1+A]
         LD [ecx] <- A
-        CMP A, [mincx]
-        JNC echkmax           ; further left than any seen yet
+        SUB A <- [mincx]
+        JC esetmin           ; further left than any seen yet
+        JMP echkmax
 esetmin: LD A <- [ecx]
         LD [mincx] <- A
 echkmax: LD A <- [maxcx]
         SUB A <- [ecx]
-        JNC echkmy           ; further right than any seen yet
+        JC esetmax           ; further right than any seen yet
+        JMP echkmy
 esetmax: LD A <- [ecx]
         LD [maxcx] <- A
 ; every live invader is asked for its row, not only the ones that widened the
@@ -348,15 +358,17 @@ echkmy: LD D1 <- cyt
         LD A <- [D1+A]
         LD [ecy] <- A
         LD A <- [maxcy]
-        CMP A, [ecy]
-        JNC enext            ; lower than any row seen yet
+        SUB A <- [ecy]
+        JC esetmy            ; lower than any row seen yet
+        JMP enext
 esetmy: LD A <- [ecy]
         LD [maxcy] <- A
 enext:  LD A <- [ei]
         INC A
         LD [ei] <- A
         SUB A <- [ninv]
-        JNZ eloop
+        JZ edgesx
+        JMP eloop
 edgesx: RET
 
 repos:  LD A <- 0
@@ -392,7 +404,8 @@ rloop:  LD A <- [ii]
         INC A
         LD [ii] <- A
         SUB A <- [ninv]
-        JNZ rloop
+        JZ reposx
+        JMP rloop
 reposx: RET
 
 ; a fire cooldown paces the bombs; then pick a live invader and drop one
@@ -410,7 +423,8 @@ ibready: LD A <- [rng]       ; advance the rng
         ADD A <- 1
         LD [rng] <- A
 ibmod:  SUB A <- [ninv]    ; reduce it into 0..ninv-1
-        JNC ibmod
+        JC ibgot
+        JMP ibmod
 ibgot:  ADD A <- [ninv]
         LD [t1] <- A
         LD D1 <- alive
@@ -476,7 +490,7 @@ ibmove: LD A <- [ib0a]
         LD A <- [ib0y]
         ADD A <- 3           ; a slower fall gives more frames over the cannon
         LD [ib0y] <- A
-        CMP A, 250
+        SUB A <- 250
         JC ib0ok
         LD A <- 0
         LD [ib0a] <- A
@@ -494,7 +508,7 @@ ibm1:   LD A <- [ib1a]
         LD A <- [ib1y]
         ADD A <- 3           ; a slower fall gives more frames over the cannon
         LD [ib1y] <- A
-        CMP A, 250
+        SUB A <- 250
         JC ib1ok
         LD A <- 0
         LD [ib1a] <- A
@@ -520,9 +534,10 @@ flash:  OUT GPU_CMD, CMD_SAVE_SCREEN
 ; Hold it for one frame. The main loop's own wait would eat this one, so the
 ; wait is here rather than left to the next time round.
 fwait:  IN GPU_FRAME
-        CMP A, [fr]
+        SUB A <- [fr]
         JZ fwait
-        LD [fr] <- A          ; CMP kept the frame in A
+        IN GPU_FRAME
+        LD [fr] <- A
         OUT GPU_X, 0
         OUT GPU_Y, 0
         OUT GPU_CMD, CMD_RESTORE_SCREEN
@@ -613,7 +628,7 @@ setboard: LD A <- 24         ; the block starts over, top left
         LD A <- 0
         LD [ii] <- A
 slloop: LD A <- [ii]
-        CMP A, [ninv]
+        SUB A <- [ninv]
         JC slon
         LD A <- 0
         JMP slput
@@ -624,7 +639,7 @@ slput:  LD [D1] <- A
         ADD A <- 1
         OUTA GPU_SPRITE
         LD A <- [ii]
-        CMP A, [ninv]
+        SUB A <- [ninv]
         JC slshow
         OUT GPU_CMD, CMD_SPRITE_HIDE
         JMP slnext
@@ -633,7 +648,8 @@ slnext: LD A <- [ii]
         INC A
         LD [ii] <- A
         SUB A <- 96
-        JNZ slloop
+        JZ slx
+        JMP slloop
 slx:    JSR edges
         RET
 

@@ -1,11 +1,14 @@
-; Multiply two bytes into a 16-bit product, with no multiply instruction.
+; Multiply two bytes into a 16-bit product, with no multiply instruction
+; and no shift instruction either.
 ;
-; Multiplying is shifting and adding. The multiplier's bits come out one
-; at a time through SHR and ROR, low bit first, and each set bit adds the
-; multiplicand into the product's high byte. ROR walks the product down a
-; bit each pass, so an early add ends up low. The carry does the work: SHR
-; and ROR drop the bit that leaves into C, ADD leaves its carry in C, and
-; ROR brings C back in at the other end.
+; Shift-left is addition. x + x is x << 1, and the bit pushed off the top
+; lands in C. ADD opens the carry chain with carry-in forced to 0, ADC
+; carries it upward, and the byte loads and stores in between leave C
+; alone, so one carry walks from prodlo up into prodhi.
+;
+; mul8 is shift-and-add, most significant bit first. Each pass doubles the
+; product, then shifts a copy of the multiplier left. Whatever falls out of
+; bit 7 is that pass's multiplier bit. C set means add mcand in.
 ;
 ; The table below drives it, one product and one printed line per pass.
 ; Each line pushes two bytes and a 16-bit word, so the template reads
@@ -88,38 +91,49 @@ line:   LD A <- [D1]+
         LD A <- [left]
         SUB A <- 1
         LD [left] <- A
-        JNZ line
+        JZ done
+        JMP line
 done:   HLT
 
 ; mul8: [prodhi][prodlo] = [mcand] * [mplier]. Both operands survive the
 ; call, so the caller can still print them.
-;
-; Low bit first. SHR drops the multiplier's bit 0 into C. When it is set,
-; the multiplicand goes into the product's high byte, and the carry out of
-; that add lands in C. ROR brings C back in at the top of the high byte, and
-; the high byte's bit 0 comes out into C. A second ROR walks it into the
-; top of the low byte, which still holds the multiplier's unused bits, and
-; the next multiplier bit comes out into C for the next pass. Eight passes
-; and the multiplier is gone, the product in its place.
-;
-; The pass count is D2 counting up from -8. LD D2 <- D2+1 sets Z when it
-; reaches zero and leaves C alone, which a SUB would not.
-mul8:   LD A <- [mplier]
-        SHR A                          ; C = bit 0 of the multiplier
-        LD [prodlo] <- A
-        LD D2 <- $FFF8                 ; -8
-        LD A <- 0                      ; the high byte builds in A
-m8lp:   JNC m8sh
-        ADD A <- [mcand]               ; C = the carry out
-m8sh:   ROR A                          ; which comes back in at the top
+mul8:   LD A <- 0
         LD [prodhi] <- A
-        LD A <- [prodlo]
-        ROR A                          ; a product bit in, a multiplier bit out
         LD [prodlo] <- A
-        LD A <- [prodhi]               ; a load leaves C alone
-        LD D2 <- D2+1
-        JNZ m8lp
-        RET
+        LD A <- [mplier]
+        LD [m8m] <- A                  ; shift a copy, keep the operand
+        LD A <- 8
+        LD [m8n] <- A
+
+        ; product <<= 1
+m8lp:   LD A <- [prodlo]
+        ADD A <- [prodlo]              ; low byte opens the carry chain
+        LD [prodlo] <- A
+        LD A <- [prodhi]
+        ADC A <- [prodhi]              ; C rode over the load and the store
+        LD [prodhi] <- A
+
+        ; multiplier <<= 1, C takes the bit that left bit 7
+        LD A <- [m8m]
+        ADD A <- [m8m]
+        LD [m8m] <- A
+        JC m8add
+        JMP m8nx
+
+        ; that bit was set, so add the multiplicand in
+m8add:  LD A <- [prodlo]
+        ADD A <- [mcand]
+        LD [prodlo] <- A
+        LD A <- [prodhi]
+        ADC A <- 0                     ; nothing to add but the carry
+        LD [prodhi] <- A
+
+m8nx:   LD A <- [m8n]
+        SUB A <- 1
+        LD [m8n] <- A
+        JZ m8end
+        JMP m8lp
+m8end:  RET
 
 .ram
 ; printf reads its arguments from RAM, so they are stored rather than
@@ -129,6 +143,8 @@ mcand:  db 0
 mplier: db 0
 prodhi: db 0                   ; big-endian and adjacent, so after the call
 prodlo: db 0                   ; LD D1 <- [prodhi] picks up all 16 bits
+m8m:    db 0
+m8n:    db 0
 row:    db 0
 left:   db 0
 npairs: db 8
@@ -136,6 +152,6 @@ pairs:  db 7,13, 12,12, 128,2, 1,255, 0,255, 100,100, 200,173, 255,255
 
 .data
 title:  db "8 x 8 multiply", 0
-sub:    db "no multiply op: shift and add", 0
-hint:   db "bits leave and enter through C", 0
+sub:    db "no multiply op, no shift op", 0
+hint:   db "x + x is x << 1", 0
 sum:    db "%3hhu * %3hhu = %5u", 0

@@ -100,34 +100,36 @@ loop:   JSR pad
 ; --- the player, four directions, clamped to the screen.
 pad:    IN IO_CONTROLLER -> A
         LD [pd] <- A
-        TST A, BTN_LEFT
+        AND A <- BTN_LEFT
         JZ pnl
         LD A <- [px]
         JZ pnl                         ; already at the edge
         SUB A <- 2
         LD [px] <- A
 pnl:    LD A <- [pd]
-        TST A, BTN_RIGHT
+        AND A <- BTN_RIGHT
         JZ pnr
         LD A <- [px]
-        CMP A, 246
-        JNC pnr
+        SUB A <- 246
+        JC prok
+        JMP pnr
 prok:   LD A <- [px]
         ADD A <- 2
         LD [px] <- A
 pnr:    LD A <- [pd]
-        TST A, BTN_UP
+        AND A <- BTN_UP
         JZ pnu
         LD A <- [py]
         JZ pnu
         SUB A <- 2
         LD [py] <- A
 pnu:    LD A <- [pd]
-        TST A, BTN_DOWN
+        AND A <- BTN_DOWN
         JZ pnd
         LD A <- [py]
-        CMP A, 246
-        JNC pnd
+        SUB A <- 246
+        JC pdok
+        JMP pnd
 pdok:   LD A <- [py]
         ADD A <- 2
         LD [py] <- A
@@ -156,7 +158,7 @@ mloop:  LD A <- [D1+2]
         LD A <- [D1]
         ADD A <- [mdx]
         LD [mt] <- A
-        CMP A, 249
+        SUB A <- 249
         JC mxok
         LD A <- 0                      ; off the edge: turn around instead
         SUB A <- [mdx]
@@ -169,7 +171,7 @@ mdy:    LD A <- [D1+3]
         LD A <- [D1+1]
         ADD A <- [mdx]
         LD [mt] <- A
-        CMP A, 249
+        SUB A <- 249
         JC myok
         LD A <- 0
         SUB A <- [mdx]
@@ -196,7 +198,8 @@ mput:   LD A <- [mi]
         LD A <- [mc]
         SUB A <- 1
         LD [mc] <- A
-        JNZ mloop
+        JZ mdone
+        JMP mloop
 mdone:  RET
 
 ; --- CMD_COLLIDE_GROUP_ALL. One command fills a mask for all 256 sprites,
@@ -224,7 +227,8 @@ lset:   OUTA GPU_SPRITE_FRAME
         LD A <- [lc]
         SUB A <- 1
         LD [lc] <- A
-        JNZ lloop
+        JZ ldone
+        JMP lloop
 ldone:  RET
 
 ; --- the three questions the readout answers.
@@ -283,13 +287,16 @@ drloop: LD A <- [dn]
         LD A <- [dc]
         SUB A <- 1
         LD [dc] <- A
-        JNZ drloop
+        JZ drdone
+        JMP drloop
 drdone: RET
 
 waitframe: IN GPU_FRAME -> A
-        CMP A, [flast]
+        LD [fnow] <- A
+        SUB A <- [flast]
         JZ waitframe
-        LD [flast] <- A           ; CMP kept the frame in A
+        LD A <- [fnow]
+        LD [flast] <- A
         RET
 
 .ram
@@ -329,6 +336,7 @@ dgrp:   db 0
 dn:     db 0
 dc:     db 0
 args:   db 0, 0, 0
+fnow:   db 0
 flast:  db 0
 
 .data

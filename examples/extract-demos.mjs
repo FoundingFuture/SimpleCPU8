@@ -1,4 +1,8 @@
-// Extracts the demo programs of the browser version into examples/<name>/<name>.asm.
+// Extracts the demo programs of the browser version into
+// tests/asm/golden-src/<name>.asm, where the golden byte test assembles
+// them against the browser assembler's output. The demos under examples/
+// started as these and were rewritten for the standalone machine's newer
+// instructions, so this script no longer writes there.
 //
 // The browser project keeps every demo as a TypeScript template string:
 // the short ones in the DEMOS table of packages/ui/src/main.ts, the long
@@ -71,11 +75,11 @@ let count = 0;
 for (const entry of block[1].matchAll(/^\s*(\w+):\s*(\w+),/gm)) {
   const [, key, name] = entry;
   if (local.has(key)) continue;
-  const dir = join(here, key);
+  const dir = join(root, "tests", "asm", "golden-src");
   mkdirSync(dir, { recursive: true });
   let text = resolveSource(name);
   if (!text.endsWith("\n")) text += "\n";
   writeFileSync(join(dir, `${key}.asm`), text);
   count++;
 }
-console.log(`extracted ${count} demos into ${here}`);
+console.log(`extracted ${count} demos into tests/asm/golden-src`);

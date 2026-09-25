@@ -3,9 +3,11 @@
 // tests/asm/golden-bytes/<name>.txt is a copy of the browser project's
 // packages/ui/test/golden-bytes fixture. It holds the program, RAM image,
 // data section, labels and RAM line map its assembler produced per demo.
-// The sources are the ones examples/extract-demos.mjs wrote to
-// examples/<name>/<name>.asm. A mismatch means the C++ assembler
-// disagrees with the TypeScript one on a shipped program.
+// The sources are the browser project's own, which
+// examples/extract-demos.mjs writes to tests/asm/golden-src/<name>.asm.
+// The demos under examples/ grew apart from them when they took up the
+// standalone machine's newer instructions. A mismatch means the C++
+// assembler disagrees with the TypeScript one on a shipped program.
 //
 // The fixture has one section per keyword, each with its count. Values are
 // hex except source lines.
@@ -135,7 +137,7 @@ TEST_SUITE("golden demo bytes") {
     for (const char* name : DEMOS) {
       SUBCASE(name) {
         const std::string n = name;
-        const std::string source = readText(std::string(SC8_EXAMPLES_DIR) + "/" + n + "/" + n + ".asm");
+        const std::string source = readText(std::string(SC8_GOLDEN_SRC_DIR) + "/" + n + ".asm");
         const Golden g = parseGolden(readText(std::string(SC8_GOLDEN_DIR) + "/" + n + ".txt"));
 
         // The fixture counts the pieces of a split on newline. That is one

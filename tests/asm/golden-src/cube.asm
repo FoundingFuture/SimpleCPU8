@@ -7,9 +7,10 @@
         OUT GPU_Y, 128
         OUT GPU_CMD, CMD_MOVE_TO
 loop:   IN GPU_FRAME
-        CMP A, [fr]
+        SUB A <- [fr]
         JZ loop              ; same frame: wait
-        LD [fr] <- A          ; CMP kept the frame in A
+        IN GPU_FRAME
+        LD [fr] <- A
         LD A <- [ay]         ; yaw, 2 steps per frame
         ADD A <- 2
         LD [ay] <- A

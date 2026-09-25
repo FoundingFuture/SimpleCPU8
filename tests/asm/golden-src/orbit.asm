@@ -128,7 +128,8 @@ copy:   LD A <- [D1]+
         LD A <- [n]
         SUB A <- 1
         LD [n] <- A
-        JNZ copy
+        JZ done
+        JMP copy
 done:
 
         JSR hud
@@ -178,9 +179,11 @@ persp:  OUT GPU_CART_BANK, get_bankbyte(perspmsg)
         RET
 
 waitframe: IN GPU_FRAME -> A
-        CMP A, [flast]
+        LD [fnow] <- A
+        SUB A <- [flast]
         JZ waitframe
-        LD [flast] <- A           ; CMP kept the frame in A
+        LD A <- [fnow]
+        LD [flast] <- A
         RET
 
 .ram
@@ -190,6 +193,7 @@ waitframe: IN GPU_FRAME -> A
 n:      db 0
 now:    db 0
 was:    db 0
+fnow:   db 0
 flast:  db 0
 
 ; The ACP's block, in the order the device reads it: A, then B, then the

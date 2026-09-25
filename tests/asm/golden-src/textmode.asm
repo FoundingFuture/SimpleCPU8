@@ -16,14 +16,13 @@
 
 ; Copy the message into the screen buffer. D2 walks the source in low
 ; RAM, D1 walks the screen in high RAM. A byte load sets Z, so the
-; zero terminator ends the loop with no separate compare. The test sits
-; at the bottom: each character costs one jump, JNZ, and no JMP.
+; zero terminator ends the loop with no separate compare.
         LD D1 <- $FAC0
         LD D2 <- msg
-        JMP next
-copy:   LD [D1]+ <- A
-next:   LD A <- [D2]+
-        JNZ copy
+copy:   LD A <- [D2]+
+        JZ done
+        LD [D1]+ <- A
+        JMP copy
 
 ; The GPU keeps composing the screen from RAM after the CPU stops, so
 ; there is nothing left to run. HLT costs no cycles, a spin loop burns

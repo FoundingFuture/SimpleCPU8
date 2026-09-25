@@ -118,8 +118,7 @@ gsinit: LD A <- [t3]
         INC A
         LD [t3] <- A
         SUB A <- 5
-        JZ gsdone
-        JMP gsinit
+        JNZ gsinit
 gsdone:
 ; --- the seven samples reach the chip, once. The three held ones are given
 ; their loop flag here too; see sndinit.
@@ -145,8 +144,7 @@ attract: JSR drainkeys
         JSR atsetup
 atloop: JSR vsync
         JSR anykey
-        JZ atstay
-        JMP newgame
+        JNZ newgame
 atstay: JSR atstep
         JSR atblink
         JMP atloop
@@ -284,10 +282,9 @@ gowait: JSR vsync
 ; routine and one byte. Leaving one screen for another therefore never waits
 ; a frame twice or skips one.
 vsync:  IN GPU_FRAME
-        SUB A <- [mainfr]
+        CMP A, [mainfr]
         JZ vsync
-        IN GPU_FRAME
-        LD [mainfr] <- A
+        LD [mainfr] <- A          ; CMP kept the frame in A
         RET
 
 ; --- nonzero in A when a fresh press has arrived since the last call.
@@ -300,10 +297,10 @@ vsync:  IN GPU_FRAME
 ; then changes nothing until it is let go and pressed again.
 anykey: IN IO_KEY -> A
         LD [t3] <- A
-        AND A <- $7F
+        TST A, $7F
         JZ akpad             ; the queue is empty: ask the pad
         LD A <- [t3]
-        AND A <- $80
+        TST A, $80
         JZ akyes             ; bit 7 clear: a press
         JMP anykey           ; a release: look at the next event
 akpad:  IN IO_CONTROLLER -> A
@@ -322,8 +319,7 @@ akyes:  LD A <- 1
 ; compares against. Called on entry to a screen that waits for a key.
 drainkeys: IN IO_KEY -> A
         OR A <- 0            ; IN sets no flags
-        JZ dkpad
-        JMP drainkeys
+        JNZ drainkeys
 dkpad:  IN IO_CONTROLLER -> A
         LD [padprev] <- A
         RET
@@ -349,8 +345,7 @@ spstep: LD A <- [t3]
         INC A
         LD [t3] <- A
         SUB A <- 6
-        JZ spdone
-        JMP spnext
+        JNZ spnext
 spdone: RET
 
 ; --- print the zero terminated RAM string D1 points at, at the text cursor.
@@ -391,7 +386,7 @@ bgrow:  LD A <- [bgg]
         LD A <- [bgx]
         LD [bgpx] <- A
 bgcol:  LD A <- [bgbits]
-        AND A <- $10
+        TST A, $10
         JZ bgskip
         OUT GPU_X_HI, 0
         LD A <- [bgpx]
@@ -410,7 +405,7 @@ bgcol:  LD A <- [bgbits]
         OUTA GPU_Y
         OUT GPU_CMD, CMD_RECT
 bgskip: LD A <- [bgbits]
-        ADD A <- [bgbits]
+        SHL A
         LD [bgbits] <- A
         LD A <- [bgpx]
         ADD A <- 4
@@ -418,18 +413,16 @@ bgskip: LD A <- [bgbits]
         LD A <- [bgc]
         INC A
         LD [bgc] <- A
-        SUB A <- 5
-        JZ bgnext
-        JMP bgcol
+        CMP A, 5
+        JNZ bgcol
 bgnext: LD A <- [bgpy]
         ADD A <- 4
         LD [bgpy] <- A
         LD A <- [bgr]
         INC A
         LD [bgr] <- A
-        SUB A <- 7
-        JZ bgglyph
-        JMP bgrow
+        CMP A, 7
+        JNZ bgrow
 bgglyph: LD A <- [bgx]
         ADD A <- 24
         LD [bgx] <- A
@@ -458,8 +451,7 @@ asloop: JSR actdraw
         INC A
         LD [acti] <- A
         SUB A <- 5
-        JZ asdrawn
-        JMP asloop
+        JNZ asloop
 asdrawn: OUT GPU_COLOR, 0
         OUT GPU_CMD, CMD_CLEAR
         OUT GPU_CMD, CMD_TEXT_CLEAR
@@ -489,13 +481,13 @@ asdrawn: OUT GPU_COLOR, 0
 ; chase to the left and 6 the chase back to the right. 7 is a pause before it
 ; all runs again.
 atstep: LD A <- [atph]
-        SUB A <- 5
+        CMP A, 5
         JZ atleft
         LD A <- [atph]
-        SUB A <- 6
+        CMP A, 6
         JZ atright
         LD A <- [atph]
-        SUB A <- 7
+        CMP A, 7
         JZ atpause
 ; the roster: on the phase's first frame stamp the actor and print its name,
 ; then hold for 40 frames.
@@ -518,7 +510,7 @@ atnext: LD A <- 0
 ; lands at eight times it less two. That centres a 12 pixel sprite on an 8
 ; pixel line of text.
 atrnew: LD A <- [atph]
-        SUB A <- 4
+        CMP A, 4
         JZ atrpac
         LD A <- [atph]
         ADD A <- 2
@@ -562,8 +554,7 @@ atrst:  OUTA GPU_SPRITE
 ; are hidden one by one on the way back. The first frame of this phase shows
 ; all five again.
 atleft: LD A <- [attk]
-        JZ atlnew
-        JMP atlgo
+        JNZ atlgo
 atlnew: JSR showall
         OUT GPU_COLOR, $FE   ; the pill, in a peach the maze fades never touch
         JSR atpill
@@ -600,7 +591,7 @@ atleat: OUT GPU_COLOR, 0
 atright: LD A <- 0
         LD [adir] <- A
         LD A <- [attk]
-        ADD A <- [attk]
+        SHL A
         ADD A <- 20
         LD [atpx] <- A
         LD A <- [attk]
@@ -651,8 +642,7 @@ aaghost: LD A <- [atx]
         LD A <- [atx]
         SUB A <- [atpx]
         JC aaeaten           ; the ghost is behind him
-        JZ aaeaten           ; or exactly under him
-        JMP aashown
+        JNZ aashown           ; or exactly under him
 aaeaten: LD A <- [acti]
         INC A
         OUTA GPU_SPRITE
@@ -664,8 +654,7 @@ aashown: LD A <- [atx]
         INC A
         LD [acti] <- A
         SUB A <- 5
-        JZ aafin
-        JMP aaghost
+        JNZ aaghost
 aafin:  RET
 
 ; --- the power pill of the chase. A disc of radius 3 at the centre of the
@@ -741,7 +730,7 @@ lmgot:  LD A <- [D1]
 ; width is the maze's and the offset is per maze, like everything else the
 ; draw resets. The result is 16 for every shipped maze; see mzxleft.
 mzcentre: LD A <- [mzcols]
-        ADD A <- [mzcols]
+        SHL A
         LD [t1] <- A
         ADD A <- [t1]        ; mzcols * 4
         LD [t1] <- A
@@ -766,19 +755,17 @@ mrstep: INC D1
         LD A <- [t2]
         SUB A <- 1
         LD [t2] <- A
-        JZ mrnext
-        JMP mrstep
+        JNZ mrstep
 mrnext: LD A <- [t1]
         INC A
         LD [t1] <- A
         SUB A <- 31
-        JZ mrdone
-        JMP mrloop
+        JNZ mrloop
 mrdone: RET
 
 ; --- read the tile at (dcol, drow) into A.
 tileat: LD A <- [drow]
-        ADD A <- [drow]      ; row times 2, the table holds words
+        SHL A      ; row times 2, the table holds words
         LD D1 <- rowtab
         LD D2 <- [D1+A]      ; D2 := the row's address
         LD A <- [dcol]
@@ -799,11 +786,10 @@ tileat: LD A <- [drow]
 ; depend on still holding the tile just drawn. Reading t1/t2 directly
 ; costs less than that save and restore, and never touches dcol/drow at all.
 openat: LD A <- [t2]
-        SUB A <- 31
-        JC oarow             ; row 0..30: check the column next
-        JMP oaopen
+        CMP A, 31
+        JNC oaopen             ; row 0..30: check the column next
 oarow:  LD A <- [t1]
-        SUB A <- 28
+        CMP A, 28
         JC oatile             ; column 0..27 too: safe to read the tile
 oaopen: LD A <- 1
         RET
@@ -812,12 +798,12 @@ oaopen: LD A <- 1
 ; "equals '#'", true for a wall and false for anything else, so the order
 ; drawmaze blanks markers in never matters to this check.
 oatile: LD A <- [t2]
-        ADD A <- [t2]         ; row times 2, the table holds words
+        SHL A         ; row times 2, the table holds words
         LD D1 <- rowtab
         LD D2 <- [D1+A]       ; D2 := the row's address
         LD A <- [t1]
         LD A <- [D2+A]
-        SUB A <- $23          ; '#'
+        CMP A, $23          ; '#'
         JZ oawall
         LD A <- 1
         RET
@@ -831,7 +817,7 @@ oawall: LD A <- 0
 ; cells, the H, and every tunnel mouth, which is two on CLASSIC and four on
 ; each of the other three shipped mazes.
 tileptr: LD A <- [drow]
-        ADD A <- [drow]
+        SHL A
         LD D2 <- rowtab
         LD D1 <- [D2+A]
         LD A <- [dcol]
@@ -841,8 +827,7 @@ tpwalk: INC D1
         LD A <- [t2]
         SUB A <- 1
         LD [t2] <- A
-        JZ tpdone
-        JMP tpwalk
+        JNZ tpwalk
 tpdone: RET
 
 ; --- paint the working array. One pass, one pointer, and the pixel position
@@ -959,7 +944,7 @@ dmcol:  LD A <- [D1]
         SUB A <- $6F         ; 'o'
         JZ dmpill
         LD A <- [dch]
-        SUB A <- $50         ; 'P'
+        CMP A, $50         ; 'P'
         JZ dmpac
 ; A tunnel mouth is any digit '1' to '9', not just '1'. Three of the four
 ; shipped mazes declare two pairs, and the second one's tiles used to fall
@@ -974,10 +959,10 @@ dmcol:  LD A <- [D1]
         SUB A <- 9
         JC dmtun             ; '1' to '9'
 dmdash: LD A <- [dch]
-        SUB A <- $2D         ; '-', one of the two door cells
+        CMP A, $2D         ; '-', one of the two door cells
         JZ dmdoor
         LD A <- [dch]
-        SUB A <- $48         ; 'H', the house point
+        CMP A, $48         ; 'H', the house point
         JZ dmhouse
         JMP dmnext
 dmwall: OUT GPU_COLOR, 1
@@ -1037,7 +1022,7 @@ dmtun:  JSR mouthdir
         LD [tunw] <- A
         JSR tundsl           ; D1 := tundtb + tund * 2
         LD A <- [D1]
-        SUB A <- $FF
+        CMP A, $FF
         JZ dmtuna            ; the slot is empty: this is the pair's first mouth
         LD A <- [tunw]       ; the second: the b half of the slot
         LD [D1+1] <- A
@@ -1074,21 +1059,20 @@ dmtunb: JSR blank
 ; shape. Nine slots, so 32 steps at the very most and 4 on a shipped maze.
 tunsl:  LD D1 <- tuntab
         LD A <- [tund]
-        ADD A <- [tund]
+        SHL A
         LD [tunt] <- A
         ADD A <- [tunt]      ; tund * 4
         JMP tunwalk
 tundsl: LD D1 <- tundtb
         LD A <- [tund]
-        ADD A <- [tund]      ; tund * 2
+        SHL A      ; tund * 2
 tunwalk: JZ tunsldone        ; slot 0: D1 is already there
         LD [tunt] <- A
 tunslw: INC D1
         LD A <- [tunt]
         SUB A <- 1
         LD [tunt] <- A
-        JZ tunsldone
-        JMP tunslw
+        JNZ tunslw
 tunsldone: RET
 
 ; --- the direction from the mouth at (dcol, drow) toward its one open
@@ -1122,8 +1106,7 @@ mdnext: LD A <- [tunt]
         ADD A <- 1
         LD [tunt] <- A
         SUB A <- 4
-        JZ mddone
-        JMP mdloop
+        JNZ mdloop
 ; No open neighbour at all. No shipped maze declares such a mouth, and the
 ; tunnel tests check every one. Right keeps the answer a legal direction.
 mddone: LD A <- 0
@@ -1137,11 +1120,10 @@ mddone: LD A <- 0
 ; the grid leads nowhere. The range check is the whole difference, so the
 ; in-range case jumps into openat rather than repeating its rowtab lookup.
 nbropen: LD A <- [t2]
-        SUB A <- 31
-        JC nbocol            ; row 0..30: check the column next
-        JMP nbono
+        CMP A, 31
+        JNC nbono            ; row 0..30: check the column next
 nbocol: LD A <- [t1]
-        SUB A <- 28
+        CMP A, 28
         JC openat            ; column 0..27 too: openat reads the tile
 nbono:  LD A <- 0
         RET
@@ -1157,8 +1139,7 @@ tclr1:  LD A <- 0
         LD A <- [tunt]
         SUB A <- 1
         LD [tunt] <- A
-        JZ tclr2
-        JMP tclr1
+        JNZ tclr1
 tclr2:  LD D1 <- tundtb
         LD A <- 18
         LD [tunt] <- A
@@ -1168,8 +1149,7 @@ tclr3:  LD A <- $FF
         LD A <- [tunt]
         SUB A <- 1
         LD [tunt] <- A
-        JZ tclrdone
-        JMP tclr3
+        JNZ tclr3
 tclrdone: RET
 
 ; --- the ghost house door, two cells wide. Keep the first one met, which is
@@ -1224,18 +1204,16 @@ dmnext: INC D1
         LD A <- [dcol]
         INC A
         LD [dcol] <- A
-        SUB A <- 28
-        JZ dmeol
-        JMP dmcol
+        CMP A, 28
+        JNZ dmcol
 dmeol:  LD A <- [py]
         ADD A <- 8
         LD [py] <- A
         LD A <- [drow]
         INC A
         LD [drow] <- A
-        SUB A <- 31
-        JZ dmdone
-        JMP dmrow
+        CMP A, 31
+        JNZ dmrow
 
 ; --- the pass is over. Work out which side of the door is outside, then put
 ; the ghosts on this maze.
@@ -1249,7 +1227,7 @@ dmeol:  LD A <- [py]
 ; Falling through means the house is below and outside is upward, -8, which
 ; is 248 in a byte.
 dmdone: LD A <- [housey]
-        SUB A <- [doory]
+        CMP A, [doory]
         JC dmabove
         LD A <- 248          ; house below the door: outside is up
         JMP dmout
@@ -1416,8 +1394,7 @@ ghswalk: INC D1
         LD A <- [t2]
         SUB A <- 1
         LD [t2] <- A
-        JZ ghsgot
-        JMP ghswalk
+        JNZ ghswalk
 ; The id goes into DATA0 first, so the three address bytes are staged in
 ; scratch of their own. gs0 to gs2, not t2 to t4: gsinit is walking t3.
 ghsgot: LD A <- [D1]
@@ -1647,19 +1624,16 @@ wallpaint:
         LD [t1] <- A
         JSR openat
         LD [nup] <- A
-        JZ wpdgu             ; up is wall, so an inner corner is possible
-        JMP wprowd
+        JNZ wprowd             ; up is wall, so an inner corner is possible
 wpdgu:  LD A <- [nlf]
-        JZ wpdgul
-        JMP wpdgu2
+        JNZ wpdgu2
 wpdgul: LD A <- [dcol]
         SUB A <- 1
         LD [t1] <- A
         JSR openat
         LD [nul] <- A
 wpdgu2: LD A <- [nrt]
-        JZ wpdgur
-        JMP wprowd
+        JNZ wprowd
 wpdgur: LD A <- [dcol]
         ADD A <- 1
         LD [t1] <- A
@@ -1672,19 +1646,16 @@ wprowd: LD A <- [drow]       ; the row below: down, then its two diagonals
         LD [t1] <- A
         JSR openat
         LD [ndn] <- A
-        JZ wpdgd
-        JMP wphor
+        JNZ wphor
 wpdgd:  LD A <- [nlf]
-        JZ wpdgdl
-        JMP wpdgd2
+        JNZ wpdgd2
 wpdgdl: LD A <- [dcol]
         SUB A <- 1
         LD [t1] <- A
         JSR openat
         LD [ndl] <- A
 wpdgd2: LD A <- [nrt]
-        JZ wpdgdr
-        JMP wphor
+        JNZ wphor
 wpdgdr: LD A <- [dcol]
         ADD A <- 1
         LD [t1] <- A
@@ -1695,8 +1666,7 @@ wpdgdr: LD A <- [dcol]
 ; once: the left end at px+4 where the left side is exposed too and px
 ; where it is not, the right end at px+3 or px+7 by the same rule.
 wphor:  LD A <- [nup]
-        JZ wphor2
-        JMP wphspn
+        JNZ wphspn
 wphor2: LD A <- [ndn]
         JZ wpver             ; neither face is open: no horizontal line
 ; left and right both exposed leaves the span empty, px+4 to px+3. Draw no
@@ -1705,8 +1675,7 @@ wphor2: LD A <- [ndn]
 wphspn: LD A <- [nlf]
         JZ wphs1
         LD A <- [nrt]
-        JZ wphs1
-        JMP wpver
+        JNZ wpver
 wphs1:  LD A <- [nlf]
         JZ wphs2
         LD A <- 4
@@ -1740,15 +1709,13 @@ wphbot: LD A <- [ndn]
 ; span shared by both, py+4 or py where the top is exposed or not, py+3 or
 ; py+7 at the other end.
 wpver:  LD A <- [nlf]
-        JZ wpver2
-        JMP wpvspn
+        JNZ wpvspn
 wpver2: LD A <- [nrt]
         JZ wpcorn
 wpvspn: LD A <- [nup]
         JZ wpvs1
         LD A <- [ndn]
-        JZ wpvs1
-        JMP wpcorn
+        JNZ wpcorn
 wpvs1:  LD A <- [nup]
         JZ wpvs2
         LD A <- 4
@@ -1989,10 +1956,9 @@ fadein: LD A <- 0
         LD [fg] <- A
         LD [fdb] <- A
 fiwait: IN GPU_FRAME
-        SUB A <- [fframe]
+        CMP A, [fframe]
         JZ fiwait
-        IN GPU_FRAME
-        LD [fframe] <- A
+        LD [fframe] <- A          ; CMP kept the frame in A
         LD A <- [fwb]         ; wall blue climbs by 8
         ADD A <- 8
         LD [fwb] <- A
@@ -2010,8 +1976,7 @@ fiwait: IN GPU_FRAME
         INC A
         LD [fstep] <- A
         SUB A <- 30
-        JZ fisnap
-        JMP fiwait
+        JNZ fiwait
 ; The exact colours, so the end of the fade is not 240.
 fisnap: LD D1 <- palbuf+3
         LD A <- 0
@@ -2308,8 +2273,7 @@ asadd:  ADD A <- [aacc]
 asgo:   LD A <- [astate]
         JZ ashwalk            ; in the house: the scripted walk out, no maze
         JSR atcentre
-        JZ asturn
-        JMP asmv              ; off centre: keep going the way he is
+        JNZ asmv   ; off centre: keep going the way he is
 ; centred: the actor chooses a direction. Which actor is in the window decides
 ; who is asked. Pac-Man eats and reads the pad; a ghost must do neither.
 asturn: LD A <- [acti]
@@ -2488,9 +2452,8 @@ frighten: LD A <- 1
         LD A <- 1
         LD [frg] <- A
 frxl:   LD A <- [D2+5]
-        SUB A <- 1
-        JZ frxblue           ; out of the house and normal: this one turns
-        JMP frxn
+        CMP A, 1
+        JNZ frxn           ; out of the house and normal: this one turns
 frxblue: LD A <- 2
         LD [D2+5] <- A
         LD A <- [D1+2]       ; the level's frightened speed
@@ -2507,8 +2470,7 @@ frxn:   INC D2
         INC A
         LD [frg] <- A
         SUB A <- 5
-        JZ frxdone
-        JMP frxl
+        JNZ frxl
 frxdone: RET
 
 ; --- the window shuts: every blue ghost comes back, at its own speed and in
@@ -2534,9 +2496,8 @@ unfright: LD A <- 0
         LD A <- 1
         LD [frg] <- A
 ufl:    LD A <- [D2+5]
-        SUB A <- 2
-        JZ ufback
-        JMP ufn
+        CMP A, 2
+        JNZ ufn
 ufback: LD A <- 1
         LD [D2+5] <- A
         LD A <- [ghspd]      ; this level's ghost speed, the one ghcom hands out
@@ -2553,8 +2514,7 @@ ufn:    INC D2
         INC A
         LD [frg] <- A
         SUB A <- 5
-        JZ ufdone
-        JMP ufl
+        JNZ ufl
 ufdone: RET
 
 ; --- the reversal a mode change owes, offered to one actor.
@@ -2627,8 +2587,7 @@ aixstep: INC D1
         LD A <- [t3]
         SUB A <- 1
         LD [t3] <- A
-        JZ aixdone
-        JMP aixstep
+        JNZ aixstep
 aixdone: RET
 
 ; --- a ghost in the house, walking out. One pixel a tick, and it asks the
@@ -2674,7 +2633,7 @@ ashlf:  LD A <- [ax]
 ; shipped mazes hold the house below the door, so out is up, and Metro
 ; Station holds it above, so out is down there.
 ashout: LD A <- [outdy]
-        SUB A <- 8
+        CMP A, 8
         JZ ashdn
         LD A <- [ay]
         SUB A <- 1
@@ -2839,8 +2798,7 @@ floodhome:
 ; pointer along its row. The address is what the flood has in hand already.
 hdloop: LD A <- [hqhh]
         SUB A <- [hqth]
-        JZ hdlq
-        JMP hdgo
+        JNZ hdgo
 hdlq:   LD A <- [hqhl]
         SUB A <- [hqtl]
         JZ hddone            ; the head has caught the tail: nothing is left
@@ -2952,7 +2910,7 @@ hdfrow: LD A <- $FE
         LD A <- 28
         LD [t2] <- A
 hdfcol: LD A <- [D1]+
-        SUB A <- $23         ; '#'
+        CMP A, $23         ; '#'
         JZ hdfw
         LD A <- $FF
         LD [D2]+ <- A
@@ -2962,15 +2920,13 @@ hdfw:   LD A <- $FE
 hdfn:   LD A <- [t2]
         SUB A <- 1
         LD [t2] <- A
-        JZ hdfeol
-        JMP hdfcol
+        JNZ hdfcol
 hdfeol: LD A <- $FE
         LD [D2]+ <- A        ; and the sentinel right of it
         LD A <- [t1]
         SUB A <- 1
         LD [t1] <- A
-        JZ hdfbot
-        JMP hdfrow
+        JNZ hdfrow
 hdfbot: JSR hdbord           ; the row below the maze
         JSR hdbord           ; and the spare one under that
         RET
@@ -2982,8 +2938,7 @@ hdb1:   LD A <- $FE
         LD A <- [t2]
         SUB A <- 1
         LD [t2] <- A
-        JZ hdbdn
-        JMP hdb1
+        JNZ hdb1
 hdbdn:  RET
 
 ; --- D1 := the field cell for tile (dcol, drow), and hnh/hnl the same address
@@ -3049,8 +3004,7 @@ mkhr:   LD D1 <- [hnh]
         LD A <- [hct]
         SUB A <- 1
         LD [hct] <- A
-        JZ mkhrdn
-        JMP mkhr
+        JNZ mkhr
 mkhrdn: RET
 
 ; --- what Pac-Man does with a centre: eat the tile under him, read the pad,
@@ -3077,7 +3031,7 @@ pdkeep: RET
 ; frightened, and a ghost in the house never reaches here at all, actstep
 ; sending state 0 to the scripted walk instead.
 ghdecide: LD A <- [astate]
-        SUB A <- 2
+        CMP A, 2
         JZ frdir             ; frightened: a random turn, with nothing to aim at
         LD A <- [astate]
         SUB A <- 3
@@ -3261,11 +3215,11 @@ tginky: JSR pacaim
         LD A <- [D1+A]
         LD [brow] <- A
         LD A <- [tcol]       ; 2P minus B, one axis at a time
-        ADD A <- [tcol]
+        SHL A
         SUB A <- [bcol]
         LD [tcol] <- A
         LD A <- [trow]
-        ADD A <- [trow]
+        SHL A
         SUB A <- [brow]
         LD [trow] <- A
         JMP clamp
@@ -3352,18 +3306,18 @@ tgadone: RET
 ; reaches is 2*30, which is 60. Nothing this routine is handed falls between
 ; 61 and 225, so one threshold separates the two cases outright.
 clamp:  LD A <- [tcol]
-        SUB A <- 128
+        CMP A, 128
         JC clcmax            ; borrow: under 128, a real column
         LD A <- 0            ; 128 and up: it went off the left
         LD [tcol] <- A
         JMP clrow
 clcmax: LD A <- [tcol]
-        SUB A <- 28
+        CMP A, 28
         JC clrow             ; 0..27 already
         LD A <- 27
         LD [tcol] <- A
 clrow:  LD A <- [trow]
-        SUB A <- 128
+        CMP A, 128
         JC clrmax
         LD A <- 0            ; off the top
         LD [trow] <- A
@@ -3426,8 +3380,7 @@ canmove: LD [t3] <- A
 ; either way in.
 cantile: LD A <- [drow]
         SUB A <- 31
-        JC cmcol             ; row 0..30: check the column next
-        JMP cmedge
+        JNC cmedge             ; row 0..30: check the column next
 cmcol:  LD A <- [dcol]
         SUB A <- 28
         JC cmtile            ; column 0..27 too: safe to read the tile
@@ -3489,28 +3442,26 @@ cmedge: JSR tunfind
 cmtile: LD A <- [doorx]
         JZ cmwall
         LD A <- [drow]
-        ADD A <- [drow]
+        SHL A
         LD [t1] <- A
         ADD A <- [t1]
         LD [t1] <- A
         ADD A <- [t1]        ; drow times 8: the entered row, in pixels
         SUB A <- [doory]
-        JZ cmdcol
-        JMP cmwall
+        JNZ cmwall
 cmdcol: LD A <- [dcol]
-        ADD A <- [dcol]
+        SHL A
         LD [t1] <- A
         ADD A <- [t1]
         LD [t1] <- A
         ADD A <- [t1]        ; dcol times 8: the entered column, in pixels
         LD [t1] <- A
-        SUB A <- [doorx]
+        CMP A, [doorx]
         JZ cmdoor            ; the left door cell
         LD A <- [t1]
         SUB A <- [doorx]
         SUB A <- 8
-        JZ cmdoor            ; and the right one
-        JMP cmwall
+        JNZ cmwall            ; and the right one
 ; --- the tile being entered IS one of the two door cells.
 ; DESIGN: which side the actor is stepping FROM decides it, not which way it
 ; is facing. canmove is only ever asked from a tile centre (asturn and
@@ -3542,15 +3493,15 @@ cmdcol: LD A <- [dcol]
 cmdoor: LD A <- [acti]
         JZ cmno              ; actor 0 is Pac-Man: the door is a wall to him
         LD A <- [astate]
-        SUB A <- 3
+        CMP A, 3
         JZ cmyes             ; eyes, going home: the one thing that crosses in
         LD A <- [doory]
         SUB A <- [outdy]     ; the tile one step inside the door
-        SUB A <- [ay]
+        CMP A, [ay]
         JZ cmyes             ; a ghost on it is leaving, and may cross
         JMP cmno             ; any other ghost is heading in, and may not
 cmwall: JSR tileat
-        SUB A <- $23         ; '#'
+        CMP A, $23         ; '#'
         JZ cmno
 cmyes:  LD A <- 1
         RET
@@ -3621,33 +3572,31 @@ pactile: LD D1 <- p2t
 ; tile against Pac-Man's.
 dist2:  LD A <- [dcol]       ; the column leg, as an absolute difference
         SUB A <- [tcol]
-        JC d2xneg            ; borrow: the target column is the larger
-        JMP d2xabs
+        JNC d2xabs            ; borrow: the target column is the larger
 d2xneg: LD A <- [tcol]
         SUB A <- [dcol]
 d2xabs: LD [d2leg] <- A
-        SUB A <- 64
+        CMP A, 64
         JC d2xsq             ; borrow: 0 to 63 already, nothing to clamp
         LD A <- 63
         LD [d2leg] <- A
 d2xsq:  LD A <- [d2leg]
-        ADD A <- [d2leg]     ; twice the leg: the table holds words
+        SHL A     ; twice the leg: the table holds words
         LD D1 <- sqtab
         LD D2 <- [D1+A]
         LD [d2hi] <- D2      ; the running total starts at the column square
         LD A <- [drow]       ; and the row leg, the same shape
         SUB A <- [trow]
-        JC d2yneg
-        JMP d2yabs
+        JNC d2yabs
 d2yneg: LD A <- [trow]
         SUB A <- [drow]
 d2yabs: LD [d2leg] <- A
-        SUB A <- 64
+        CMP A, 64
         JC d2ysq
         LD A <- 63
         LD [d2leg] <- A
 d2ysq:  LD A <- [d2leg]
-        ADD A <- [d2leg]
+        SHL A
         LD D1 <- sqtab
         LD D2 <- [D1+A]
         LD [d2shi] <- D2
@@ -3803,7 +3752,7 @@ frdir:  IN GPU_RAND -> A
         LD [frn] <- A
 frtry:  LD A <- [frcand]
         XOR A <- 2           ; a reversal is the direction exclusive-or 2
-        SUB A <- [adir]
+        CMP A, [adir]
         JZ frskip
         LD A <- [frcand]
         JSR canmove
@@ -3818,8 +3767,7 @@ frskip: LD A <- [frcand]
         LD A <- [frn]
         SUB A <- 1
         LD [frn] <- A
-        JZ frnone
-        JMP frtry
+        JNZ frtry
 ; nothing open but the way it came: keep the direction, which is pickdir's own
 ; fallback and stands on the same ground. A ghost reaches it only in a dead
 ; end, and every dead end on the four shipped mazes is a tunnel mouth, which
@@ -3866,24 +3814,22 @@ tunfind: LD A <- [tuncount]
 tfloop: LD A <- [D1]
         LD [tunt] <- A
         LD A <- [ax]
-        SUB A <- [tunt]
-        JZ tfaxy
-        JMP tfb
+        CMP A, [tunt]
+        JNZ tfb
 tfaxy:  LD A <- [D1+1]
         LD [tunt] <- A
         LD A <- [ay]
-        SUB A <- [tunt]
+        CMP A, [tunt]
         JZ tfhita
 tfb:    LD A <- [D1+2]
         LD [tunt] <- A
         LD A <- [ax]
-        SUB A <- [tunt]
-        JZ tfbxy
-        JMP tfnext
+        CMP A, [tunt]
+        JNZ tfnext
 tfbxy:  LD A <- [D1+3]
         LD [tunt] <- A
         LD A <- [ay]
-        SUB A <- [tunt]
+        CMP A, [tunt]
         JZ tfhitb
 tfnext: INC D1
         INC D1
@@ -3894,8 +3840,7 @@ tfnext: INC D1
         LD A <- [tunn]
         SUB A <- 1
         LD [tunn] <- A
-        JZ tfno
-        JMP tfloop
+        JNZ tfloop
 tfno:   LD A <- 0
         RET
 tfhita: LD A <- [D2]         ; on the a mouth, so b is the far one
@@ -3968,8 +3913,7 @@ itnext: INC D1
         LD A <- [itn]
         SUB A <- 1
         LD [itn] <- A
-        JZ itno
-        JMP itloop
+        JNZ itloop
 itno:   LD A <- 0
         RET
 
@@ -3977,13 +3921,13 @@ itno:   LD A <- 0
 ; Even directions run sideways and odd ones up and down, which is what the
 ; low bit of the direction picks out.
 itone:  LD A <- [itmd]
-        AND A <- 1
+        TST A, 1
         JZ ithorz
 ; up or down: the column has to match, the row is the one with room in it.
         LD A <- [itmx]
         LD [itt] <- A
         LD A <- [ax]
-        SUB A <- [itt]
+        CMP A, [itt]
         JZ itvy
         LD A <- 0
         RET
@@ -3994,7 +3938,7 @@ itvy:   LD A <- [itmy]
 ithorz: LD A <- [itmy]
         LD [itt] <- A
         LD A <- [ay]
-        SUB A <- [itt]
+        CMP A, [itt]
         JZ ithx
         LD A <- 0
         RET
@@ -4009,12 +3953,11 @@ ithx:   LD A <- [itmx]
 ; borrowed and wrapped. There is no negate, so the wrapped difference is
 ; parked and taken off zero.
 itnear: SUB A <- [itt]
-        JC itneg
-        JMP ittest
+        JNC ittest
 itneg:  LD [itt] <- A
         LD A <- 0
         SUB A <- [itt]
-ittest: SUB A <- 41
+ittest: CMP A, 41
         JC ityes             ; borrow: the distance is 40 or less
         LD A <- 0
         RET
@@ -4048,7 +3991,7 @@ ityes:  LD A <- 1
 wrap:   JSR tunfind
         JZ wrno              ; not standing on a mouth at all
         LD A <- [adir]
-        SUB A <- [tunmd]
+        CMP A, [tunmd]
         JZ wrno              ; heading back up this mouth's own corridor
         LD A <- [tunpd]
         LD [adir] <- A
@@ -4071,19 +4014,19 @@ wrno:   LD A <- 0
 ; value is tested with AND before any JZ.
 readpad: IN IO_CONTROLLER -> A
         LD [t3] <- A
-        AND A <- BTN_LEFT
+        TST A, BTN_LEFT
         JZ rpr
         LD A <- 2
         LD [pacnext] <- A
         RET
 rpr:    LD A <- [t3]
-        AND A <- BTN_RIGHT
+        TST A, BTN_RIGHT
         JZ rpu
         LD A <- 0
         LD [pacnext] <- A
         RET
 rpu:    LD A <- [t3]
-        AND A <- BTN_UP
+        TST A, BTN_UP
         JZ rpd
         LD A <- 3
         LD [pacnext] <- A
@@ -4131,7 +4074,7 @@ actdraw: LD A <- [acti]
         LD A <- [acti]
         JZ adpacf
         LD A <- [astate]
-        SUB A <- 2
+        CMP A, 2
         JZ adfrgh
         LD A <- [adir]
         JSR adframe
@@ -4150,7 +4093,7 @@ actdraw: LD A <- [acti]
 ; clock drives all four, so they flash on the same frame, which is what makes
 ; it read as a warning rather than as four ghosts blinking.
 adfrgh: LD A <- [frtk]
-        SUB A <- 15
+        CMP A, 15
         JC adflash           ; borrow: inside the last units of the window
         LD A <- 0
         JSR adframe
@@ -4210,10 +4153,10 @@ adframe: LD [gs0] <- A
 adstrip: LD A <- [acti]
         JZ adskp             ; Pac-Man: one strip, whatever his state says
         LD A <- [astate]
-        SUB A <- 2
+        CMP A, 2
         JZ adskf
         LD A <- [astate]
-        SUB A <- 3
+        CMP A, 3
         JZ adske
         LD A <- [acti]       ; in the house or hunting: its own colours
         JMP adswant
@@ -4229,13 +4172,13 @@ adswant: LD [adsk] <- A
         JZ adsdone           ; already wearing it: nothing to do
         LD A <- [adsk]
         LD [D1] <- A
-        SUB A <- 5
+        CMP A, 5
         JZ adslp
         LD A <- [adsk]
-        SUB A <- 6
+        CMP A, 6
         JZ adslf
         LD A <- [adsk]
-        SUB A <- 7
+        CMP A, 7
         JZ adsle
         LD A <- [adsk]       ; 1 to 4: its own colours, out of ghsttab
         JMP ghstrip          ; a tail call: it points the latches and defines
@@ -4318,11 +4261,10 @@ sfstep: LD A <- 4
 sfopen: LD A <- [pacph]
         ADD A <- 1
         LD [pacph] <- A
-        SUB A <- 2
-        JZ sfturn
-        JMP sfdraw
+        CMP A, 2
+        JNZ sfdraw
 sfturn: LD A <- [pacpd]        ; hit an end: swap direction
-        SUB A <- 1
+        CMP A, 1
         JZ sfopening
         LD A <- 1
         LD [pacpd] <- A
@@ -4330,7 +4272,7 @@ sfturn: LD A <- [pacpd]        ; hit an end: swap direction
 sfopening: LD A <- 0
         LD [pacpd] <- A
 sfdraw: LD A <- [adir]         ; frame = dir * 3 + phase
-        ADD A <- [adir]
+        SHL A
         ADD A <- [adir]
         ADD A <- [pacph]
         LD [pacfrm] <- A
@@ -4390,8 +4332,7 @@ dropdot: LD D1 <- dots
         LD A <- [D1+1]
         SUB A <- 1
         LD [D1+1] <- A
-        JC dropahi
-        JMP droptest
+        JNC droptest
 dropahi: LD A <- [D1]
         SUB A <- 1
         LD [D1] <- A
@@ -4407,8 +4348,7 @@ addscore: LD D1 <- score
         LD A <- [D1+1]
         ADD A <- [t3]
         LD [D1+1] <- A
-        JC ashi
-        JMP hud              ; a tail call: hud's RET answers addscore's caller
+        JNC hud   ; a tail call: hud's RET answers addscore's caller
 ashi:   LD A <- [D1]
         ADD A <- 1
         LD [D1] <- A
@@ -4451,7 +4391,7 @@ nextlvl: JSR sndoff          ; the board is over: silence across the fade
         LD A <- [level]
         INC A
         LD [level] <- A
-        SUB A <- 5
+        CMP A, 5
         JC nlkeep
         LD A <- 1            ; four mazes, then round again
         LD [level] <- A
@@ -4528,10 +4468,9 @@ fadeout: LD A <- 0
         LD A <- 176
         LD [fdb] <- A
 fowait: IN GPU_FRAME
-        SUB A <- [fframe]
+        CMP A, [fframe]
         JZ fowait
-        IN GPU_FRAME
-        LD [fframe] <- A
+        LD [fframe] <- A          ; CMP kept the frame in A
         LD A <- [fwb]
         SUB A <- 8
         LD [fwb] <- A
@@ -4549,8 +4488,7 @@ fowait: IN GPU_FRAME
         INC A
         LD [fstep] <- A
         SUB A <- 30
-        JZ foblack
-        JMP fowait
+        JNZ fowait
 foblack: LD D1 <- palbuf+3
         LD A <- 0
         LD [D1]+ <- A
@@ -4646,8 +4584,7 @@ ctloop: LD D1 <- [cgp]
 ; the column leg, as an absolute difference in pixels
         LD A <- [cgx]
         SUB A <- [cpx]
-        JC ctxneg            ; borrow: Pac-Man is the further right
-        JMP ctxabs
+        JNC ctxabs            ; borrow: Pac-Man is the further right
 ctxneg: LD A <- [cpx]
         SUB A <- [cgx]
 ; DESIGN: the clamp is live here, unlike dist2's row clamp. Every ghost is
@@ -4655,29 +4592,28 @@ ctxneg: LD A <- [cpx]
 ; near him, and a leg between two pixel coordinates reaches 255. 63 is the
 ; table's last entry and further away than any catch.
 ctxabs: LD [d2leg] <- A
-        SUB A <- 64
+        CMP A, 64
         JC ctxsq
         LD A <- 63
         LD [d2leg] <- A
 ctxsq:  LD A <- [d2leg]
-        ADD A <- [d2leg]     ; twice the leg: the table holds words
+        SHL A     ; twice the leg: the table holds words
         LD D1 <- sqtab
         LD D2 <- [D1+A]
         LD [d2hi] <- D2
 ; and the row leg, the same shape
         LD A <- [cgy]
         SUB A <- [cpy]
-        JC ctyneg
-        JMP ctyabs
+        JNC ctyabs
 ctyneg: LD A <- [cpy]
         SUB A <- [cgy]
 ctyabs: LD [d2leg] <- A
-        SUB A <- 64
+        CMP A, 64
         JC ctysq
         LD A <- 63
         LD [d2leg] <- A
 ctysq:  LD A <- [d2leg]
-        ADD A <- [d2leg]
+        SHL A
         LD D1 <- sqtab
         LD D2 <- [D1+A]
         LD [d2shi] <- D2
@@ -4694,12 +4630,10 @@ ctysq:  LD A <- [d2leg]
 ; with a high byte at all is further away than the radius and the low byte
 ; never has to be looked at.
         LD A <- [d2hi]
-        JZ cttest
-        JMP ctnext
+        JNZ ctnext
 cttest: LD A <- [d2lo]
         SUB A <- 17
-        JC cttouch           ; borrow: nearer than the radius, so a catch
-        JMP ctnext
+        JNC ctnext           ; borrow: nearer than the radius, so a catch
 ; --- touching. What happens now is the ghost's state, and all three states a
 ; ghost out of the house can be in do something different. 1 is a normal ghost
 ; and he dies. 2 is frightened, and the ghost is eaten instead. 3 is a ghost
@@ -4728,8 +4662,7 @@ ctnext: LD D1 <- [cgp]
         LD A <- [cgn]
         SUB A <- 1
         LD [cgn] <- A
-        JZ ctno
-        JMP ctloop
+        JNZ ctloop
 ctno:   RET
 ; caught. The board holds still for a moment and then comes back a life short.
 ctdie:  JSR snddie
@@ -4777,7 +4710,7 @@ cteat:  JSR sndeat
         LD [t3] <- A
         JSR addscore
         LD A <- [ghchain]
-        ADD A <- [ghchain]
+        SHL A
         JC cteheld           ; past a byte: the chain holds at the top
         LD [ghchain] <- A
 cteheld: LD D1 <- [cgp]
@@ -4992,7 +4925,7 @@ sndoff: OUT APU_TRACK, 1
 ; through the dying pause and the game over screen. State 0 is unreachable
 ; here: gstate is 1 before main is ever entered and never goes back.
 sndbed: LD A <- [gstate]
-        SUB A <- 1
+        CMP A, 1
         JZ sbplay
         LD A <- 0
         JMP sbset
@@ -5002,12 +4935,11 @@ sbplay: LD A <- 0
         LD [sbn] <- A
         LD D1 <- blinky
 sbl:    LD A <- [D1+5]
-        SUB A <- 3
+        CMP A, 3
         JZ sbeyes            ; eyes: nothing outranks them, so stop looking
         LD A <- [D1+5]
-        SUB A <- 2
-        JZ sbblue
-        JMP sbnx
+        CMP A, 2
+        JNZ sbnx
 sbblue: LD A <- 1
         LD [sbb] <- A
 sbnx:   INC D1
@@ -5021,8 +4953,7 @@ sbnx:   INC D1
         LD A <- [sbn]
         SUB A <- 1
         LD [sbn] <- A
-        JZ sbscan
-        JMP sbl
+        JNZ sbl
 sbscan: LD A <- [sbb]
         JZ sbsiren
         LD A <- 1
@@ -5091,16 +5022,16 @@ sndstep: LD D1 <- dots
 sstlo:  LD A <- [D1+1]
         LD [sstd] <- A
         LD A <- [sstd]
-        SUB A <- [srn4]
+        CMP A, [srn4]
         JC sst4
         LD A <- [sstd]
-        SUB A <- [srn3]
+        CMP A, [srn3]
         JC sst3
         LD A <- [sstd]
-        SUB A <- [srn2]
+        CMP A, [srn2]
         JC sst2
         LD A <- [sstd]
-        SUB A <- [srn1]
+        CMP A, [srn1]
         JC sst1
         LD A <- 0
         RET
@@ -5131,8 +5062,7 @@ sl5:    LD A <- [srh]
         LD A <- [srl]        ; 256 or more still to go, so five certainly fits
         SUB A <- 5
         LD [srl] <- A
-        JC sl5hi
-        JMP sl5inc
+        JNC sl5inc
 sl5hi:  LD A <- [srh]
         SUB A <- 1
         LD [srh] <- A
@@ -5146,7 +5076,7 @@ sl5inc: LD A <- [srn4]
         LD [srn4] <- A
         JMP sl5
 sl5done: LD A <- [srn4]
-        ADD A <- [srn4]
+        SHL A
         LD [srn3] <- A
         ADD A <- [srn4]
         LD [srn2] <- A

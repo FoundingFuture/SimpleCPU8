@@ -11,14 +11,17 @@
 rings:  LD A <- [c]
         OUTA GPU_COLOR
         OUT GPU_CMD, CMD_SET_COLOR
-        ADD A <- 7           ; OUT leaves A alone, so it still holds c
-        LD [c] <- A
         LD A <- [r]
         OUTA GPU_RADIUS
         OUT GPU_CMD, CMD_CIRCLE
+        LD A <- [c]
+        ADD A <- 7
+        LD [c] <- A
+        LD A <- [r]
         SUB A <- 6
         LD [r] <- A
-        JNZ rings
+        JZ spin
+        JMP rings
 
 ; Rotate palette entries 1..255, one step per frame. Entry 0 stays:
 ; the background keeps its color while the rings cycle.

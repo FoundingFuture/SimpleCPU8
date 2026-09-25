@@ -13,29 +13,24 @@
 .org $F000
 hello:
         LD A <- [D1]+
-        SUB A <- 72        ; H
-        JZ h0
-        JMP pass
+        CMP A, 72        ; H
+        JNZ pass
 h0:
         LD A <- [D1]+
-        SUB A <- 69        ; E
-        JZ h1
-        JMP pass
+        CMP A, 69        ; E
+        JNZ pass
 h1:
         LD A <- [D1]+
-        SUB A <- 76        ; L
-        JZ h2
-        JMP pass
+        CMP A, 76        ; L
+        JNZ pass
 h2:
         LD A <- [D1]+
-        SUB A <- 76        ; L
-        JZ h3
-        JMP pass
+        CMP A, 76        ; L
+        JNZ pass
 h3:
         LD A <- [D1]+
         SUB A <- 79        ; O
-        JZ h4
-        JMP pass
+        JNZ pass
 h4:
 ; Matched. Row 20 of the 42 column text screen at $FAC0 is $FAC0 + 20 * 42.
         LD D2 <- $FAC0 + 20 * 42

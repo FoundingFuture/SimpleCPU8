@@ -71,19 +71,22 @@ nextcol: LD A <- [px]
 ; which makes this compare read "when px wraps" at the finest level and
 ; "when px reaches the count" at every other.
         SUB A <- [pn]
-        JNZ col
+        JZ nextrow
+        JMP col
 
 nextrow: LD A <- [py]
         ADD A <- 1
         LD [py] <- A
-        CMP A, [pn]
-        JNZ row
+        SUB A <- [pn]
+        JZ nextlvl
+        JMP row
 
 nextlvl: LD A <- [lvl]
         ADD A <- 1
         LD [lvl] <- A
         SUB A <- 5
-        JNZ level
+        JZ done
+        JMP level
 done:   HLT
 
 ; ---- one level's shape ----
@@ -106,7 +109,7 @@ setlevel: LD D1 <- &pntab
 ; The step is a float, so it moves eight bytes at a time. lvl times eight is
 ; three doublings, which is the only multiply this machine has.
         LD A <- [lvl]
-        SHL A
+        ADD A <- [lvl]
         LD [t2] <- A
         ADD A <- [t2]
         LD [t2] <- A
@@ -129,7 +132,8 @@ stbyte: LD A <- [D1]+
         LD A <- [t3]
         SUB A <- 1
         LD [t3] <- A
-        JNZ stbyte
+        JZ stdone
+        JMP stbyte
 stdone: RET
 
 ; ---- was this point painted by the level before it? ----
@@ -139,7 +143,7 @@ stdone: RET
 skipped: LD A <- [lvl]
         JZ nope                        ; the first level paints everything
         LD A <- [px]
-        TST A, 1
+        AND A <- 1
         JZ maybe
 nope:   LD A <- 1                      ; any nonzero: do the work
         AND A <- 1
@@ -264,7 +268,7 @@ pass:   LD A <- [iter]
 
         JSR backz                      ; znew becomes z and zc for the next pass
         LD A <- [iter]
-        CMP A, 24
+        SUB A <- 24
         JZ inside
         JMP pass
 
@@ -283,7 +287,8 @@ zloop:  LD A <- 0
         LD A <- [n]
         SUB A <- 1
         LD [n] <- A
-        JNZ zloop
+        JZ zdone
+        JMP zloop
 zdone:  RET
 
 ; znew into z, then znew into zc. Sixteen bytes each way.
@@ -302,7 +307,8 @@ cloop:  LD A <- [D1]+
         LD A <- [n]
         SUB A <- 1
         LD [n] <- A
-        JNZ cloop
+        JZ cdone
+        JMP cloop
 cdone:  RET
 
 ; ---- one 4 by 4 block on the screen ----
@@ -352,7 +358,7 @@ shl:    LD A <- [pshift]
 shlnext: LD A <- [t5]
         JZ shldone
         LD A <- [t0]
-        SHL A
+        ADD A <- [t0]
         LD [t0] <- A
         LD A <- [t5]
         SUB A <- 1

@@ -1,16 +1,16 @@
 ; Divide one 16-bit word by another, on a machine with no divide
-; instruction.
+; instruction, no shift instruction, and no compare instruction either.
 ;
 ; div8 did this a byte at a time. Widening it needs no new idea, only the
 ; carry walking one byte further, because every piece already spans bytes:
 ;
-;   shift left   SHL on the low byte, ROL on the high byte
+;   shift left   ADD on the low byte, ADC on the high byte
 ;   compare      SUB on the low byte, SBC on the high byte
 ;   the answer   C after the SBC, which is the borrow out of the pair
 ;
-; That last line is the one worth stopping at. CMP compares one byte and
-; has no borrow in, so it cannot compare a pair. A subtract can, and the
-; answer is in C. C set means the pair went negative, so the divisor
+; That last line is the one worth stopping at. There is no CMP on this
+; machine and none is wanted: a subtract already answers the question, and
+; the answer is in C. C set means the pair went negative, so the divisor
 ; did not fit. The difference is computed into a scratch pair first, so a
 ; miss costs nothing to undo. Nothing is put back, because nothing moved.
 ;
@@ -117,7 +117,8 @@ line:   LD A <- [D1]+
         LD A <- [left]
         SUB A <- 1
         LD [left] <- A
-        JNZ line
+        JZ done
+        JMP line
 done:   HLT
 
 ; div16: [q0 q1] = [dv0 dv1] / [ds0 ds1], [r0 r1] = the remainder. The
@@ -139,18 +140,18 @@ div16:  LD A <- [dv0]
 
         ; quot <<= 1, and the bit leaving bit 15 lands in C
 d16lp:  LD A <- [q1]
-        SHL A
+        ADD A <- [q1]
         LD [q1] <- A
         LD A <- [q0]
-        ROL A
+        ADC A <- [q0]
         LD [q0] <- A
 
         ; rem = rem * 2 + C, a rotate through carry across the pair
         LD A <- [r1]
-        ROL A
+        ADC A <- [r1]
         LD [r1] <- A
         LD A <- [r0]
-        ROL A
+        ADC A <- [r0]
         LD [r0] <- A
 
         ; Does the divisor fit? Subtract the pair into scratch, and read C
@@ -163,8 +164,10 @@ d16lp:  LD A <- [q1]
         LD [t0] <- A
         JC d16nx                       ; borrow: it did not fit, scratch is dropped
 
-        LD D2 <- [t0]                  ; it fit, so the scratch pair is the rem,
-        LD [r0] <- D2                  ; moved as one word
+        LD A <- [t1]                   ; it fit, so the scratch pair is the rem
+        LD [r1] <- A
+        LD A <- [t0]
+        LD [r0] <- A
         LD A <- [q1]
         OR A <- 1                      ; the quotient bit for this pass
         LD [q1] <- A
@@ -172,7 +175,8 @@ d16lp:  LD A <- [q1]
 d16nx:  LD A <- [d16n]
         SUB A <- 1
         LD [d16n] <- A
-        JNZ d16lp
+        JZ d16end
+        JMP d16lp
 d16end: RET
 
 .ram
@@ -204,5 +208,5 @@ pairs:  dw 65535,7
 .data
 title:  db "16 / 16 divide", 0
 sub:    db "SUB then SBC, and C answers", 0
-hint:   db "CMP is one byte, no borrow in", 0
+hint:   db "no CMP, and none wanted", 0
 ans:    db "%5u/%5u=%5u r%5u", 0

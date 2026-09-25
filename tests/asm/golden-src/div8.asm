@@ -1,9 +1,10 @@
-; Divide one byte by another, with no divide instruction.
+; Divide one byte by another, with no divide instruction and no shift
+; instruction either.
 ;
-; SHL shifts a byte left and drops the bit pushed off the top into C. ROL
-; shifts left too and brings C in at bit 0, so SHL on one byte and ROL on
-; the next move a bit between them. The byte loads and stores in between
-; leave C alone.
+; Shift-left is addition. x + x is x << 1, and the bit pushed off the top
+; lands in C. ADC A <- x after LD A <- x is a rotate left through carry,
+; because A + A + C is the old A doubled with C landing in bit 0. The byte
+; loads and stores in between leave C alone, so a carry walks between bytes.
 ;
 ; div8 is restoring division, most significant bit first. The quotient is
 ; built in the same byte the dividend leaves: each pass shifts quot left,
@@ -103,7 +104,8 @@ line:   LD A <- [D1]+
         LD A <- [left]
         SUB A <- 1
         LD [left] <- A
-        JNZ line
+        JZ done
+        JMP line
 done:   HLT
 
 ; div8: [quot] = [dvend] / [dsor], [rem] = the remainder. Both operands
@@ -122,17 +124,17 @@ div8:   LD A <- [dvend]
 
         ; quot <<= 1, and the bit leaving bit 7 lands in C
 d8lp:   LD A <- [quot]
-        SHL A
+        ADD A <- [quot]
         LD [quot] <- A
 
-        ; rem = rem * 2 + C
+        ; rem = rem * 2 + C, a rotate left through carry
         LD A <- [rem]
-        ROL A                          ; C rode over the load and the store
+        ADC A <- [rem]                 ; C rode over the load and the store
         LD [rem] <- A
 
-        ; Does the divisor fit? Subtract and read the borrow. CMP would
-        ; answer the same question and throw the difference away. SUB keeps
-        ; it in A, and when the divisor fits the difference is the new rem.
+        ; Does the divisor fit? Subtract and read the borrow. There is no
+        ; CMP on this machine and none is wanted: the subtract has already
+        ; done the work, and A holds the difference when it fits.
         SUB A <- [dsor]                ; A still holds rem
         JC d8nx                        ; borrow: it did not fit, rem stands
         LD [rem] <- A                  ; it fit, so keep the difference
@@ -143,7 +145,8 @@ d8lp:   LD A <- [quot]
 d8nx:   LD A <- [d8n]
         SUB A <- 1
         LD [d8n] <- A
-        JNZ d8lp
+        JZ d8end
+        JMP d8lp
 d8end:  RET
 
 .ram
@@ -162,6 +165,6 @@ pairs:  db 200,7, 255,16, 7,9, 255,1, 128,3, 255,254, 100,100, 5,0
 
 .data
 title:  db "8 / 8 divide", 0
-sub:    db "no divide op: shift and subtract", 0
+sub:    db "no divide op, no shift op", 0
 hint:   db "C is the borrow", 0
 ans:    db "%3hhu / %3hhu = %3hhu r %3hhu", 0
