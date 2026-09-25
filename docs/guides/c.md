@@ -809,11 +809,37 @@ Twice 200 is 400, which is `$0190`. Width 1 keeps the low byte, `$90`,
 144.
 
 The C files in a mixed project must not define `main`. That belongs to
-the interpreter. Every public function in your files is kept whether or
-not C calls it. BASIC calls it by name, and the build writes the
+the interpreter. BASIC calls a function by name, and the build writes the
 function's address into the program. A name BASIC calls that no file
 defines is a build error naming the line. `examples/basic-c` is the
 worked example, with an assembly routine beside the C one.
+
+### Which functions are kept
+
+The compiler leaves out every function nothing calls, so an unused one
+costs no program memory. BASIC and assembly call C by name, which the C
+cannot show. So the build reads them first:
+
+1. It reads every `.bas` file for the names after `CALL`, `JSR`, `JMP`
+   and `USR`.
+2. It reads every `.asm` file for every name in it outside comments and
+   strings, so `JSR name` and `LD D2 <- name` both count.
+3. It compiles the C with those names as extra starting points, beside
+   `main`. A C function they name is kept, and so is everything it calls.
+   Everything else is left out.
+4. It assembles the C's output with the `.asm` files into one ROM.
+
+A function called from BASIC or assembly must be public. A `static`
+function's label is private to its file, so the build refuses the call
+with `NAME is static, so only its own file can call it`, and says to
+remove `static`.
+
+The calls go every way. BASIC calls C and assembly. Assembly calls C.
+C calls assembly through a prototype with no body, `int twice(int n);`,
+and the assembly defines the label `twice`. An assembly routine called
+from C follows the C convention. It finds its parameters at `[D3+0]`
+upward and leaves its answer in `__ret`. It drops the parameters with
+`LD D3 <- D3+n` before `RET`, as a C function does.
 
 ## Pictures and sounds on the cartridge
 

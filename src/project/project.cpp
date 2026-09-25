@@ -170,6 +170,46 @@ std::string resolveLabels(const std::string& text, const std::map<std::string, L
   return out;
 }
 
+// The names a BASIC program calls by: the targets of CALL, JSR, JMP and
+// USR that are not numbers or variables. resolveLabels with no labels
+// reports exactly those.
+std::set<std::string> basicCallNames(const std::string& text) {
+  std::vector<LabelError> names;
+  resolveLabels(text, {}, names);
+  std::set<std::string> out;
+  for (const LabelError& e : names) out.insert(e.name);
+  return out;
+}
+
+// Every identifier in an assembly file outside its comments and strings.
+// Any of them may name a C function: JSR helper, LD D2 <- helper, dw helper.
+std::set<std::string> asmNames(const std::string& text) {
+  std::set<std::string> out;
+  bool quoted = false;
+  for (size_t i = 0; i < text.size();) {
+    const char c = text[i];
+    if (c == '\n') quoted = false;
+    if (c == '"' || c == '\'') {
+      quoted = !quoted;
+      i++;
+      continue;
+    }
+    if (!quoted && c == ';') {
+      while (i < text.size() && text[i] != '\n') i++;
+      continue;
+    }
+    if (!quoted && (c == '_' || std::isalpha(static_cast<unsigned char>(c)))) {
+      size_t n = 1;
+      while (i + n < text.size() && (text[i + n] == '_' || std::isalnum(static_cast<unsigned char>(text[i + n])))) n++;
+      out.insert(text.substr(i, n));
+      i += n;
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
 }  // namespace
 
 Assets loaders(const Layout& layout, std::vector<std::string>* notes) {
@@ -523,10 +563,19 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
       return b;
 #endif
     }
+    // What BASIC and the assembly files call by name comes first: those C
+    // functions are the roots nothing in the C can show. The rest of the C
+    // is kept only if one of them, or main, reaches it.
+    for (const Source* p : basFiles) {
+      for (const std::string& n : basicCallNames(p->text)) ccOpts.externalCalls.insert(n);
+    }
+    for (const Source* p : asmFiles) {
+      for (const std::string& n : asmNames(p->text)) ccOpts.externalCalls.insert(n);
+    }
     for (const Source* c : cFiles) {
       inputs.push_back({c->name, c->text});
       b.sources.push_back(c->name);
-      if (mixedProject) ccOpts.keepAllFrom.insert(c->name);
+      if (mixedProject) ccOpts.guestFiles.insert(c->name);
     }
     for (const Source* h : hFiles) ccOpts.extra[h->name] = h->text;
     CcResult r = compile(inputs, ccOpts);

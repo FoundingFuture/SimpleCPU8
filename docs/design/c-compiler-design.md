@@ -920,6 +920,17 @@ directions. C reaches a `.export`ed label as an ordinary function. Assembly reac
 function the same way, as long as it builds the frame the calling convention
 describes.
 
+A C function that only BASIC or assembly calls is one `main` never reaches,
+so the dead code rule would drop it. The project build therefore reads the
+callers first. It collects the names after `CALL`, `JSR`, `JMP` and `USR` in
+every `.bas` file, and every name in every `.asm` file outside comments and
+strings. Those names go to the compiler as extra roots beside `main`, in
+`CcOptions::externalCalls`. The compiler keeps each C function they name,
+and all it calls, and then the assembler joins the output with the `.asm`
+files. Inline assembly is read the same way inside the compiler. A root that
+names a `static` function is refused, because its label is private to its
+file.
+
 ### The build line, in place of a Makefile
 
 A program of many files needs somebody to say which ones, and in what order,
@@ -1118,7 +1129,9 @@ What is built, and what is not. This section is the record.
 3. **The linker. Built, one stage earlier than the design put it.** The units
    are merged as trees rather than as assembly text: a `static` name is made
    private by mangling it with its file, a public name defined twice is an
-   error naming the other file, and nothing `main` can reach is emitted. A
+   error naming the other file, and nothing the roots reach is emitted. The
+   roots are `main`, the names BASIC and the project's `.asm` files call,
+   and the names in inline assembly. A
    program sees the three properties the design wanted. The build line
    chooses the files and their order.
    **Not built:** `.export` and `.zp` for hand written assembly, so a program

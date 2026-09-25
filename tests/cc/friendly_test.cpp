@@ -139,21 +139,40 @@ int main(void) {
     CHECK_EQ(r.i16("seen_b"), -2);
   }
 
-  TEST_CASE("a guest file's public functions survive the reachability pass") {
+  TEST_CASE("a function BASIC or assembly calls survives the reachability pass, and no other") {
     CcOptions opts;
-    opts.keepAllFrom = {"guest.c"};
+    opts.guestFiles = {"guest.c"};
+    opts.externalCalls = {"called_by_basic", "PRINT", "loop"};
     const std::string text = compileFiles(
         {{"host.c", "int main(void) { return 0; }"},
-         {"guest.c", "int called_by_nobody(void) { return 1; }\nstatic int mine(void) { return 2; }"}},
+         {"guest.c", "int helper(void) { return 3; }\n"
+                     "int called_by_basic(void) { return helper(); }\n"
+                     "int called_by_nobody(void) { return 1; }\n"
+                     "static int mine(void) { return 2; }"}},
         opts);
-    CHECK(has(text, "called_by_nobody:"));
-    CHECK_FALSE(has(text, "mine:"));
+    CHECK(has(text, "called_by_basic:"));
+    CHECK(has(text, "helper:"));
+    CHECK_FALSE(has(text, "called_by_nobody:"));
     CHECK_FALSE(has(text, "guest_c__mine:"));
+  }
+
+  TEST_CASE("a static function called from outside the C is refused, with the fix") {
+    CcOptions opts;
+    opts.externalCalls = {"mine"};
+    std::string msg;
+    try {
+      compileFiles({{"host.c", "int main(void) { return 0; }"}, {"guest.c", "static int mine(void) { return 2; }"}},
+                   opts);
+    } catch (const CcError& e) {
+      msg = e.file + ":" + std::to_string(e.line) + ": " + e.message();
+    }
+    CHECK(has(msg, "guest.c:1: mine is static"));
+    CHECK(has(msg, "remove static"));
   }
 
   TEST_CASE("a main in a guest file is refused") {
     CcOptions opts;
-    opts.keepAllFrom = {"guest.c"};
+    opts.guestFiles = {"guest.c"};
     std::string msg;
     try {
       compileFiles({{"host.c", "int main(void) { return 0; }"}, {"guest.c", "int main(void) { return 1; }"}}, opts);

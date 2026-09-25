@@ -1334,6 +1334,22 @@ assembly, so an assembly file in the same project can read it. Every
 `.asm` in a C project is appended after the generated code, with its
 own `.ram` and `.data` following the compiler's.
 
+Calls go both ways. C calls a routine in an `.asm` file through a
+prototype with no body, `int twice(int n);`, and the file defines the
+label `twice:`. The routine finds its parameters at `[D3+0]` upward,
+leaves its answer in `__ret`, and drops the parameters with
+`LD D3 <- D3+n` before `RET`. It gives back every other change to `D3`.
+Assembly calls a C function the same way. It makes room with
+`LD D2 <- D3-n`, writes the arguments through `D2`, moves `D3` down with
+`LD D3 <- D3-n` and does `JSR`. The C function drops them itself.
+
+The compiler leaves out a C function nothing calls. It cannot see a call
+from an `.asm` file, so the build reads the `.asm` files first. Every
+name in them outside comments and strings keeps the C function of that
+name, with all it calls. So the one `JSR` is all it takes. A `static` C
+function has a private label, and the build refuses a call to it from
+assembly. Inline assembly in a C file counts the same way.
+
 ## A routine for BASIC
 
 A project with `.bas` files and an `.asm` file builds the interpreter

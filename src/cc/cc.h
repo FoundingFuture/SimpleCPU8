@@ -44,11 +44,14 @@ struct CcOptions {
   // bytes: the preloaded maps first, then the loaders, as the assembler's
   // directives resolve a name. Without it every asset form is an error.
   const Assets* assets = nullptr;
-  // Files whose public functions are roots of the reachability pass, so
-  // they survive when nothing in the program calls them. A host such as
-  // BASIC reaches them by instruction slot, with CALL. main belongs to the
-  // host, so a main in one of these files is refused.
-  std::set<std::string> keepAllFrom;
+  // Files a host program owns main for, such as BASIC in a project with
+  // BASIC and C. A main in one of them is refused.
+  std::set<std::string> guestFiles;
+  // Functions something outside the C calls by name: a CALL or USR in a
+  // BASIC program, or a JSR in an assembly file. They are roots of the
+  // reachability pass, so they survive though no C calls them. A name that
+  // is a static function is refused, since its label is private.
+  std::set<std::string> externalCalls;
   // The heap stack's size in bytes: the C stack in RAM, under D3, that holds
   // parameters and locals. 0 gives it every byte between the program's
   // data and the text screen.

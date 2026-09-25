@@ -130,6 +130,33 @@ main.c:15: y is not declared
 A warning says something the build did anyway, such as a picture moved
 onto the machine's palette.
 
+### Calls between languages
+
+A project can mix BASIC, C and assembly in one ROM. BASIC calls C and
+assembly. Assembly calls C. C calls assembly. The compiler leaves out
+every C function nothing calls. The C cannot show a call from BASIC or
+assembly, so `simplecpu-make` builds in this order:
+
+1. It reads every `.bas` file for the names after `CALL`, `JSR`, `JMP`
+   and `USR`.
+2. It reads every `.asm` file for every name outside comments and
+   strings.
+3. It compiles the C with those names as starting points beside `main`.
+   A C function they name is kept, with everything it calls.
+4. It assembles the C's output and the `.asm` files into one ROM.
+
+A C function called from BASIC or assembly must not be `static`, since
+its label is private to its file. The build refuses such a call:
+
+```text
+maths.c:2: SQUARE is static, so only its own file can call it. BASIC and assembly call it by name: remove static.
+```
+
+C calls an assembly routine through a prototype with no body, such as
+`int twice(int n);`, and an `.asm` file defines the label `twice`. The
+routine follows the C calling convention. The C guide and the assembly
+guide describe it.
+
 ## Running a ROM
 
 ```bash
@@ -252,7 +279,9 @@ The machine prints `12 SQUARED IS 144`. The build turns the name
 ROM. Names work only in a built project. At the machine's prompt, a
 routine is called by its number, which `LIST` shows. An `.asm` file in a
 BASIC project is a driver appended to the interpreter, called the same
-way. The BASIC guide's chapter on machine code has the details.
+way. The BASIC guide's chapter on machine code has the details. The
+build reads the BASIC program for those names before it compiles the C,
+as Calls between languages describes.
 
 ## C
 
@@ -284,6 +313,10 @@ wrote ball/build/ball.rom
 `--asm-out` keeps the assembly the compiler made, as
 `build/ball.asm`, to read what a line of C became. `-D DEBUG` defines
 `DEBUG` for every file, as with any C compiler.
+
+An `.asm` file beside the C goes into the same ROM. It follows the
+compiler's output. The C calls a routine in it through a prototype with
+no body. The assembly calls a C function by its name.
 
 The C guide covers the language and each library.
 

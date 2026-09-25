@@ -851,7 +851,10 @@ answer. `PRINT USR(2, TWICE, 21)` hands 21 to a routine named TWICE and
 prints what it gives back. The first number says how big the answer is.
 A 1 means one box, 0 to 255. A 2 means two boxes, up to 65535. A routine
 with a longer answer fills a row of boxes and gives back where the row
-starts. `PEEK` and `DEEK` then read it. The C guide shows the other side.
+starts. `PEEK` and `DEEK` then read it. The routine can be written in C
+or in assembly, and the call looks the same from BASIC. How the other
+side works matters once you move on to C, and later to assembly. The C
+guide and the assembly guide pick it up there.
 
 The system page at docs/basic-system-page.md lists every box BASIC keeps
 its own state in, from 0 to 31. Box 5 and box 6 came from there.

@@ -123,8 +123,31 @@ void rewriteInit(std::optional<Initializer>& init, const std::map<std::string, s
   else rewrite(init->one, map);
 }
 
+// A private name inside inline assembly, word by word. The compiler does not
+// read that text, but the label it names has moved, so the text follows.
+void rewriteAsm(std::string& text, const std::map<std::string, std::string>& map) {
+  std::string out;
+  size_t i = 0;
+  while (i < text.size()) {
+    const char c = text[i];
+    if (c == '_' || std::isalpha(static_cast<unsigned char>(c))) {
+      size_t n = 1;
+      while (i + n < text.size() && (text[i + n] == '_' || std::isalnum(static_cast<unsigned char>(text[i + n])))) n++;
+      const std::string w = text.substr(i, n);
+      auto hit = map.find(w);
+      out += hit != map.end() ? hit->second : w;
+      i += n;
+    } else {
+      out += c;
+      i++;
+    }
+  }
+  text = out;
+}
+
 void rewrite(const StmtPtr& s, const std::map<std::string, std::string>& map) {
   if (!s) return;
+  if (s->k == StmtKind::Asm) rewriteAsm(s->text, map);
   rewrite(s->e, map);
   rewrite(s->c, map);
   rewrite(s->step, map);
@@ -232,7 +255,7 @@ Merged merge(const std::vector<SourceFile>& sources, const Resolve& resolve, con
   for (size_t ui = 0; ui < units.size(); ui++) {
     const Unit& u = units[ui];
     for (const FuncDecl& f : u.funcs) {
-      if (f.body && f.name == "main" && opts.keepAllFrom.count(u.file)) {
+      if (f.body && f.name == "main" && opts.guestFiles.count(u.file)) {
         throw CcError(f.pos.file, f.pos.line,
                       "main belongs to the interpreter in a project with BASIC. Give this function another "
                       "name and call it from BASIC with CALL.");
@@ -393,9 +416,23 @@ Program compileProgram(const std::vector<SourceFile>& files, const CcOptions& op
   std::vector<std::string> queue = {"main"};
   // A guest file's public functions are roots too: the host calls them by
   // slot, which the compiler cannot see. Its main would shadow the host's.
-  for (const std::string& n : m.funcs.order) {
+  for (const std::string& n : opts.externalCalls) {
     const FuncDecl* f = m.funcs.get(n);
-    if (f->body && !f->isStatic && opts.keepAllFrom.count(f->pos.file)) queue.push_back(n);
+    if (f && f->body && !f->isStatic) {
+      queue.push_back(n);
+      continue;
+    }
+    // A static function of that name has a private label nothing outside
+    // its file can reach, so the call would fail to assemble.
+    for (const std::string& other : m.funcs.order) {
+      const FuncDecl* g = m.funcs.get(other);
+      if (g->body && g->isStatic && other.size() > n.size() + 2 &&
+          other.compare(other.size() - n.size() - 2, std::string::npos, "__" + n) == 0) {
+        throw CcError(g->pos.file, g->pos.line,
+                      n + " is static, so only its own file can call it. BASIC and assembly call it by name: "
+                          "remove static.");
+      }
+    }
   }
   while (!queue.empty()) {
     const std::string n = queue.back();
@@ -406,6 +443,11 @@ Program compileProgram(const std::vector<SourceFile>& files, const CcOptions& op
     if (!f || !f->body) continue;
     std::set<std::string> names;
     namesIn(f->body, names);
+    // A function inline assembly names is reached too: JSR helper in an
+    // asm statement is a call the compiler cannot see.
+    std::vector<std::string> words;
+    asmWords(f->body, words);
+    names.insert(words.begin(), words.end());
     for (const std::string& x : names) if (m.funcs.get(x) && !reach.count(x)) queue.push_back(x);
   }
   std::vector<std::string> dropped;

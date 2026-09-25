@@ -272,3 +272,56 @@ void unused_but_kept(void) { calls = 0; }
   }
 }
 #endif
+
+TEST_SUITE("calls across languages") {
+  // BASIC calls C and assembly by name, assembly calls C, and C calls
+  // assembly. The build reads the BASIC and the assembly for the names
+  // they call first, and those C functions are kept as reached.
+  TEST_CASE("a C function only an assembly file calls is kept, and C calls the assembly") {
+    TempDir t;
+    write(t.path / "src" / "main.c",
+          "int result;\n"
+          "int twice(int n);\n"
+          "int add_one(int n) { return n + 1; }\n"
+          "int main(void) { result = twice(20); return 0; }\n");
+    write(t.path / "src" / "twice.asm",
+          "twice:  LD A <- [D3+1]\n"
+          "        ADD A <- [D3+1]\n"
+          "        LD [__ret+1] <- A\n"
+          "        LD A <- 0\n"
+          "        LD [__ret] <- A\n"
+          "        LD D3 <- D3+2\n"
+          "        RET\n"
+          "unused_by_c:\n"
+          "        JSR add_one\n"
+          "        RET\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    CHECK(b.assembly.find("\nadd_one:") != std::string::npos);
+  }
+
+  TEST_CASE("with BASIC, a C function nothing calls is left out, and one BASIC calls is kept") {
+    TempDir t;
+    write(t.path / "src" / "autorun.bas", "10 CALL KEPT\n20 PRINT USR(1, ALSO, 2)\n");
+    write(t.path / "src" / "funcs.c",
+          "void KEPT(void) { }\n"
+          "int ALSO(int x) { return x; }\n"
+          "int DROPPED(void) { return 1; }\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    CHECK(b.assembly.find("\nKEPT:") != std::string::npos);
+    CHECK(b.assembly.find("\nALSO:") != std::string::npos);
+    CHECK(b.assembly.find("\nDROPPED:") == std::string::npos);
+  }
+
+  TEST_CASE("BASIC calling a static function is refused, with the fix") {
+    TempDir t;
+    write(t.path / "src" / "autorun.bas", "10 CALL HIDDEN\n");
+    write(t.path / "src" / "funcs.c", "static void HIDDEN(void) { }\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_FALSE(b.errors.empty());
+    CHECK(b.errors[0].find("HIDDEN is static") != std::string::npos);
+    CHECK(b.errors[0].find("remove static") != std::string::npos);
+  }
+}
