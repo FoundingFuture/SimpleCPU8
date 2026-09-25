@@ -37,5 +37,14 @@ add_executable(simplecpu-ide
   sprite_pane.cpp
   "${SC8_GUIDES_H}")
 
+# The window's own full screen is a Cocoa call on macOS.
+if(APPLE)
+  enable_language(OBJCXX)
+  target_sources(simplecpu-ide PRIVATE native_window.mm)
+  target_link_libraries(simplecpu-ide PRIVATE "-framework Cocoa")
+else()
+  target_sources(simplecpu-ide PRIVATE native_window.cpp)
+endif()
+
 target_include_directories(simplecpu-ide PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_libraries(simplecpu-ide PRIVATE sc8::vm sc8::basic sc8::cc sc8::project rlimgui imgui sc8_warnings)

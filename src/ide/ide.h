@@ -247,9 +247,15 @@ class Ide {
   int windowedW_ = 0, windowedH_ = 0;
   int windowedX_ = 0, windowedY_ = 0;
   bool filledBeforeScreen_ = false;  // the IDE window filled the monitor before F12
-  // The window's place before it filled the monitor, which Save layout
-  // keeps, so the next session can go back to it.
-  int unfilledX_ = 0, unfilledY_ = 0, unfilledW_ = 0, unfilledH_ = 0;
+  // The window's last plain place: not maximized, not filling the
+  // monitor, not in the system's full screen. trackWindow notes it every
+  // frame, and Save layout keeps it, so the next session has a window to
+  // come back to from any of those.
+  int plainX_ = 0, plainY_ = 0, plainW_ = 0, plainH_ = 0;
+  void trackWindow();
+  bool nativeFullscreen() const;
+  bool nativeBeforeScreen_ = false;  // F12 came from the system's full screen
+  int pendingNative_ = 0;  // frames until the saved system full screen is entered
   void statusMenu();
   void selectMicrocode(const std::string& name);
   void applyLock();
@@ -335,7 +341,8 @@ class Ide {
     int x = 0, y = 0, w = 0, h = 0;
     int monitor = 0;
     bool maximized = false;
-    bool fullscreen = false;
+    bool fullscreen = false;  // filled the monitor, borderless
+    bool native = false;      // the system's own full screen (macOS)
   };
   WindowPlace savedWindow_;
   // The sprite editor in the layout file: shown or not, the sprite it

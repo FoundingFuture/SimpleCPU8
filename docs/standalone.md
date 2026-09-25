@@ -315,7 +315,10 @@ spacing through Dear ImGui's font scaling, so text stays sharp. Preferences in
 the Settings menu edits both. The pane layout is written only by Save
 layout in that menu, to `layout.ini` beside the settings. It is read at
 the next start. The file also keeps the IDE window's place, size and
-monitor, and whether it was maximized or filled the monitor. A place off
+monitor, and whether it was maximized or filled the monitor. On macOS it
+also keeps the system's own full screen, the green button. The place kept
+is the plain window's, so leaving a full screen lands where the window
+was. A place off
 every monitor attached at the next start is ignored. So the window never
 opens out of sight. It keeps the sprite editor
 too: whether it shows and the sprite it had open. The tool, zoom, grid,

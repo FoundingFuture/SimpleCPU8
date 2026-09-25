@@ -19,6 +19,7 @@
 #include "basic/program.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
+#include "ide/native_window.h"
 #include "ide/panes.h"
 
 namespace fs = std::filesystem;
@@ -167,6 +168,10 @@ void Ide::registerLayoutHandler() {
   //   Monitor=0
   //   Maximized=0
   //   Fullscreen=0
+  //   NativeFullscreen=0
+  //
+  // Pos and Size are the plain window, the one to come back to from a
+  // maximized or full screen one.
   ImGuiSettingsHandler w;
   w.TypeName = "SC8Window";
   w.TypeHash = ImHashStr("SC8Window");
@@ -188,13 +193,16 @@ void Ide::registerLayoutHandler() {
       p.maximized = a != 0;
     } else if (std::sscanf(text, "Fullscreen=%d", &a) == 1) {
       p.fullscreen = a != 0;
+    } else if (std::sscanf(text, "NativeFullscreen=%d", &a) == 1) {
+      p.native = a != 0;
     }
   };
   w.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* handler, ImGuiTextBuffer* out) {
     const WindowPlace p = static_cast<const Ide*>(handler->UserData)->windowNow();
     out->appendf("[%s][State]\n", handler->TypeName);
     out->appendf("Pos=%d,%d\nSize=%d,%d\nMonitor=%d\n", p.x, p.y, p.w, p.h, p.monitor);
-    out->appendf("Maximized=%d\nFullscreen=%d\n\n", p.maximized ? 1 : 0, p.fullscreen ? 1 : 0);
+    out->appendf("Maximized=%d\nFullscreen=%d\nNativeFullscreen=%d\n\n", p.maximized ? 1 : 0,
+                 p.fullscreen ? 1 : 0, p.native ? 1 : 0);
   };
   ImGui::AddSettingsHandler(&w);
 
@@ -236,28 +244,27 @@ void Ide::restoreSprite() {
 Ide::WindowPlace Ide::windowNow() const {
   WindowPlace p;
   p.known = true;
-  // Full screen for the machine is a state of the moment, so the window
-  // it came from is what is kept.
   if (screenOnly_) {
-    p.x = windowedX_;
-    p.y = windowedY_;
-    p.w = windowedW_;
-    p.h = windowedH_;
+    // Full screen for the machine is a state of the moment, so the window
+    // it came from is what is kept.
     p.fullscreen = filledBeforeScreen_;
+    p.native = nativeBeforeScreen_;
+  } else {
+    p.maximized = IsWindowMaximized();
+    p.fullscreen = windowFilled();
+    p.native = nativeFullscreen();
+  }
+  if (plainW_ > 0) {
+    p.x = plainX_;
+    p.y = plainY_;
+    p.w = plainW_;
+    p.h = plainH_;
   } else {
     const Vector2 at = GetWindowPosition();
     p.x = static_cast<int>(at.x);
     p.y = static_cast<int>(at.y);
     p.w = GetScreenWidth();
     p.h = GetScreenHeight();
-    p.maximized = IsWindowMaximized();
-    p.fullscreen = windowFilled();
-    if (p.fullscreen && unfilledW_ > 0) {
-      p.x = unfilledX_;
-      p.y = unfilledY_;
-      p.w = unfilledW_;
-      p.h = unfilledH_;
-    }
   }
   p.monitor = GetCurrentMonitor();
   return p;
@@ -265,15 +272,24 @@ Ide::WindowPlace Ide::windowNow() const {
 
 bool Ide::windowFilled() const { return IsWindowState(FLAG_BORDERLESS_WINDOWED_MODE); }
 
+bool Ide::nativeFullscreen() const { return native::isFullscreen(GetWindowHandle()); }
+
 void Ide::toggleWindowFill() {
-  if (!windowFilled()) {
-    const Vector2 at = GetWindowPosition();
-    unfilledX_ = static_cast<int>(at.x);
-    unfilledY_ = static_cast<int>(at.y);
-    unfilledW_ = GetScreenWidth();
-    unfilledH_ = GetScreenHeight();
-  }
+  // The system's full screen and the borderless fill do not stack.
+  if (nativeFullscreen()) native::toggleFullscreen(GetWindowHandle());
   ToggleBorderlessWindowed();
+}
+
+void Ide::trackWindow() {
+  if (pendingNative_ > 0 && --pendingNative_ == 0 && !nativeFullscreen()) {
+    native::toggleFullscreen(GetWindowHandle());
+  }
+  if (screenOnly_ || windowFilled() || nativeFullscreen() || IsWindowMaximized() || IsWindowMinimized()) return;
+  const Vector2 at = GetWindowPosition();
+  plainX_ = static_cast<int>(at.x);
+  plainY_ = static_cast<int>(at.y);
+  plainW_ = GetScreenWidth();
+  plainH_ = GetScreenHeight();
 }
 
 void Ide::applyWindow() {
@@ -294,7 +310,14 @@ void Ide::applyWindow() {
   } else if (p.monitor >= 0 && p.monitor < GetMonitorCount()) {
     SetWindowMonitor(p.monitor);
   }
-  if (p.fullscreen && !windowFilled()) toggleWindowFill();
+  plainX_ = p.x;
+  plainY_ = p.y;
+  plainW_ = p.w;
+  plainH_ = p.h;
+  // The system's full screen animates, and Cocoa ignores the request
+  // before the window is on screen, so it waits for a few frames.
+  if (p.native) pendingNative_ = 3;
+  else if (p.fullscreen && !windowFilled()) toggleWindowFill();
   else if (p.maximized) MaximizeWindow();
 }
 
@@ -626,6 +649,13 @@ void Ide::enterScreenOnly() {
   // A window that fills the monitor goes back to a plain window first,
   // so the machine's full screen and the way back start from one state.
   filledBeforeScreen_ = windowFilled();
+  nativeBeforeScreen_ = nativeFullscreen();
+  // In the system's full screen the window already covers the display:
+  // the picture alone is drawn over it, and nothing moves.
+  if (nativeBeforeScreen_) {
+    if (!running_ && !poweredOff_) setRunning(true);
+    return;
+  }
   if (filledBeforeScreen_) toggleWindowFill();
   windowedW_ = GetScreenWidth();
   windowedH_ = GetScreenHeight();
@@ -643,6 +673,10 @@ void Ide::enterScreenOnly() {
 void Ide::leaveScreenOnly() {
   if (!screenOnly_) return;
   screenOnly_ = false;
+  if (nativeBeforeScreen_) {
+    ImGui::GetIO().ClearInputKeys();
+    return;
+  }
   if (IsWindowFullscreen()) ToggleFullscreen();
   SetWindowSize(windowedW_, windowedH_);
   SetWindowPosition(windowedX_, windowedY_);
@@ -665,6 +699,7 @@ void Ide::drawScreenOnly() {
 }
 
 void Ide::update() {
+  trackWindow();
   // Escape leaves the full screen before the keyboard is read, so the
   // machine never sees it.
   if (screenOnly_ && IsKeyPressed(KEY_ESCAPE)) leaveScreenOnly();
