@@ -15,6 +15,7 @@ screen. Nothing halts. The ghosts' skirts ripple as they move.
 The sprites are PNG strips beside the source, placed with `.sprite`, so
 the IDE's sprite editor opens them. Pac-Man is twelve frames. Each ghost
 is eight, two per facing. The frightened ghost is four and the eyes are
-eight. The
+eight. Their round edges are anti-aliased. An edge pixel takes
+the body colour, darkened by how much of it the shape covers. The eyes and the skirts keep their square pixels. The
 mazes and sounds sit in .data as db lines. genmazes.mjs and
 genpacsound.mjs of the browser project generated them.
