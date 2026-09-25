@@ -817,7 +817,7 @@ is the low byte, `get_highbyte(x)` the next and `get_bankbyte(x)` bits
 `get_sizelo(x)` and `get_sizehi(x)` give the byte count of a blob a
 directive placed, and refuse anything else.
 
-Four directives place a file from `assets/` in `.data`:
+Five directives place a file from `assets/` in `.data`:
 
 | Line | Places |
 |---|---|
@@ -825,12 +825,19 @@ Four directives place a file from `assets/` in `.data`:
 | `.image('pic.png')` | the picture's pixels, one palette index per pixel, row by row |
 | `.palette('pic.png')` | its 768 palette bytes |
 | `.sample('ping.wav')` | the sound as 8 bit mono at 8000 a second |
+| `.sprite('ship.png')` | a sprite strip as `CMD_SPRITE_DEF` reads it, header and frames |
 
 The label in front binds to where the blob landed. Equal bytes are
 stored once, so two labels on the same file share one copy. `.image`
-places the pixels alone, with no size in front. The GPU's sprite and
-image commands read a header first. Write it with `db` on the line
-before, as the sprite chapter shows.
+places the pixels alone, with no size in front. The GPU's image command
+reads a header first. Write it with `db` on the line before, as the
+sprite chapter shows.
+
+`.sprite` places the whole blob a sprite needs. The PNG is a strip of
+frames side by side. The directive writes the frame count, the frame's
+width and height, then each frame row by row. The count comes from the
+PNG, which the IDE's sprite editor writes into it. `.sprite('ship.png', 2)`
+gives the count instead, for a PNG from another program.
 
 Every port name, command name, button bit and mode number lives in one
 registry. The devices publish it and the assembler reads it. The same
@@ -1006,17 +1013,18 @@ The `AND A <- 8` reads one bit of the frame count. It is 0 for eight
 frames and 8 for the next eight, and the `JZ` turns that into a frame
 number of 0 or 1.
 
-The picture can come from a paint program instead. Save a PNG with a
-transparent background into `assets/` and write the header by hand:
+The picture can come from the IDE's sprite editor instead, or from a
+paint program. Save a PNG with a transparent background into `assets/`.
+`.sprite` places it with its header:
 
 ```asm
 .data
-ball:   db 1, 16, 16                  ; one frame, 16 by 16
-        .image('ball.png')            ; its pixels, straight after
+bug:    .sprite('bug.png')            ; the count, 8 by 8, both frames
 ```
 
-The pixels land right after the header, so `ball` names a complete
-blob. A picture in other colours is moved onto the 3-3-2 palette, and
+A strip from another program says nothing about its frames, so give the
+count: `.sprite('bug.png', 2)`. examples/pacman keeps every sprite this
+way, a PNG a strip, and the sprite editor opens them. A picture in other colours is moved onto the 3-3-2 palette, and
 the build says `colors quantized to the current palette`.
 
 `CMD_HIT_TEST` takes two sprites in `GPU_SPRITE` and `GPU_SPRITE_B` and

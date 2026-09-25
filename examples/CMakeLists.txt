@@ -63,13 +63,14 @@ foreach(dir IN LISTS SC8_EXAMPLE_DIRS)
     string(REGEX REPLACE "^#+ *" "" title "${first}")
   endif()
 
-  # Every .file('x'), .image('x'), .palette('x') and .sample('x') in the source.
+  # Every .file('x'), .image('x'), .palette('x'), .sample('x') and
+  # .sprite('x'), which may carry a count after the name, in the source.
   set(assets)
-  file(STRINGS "${src}" asset_lines REGEX "\\.(file|image|palette|sample)\\(")
+  file(STRINGS "${src}" asset_lines REGEX "\\.(file|image|palette|sample|sprite)\\(")
   foreach(line IN LISTS asset_lines)
-    string(REGEX MATCHALL "\\.(file|image|palette|sample)\\('([^']*)'\\)" refs "${line}")
+    string(REGEX MATCHALL "\\.(file|image|palette|sample|sprite)\\('([^']*)'" refs "${line}")
     foreach(ref IN LISTS refs)
-      string(REGEX REPLACE "^.*\\('([^']*)'\\)$" "\\1" asset "${ref}")
+      string(REGEX REPLACE "^.*\\('([^']*)'$" "\\1" asset "${ref}")
       list(APPEND assets "${dir}/${asset}")
     endforeach()
   endforeach()

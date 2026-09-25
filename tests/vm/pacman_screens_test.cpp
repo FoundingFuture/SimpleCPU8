@@ -146,4 +146,36 @@ TEST_CASE("pacman: attract screen, a key into the game, game over, a key back ro
   CHECK(vramHas(c.gpu(), MAZE_WALL));
   CHECK(c.machine().status == Status::Running);
 }
+TEST_CASE("pacman: the ghosts wear eight frame strips, and their skirts ripple as the game runs") {
+  std::ifstream in(std::string(SC8_ROM_DIR) + "/pacman.rom", std::ios::binary);
+  REQUIRE_MESSAGE(in, "pacman.rom is not built");
+  std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
+  CartridgeResult r = decodeCartridge(bytes);
+  REQUIRE_MESSAGE(r.cartridge, r.error);
+  Computer c;
+  c.setSeed(1);
+  c.insert(std::move(*r.cartridge));
+  runFrames(c, 70);
+  c.typeText(" ");
+  runFrames(c, 80);
+
+  // Sprites 2 to 5 are the ghosts, Pac-Man is 1 with his twelve frames.
+  REQUIRE(c.gpu().sprites[1]);
+  CHECK(c.gpu().sprites[1]->frames == 12);
+  for (size_t s = 2; s <= 5; s++) {
+    REQUIRE(c.gpu().sprites[s]);
+    CHECK(c.gpu().sprites[s]->frames == 8);
+  }
+  // Over 32 frames Blinky shows both skirts of a facing: frame 2d and 2d+1.
+  bool even = false, odd = false;
+  for (int i = 0; i < 32; i++) {
+    runFrames(c, 1);
+    const int f = c.gpu().sprites[2]->frame;
+    if (f % 2 == 0) even = true;
+    else odd = true;
+  }
+  CHECK(even);
+  CHECK(odd);
+}
+
 #endif

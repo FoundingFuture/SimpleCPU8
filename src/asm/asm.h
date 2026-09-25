@@ -76,8 +76,11 @@ struct Assembled {
   Cartridge cartridge() const;
 };
 
-// The .data directives that place an asset blob.
-constexpr std::string_view DATA_DIRECTIVES[] = {"file", "image", "palette", "sample"};
+// The .data directives that place an asset blob. `.sprite('x.png')` is the
+// CMD_SPRITE_DEF blob of a strip: the frame count, the frame's width and
+// height, then each frame row by row. `.sprite('x.png', n)` gives the
+// count; without it the PNG's own count is used, as C's __sprite does.
+constexpr std::string_view DATA_DIRECTIVES[] = {"file", "image", "palette", "sample", "sprite"};
 
 Assembled assemble(std::string_view source, const Assets* assets = nullptr);
 

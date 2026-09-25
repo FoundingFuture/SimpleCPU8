@@ -1,5 +1,6 @@
 #include "asm/asm.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <functional>
@@ -11,6 +12,7 @@
 #include "asm/expr.h"
 #include "core/machine.h"
 #include "devices/constants.h"
+#include "devices/gpu.h"
 
 namespace sc8 {
 
@@ -318,6 +320,7 @@ std::string directiveList() {
 // name may hold the other quote.
 struct Directive {
   std::string kind, name;
+  std::string frames;  // .sprite's optional count, an expression, or empty
 };
 
 std::optional<Directive> parseDataDirective(std::string_view line) {
@@ -327,12 +330,24 @@ std::optional<Directive> parseDataDirective(std::string_view line) {
     std::string_view rest = trim(line.substr(1 + d.size()));
     if (rest.size() < 4 || rest.front() != '(' || rest.back() != ')') continue;
     std::string_view arg = trim(rest.substr(1, rest.size() - 2));
+    // .sprite may name its frame count after the file name.
+    std::string frames;
+    if (d == "sprite" && arg.size() >= 2 && (arg.front() == '\'' || arg.front() == '"')) {
+      const size_t close = arg.find(arg.front(), 1);
+      if (close != std::string_view::npos && close + 1 < arg.size()) {
+        std::string_view after = trim(arg.substr(close + 1));
+        if (after.empty() || after.front() != ',') continue;
+        frames = std::string(trim(after.substr(1)));
+        if (frames.empty()) continue;
+        arg = arg.substr(0, close + 1);
+      }
+    }
     if (arg.size() < 2) continue;
     const char q = arg.front();
     if ((q != '\'' && q != '"') || arg.back() != q) continue;
     std::string_view name = arg.substr(1, arg.size() - 2);
     if (name.empty() || name.find(q) != std::string_view::npos) continue;
-    return Directive{std::string(d), std::string(name)};
+    return Directive{std::string(d), std::string(name), frames};
   }
   return std::nullopt;
 }
@@ -454,7 +469,8 @@ class Assembler {
   // Place a directive's blob and return its cartridge offset plus its
   // length. A deduplicated blob returns an earlier offset and grows the
   // cartridge by nothing, so the length must come back from here.
-  std::optional<Placed> dataDirective(int line, const std::string& kind, const std::string& name) {
+  std::optional<Placed> dataDirective(int line, const std::string& kind, const std::string& name,
+                                      const std::string& framesExpr = "") {
     if (kind == "file" || kind == "sample") {
       const std::vector<uint8_t>* bytes = nullptr;
       if (kind == "file") bytes = asset(files_, assets_ ? assets_->loadFile : nullptr, name);
@@ -470,8 +486,58 @@ class Assembler {
       err(line, "unknown image: " + name + " (add it to the project assets)");
       return std::nullopt;
     }
+    if (kind == "sprite") {
+      std::vector<uint8_t> blob;
+      if (!spriteBlob(line, *img, name, framesExpr, blob)) return std::nullopt;
+      return Placed{placeBlob(line, blob), blob.size()};
+    }
     const std::vector<uint8_t>& bytes = kind == "image" ? img->pixels : img->palette;
     return Placed{placeBlob(line, bytes), bytes.size()};
+  }
+
+  // The CMD_SPRITE_DEF blob of a strip, the frames side by side in the
+  // picture. The same rules and messages as C's __sprite.
+  bool spriteBlob(int line, const ImageAsset& img, const std::string& name, const std::string& framesExpr,
+                  std::vector<uint8_t>& out) {
+    int frames = img.frames > 0 ? img.frames : 1;
+    if (!framesExpr.empty()) {
+      auto n = constantValue(framesExpr);
+      if (!n) {
+        err(line, name + ": .sprite needs a frame count the assembler can work out here, and not a label");
+        return false;
+      }
+      if (*n < 1) {
+        err(line, name + ": .sprite needs at least one frame");
+        return false;
+      }
+      frames = static_cast<int>(std::min<int64_t>(*n, 1 << 20));
+    }
+    if (frames > gpu::SPRITE_FRAMES_MAX) {
+      err(line, name + ": .sprite takes at most " + std::to_string(gpu::SPRITE_FRAMES_MAX) + " frames");
+      return false;
+    }
+    if (img.width < 1 || img.height < 1 || img.width % frames != 0) {
+      err(line, name + ": " + std::to_string(img.width) + " pixels wide does not divide into " +
+                    std::to_string(frames) + " frames for .sprite");
+      return false;
+    }
+    const int fw = img.width / frames, fh = img.height;
+    if (fw > gpu::SPRITE_MAX || fh > gpu::SPRITE_MAX) {
+      err(line, name + ": a frame is " + std::to_string(fw) + " x " + std::to_string(fh) +
+                    " and a sprite is at most " + std::to_string(gpu::SPRITE_MAX) + " pixels a side");
+      return false;
+    }
+    out.push_back(static_cast<uint8_t>(frames));
+    out.push_back(static_cast<uint8_t>(fw));
+    out.push_back(static_cast<uint8_t>(fh));
+    for (int f = 0; f < frames; f++) {
+      for (int y = 0; y < fh; y++) {
+        const auto row = static_cast<size_t>(y * img.width + f * fw);
+        out.insert(out.end(), img.pixels.begin() + static_cast<long>(row),
+                   img.pixels.begin() + static_cast<long>(row + static_cast<size_t>(fw)));
+      }
+    }
+    return true;
   }
 
   void passOne() {
@@ -575,7 +641,7 @@ class Assembler {
 
       if (section == Section::Data) {
         if (auto dir = parseDataDirective(line)) {
-          auto placed = dataDirective(lineNo, dir->kind, dir->name);
+          auto placed = dataDirective(lineNo, dir->kind, dir->name, dir->frames);
           if (dataLabel) {
             defineLabel(lineNo, *dataLabel, Label::Kind::Data,
                         static_cast<int64_t>(placed ? placed->at : cartOffset_));

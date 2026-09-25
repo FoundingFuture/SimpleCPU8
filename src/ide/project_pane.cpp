@@ -799,7 +799,7 @@ void Ide::filesPane(const char* name, bool* open) {
     }
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("%s, %ju bytes. C names it as __sprite(\"%s\"), __image, __sample or __file; "
-                        "assembly as .image('%s'), .sample or .file.%s",
+                        "assembly as .sprite('%s'), .image, .sample or .file.%s",
                         a.name.c_str(), a.bytes, a.name.c_str(), a.name.c_str(),
                         picture ? " A double click opens it in the sprite editor." : "");
     }

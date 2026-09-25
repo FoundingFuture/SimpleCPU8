@@ -96,8 +96,8 @@
         OUT GPU_SRC_LO, get_lowbyte(pacspr)
         OUT GPU_CMD, CMD_SPRITE_DEF
 
-; --- the four ghosts, sprites 2 to 5. Each strip is four frames, one per
-; facing, so a ghost's frame index is its direction with no arithmetic.
+; --- the four ghosts, sprites 2 to 5. Each strip is eight frames, two per
+; facing, so a ghost's frame is its direction times two plus the skirt.
 ; DESIGN: OVERRIDE. A loop over ghsttab, where this was four near-identical
 ; blocks. get_bankbyte and its two siblings resolve at assembly time, so a
 ; strip's cartridge address is a constant baked into the OUT that carries it
@@ -3959,8 +3959,8 @@ rpx:    RET
 ; DESIGN: the frame comes from a different place for each kind of actor.
 ; Pac-Man's strip is twelve frames, four facings times three mouth positions,
 ; so setframe computes dir times 3 plus phase and writes the port itself. A
-; ghost's strip is four frames, one per facing, so the direction IS the frame
-; and there is nothing to compute.
+; ghost's strip is eight frames, two per facing, so its frame is the
+; direction times two plus the skirt gwig gives.
 ; DESIGN: the draw owns the ART as well as the frame, through adstrip below.
 ; The state byte says what a ghost IS and the strip says what a player SEES,
 ; and they are two facts that must never disagree. They were kept in step by
@@ -3970,10 +3970,10 @@ rpx:    RET
 ; board that cannot touch you. The owner met it in a real game. Nothing writes
 ; a strip at runtime any more except the routine that draws.
 ; DESIGN: an eaten ghost needs no arm of its own here, and that is why the
-; eyes strip carries four frames rather than one. State 3 falls past the state
-; 2 test onto the direction path above, so a pair of eyes faces the way it is
-; travelling for free. A one frame strip would have worked too and would have
-; cost this routine a third branch.
+; eyes strip carries eight frames, each facing twice, rather than one. State 3
+; falls past the state 2 test onto the direction path above, so a pair of
+; eyes faces the way it is travelling for free. A one frame strip would have
+; worked too and would have cost this routine a third branch.
 ; DESIGN: the sprite id is written again before every command, because the
 ; data ports clear behind each one. It is kept in aspr rather than recomputed,
 ; so the three commands below cannot disagree about which sprite they mean.
@@ -3987,31 +3987,50 @@ actdraw: LD A <- [acti]
         CMP A, 2
         JZ adfrgh
         LD A <- [adir]
+        SHL A                ; two frames a facing
+        LD [adfr] <- A
+        JSR gwig
+        ADD A <- [adfr]
         JSR adframe
         JMP adxy
 ; --- a frightened ghost's frame comes from the clock, not from its facing.
-; DESIGN: writing adir here would be wrong and not merely pointless. The
-; frightened strip is two frames and a direction is 0 to 3, and the GPU takes
-; a frame number modulo the strip's own length. Directions are 0 right, 1
-; down, 2 left, 3 up, so dir modulo 2 is 1 for DOWN and UP: a ghost facing
-; either of those would show the white flash for as long as it faced that
-; way, and left, being 2, would show blue. The four frame strips every other
-; ghost uses are unaffected, 0 to 3 modulo 4 being the identity.
+; DESIGN: writing the facing here would be wrong and not merely pointless.
+; The frightened strip is four frames and a facing's frame is 0 to 7, and
+; the GPU takes a frame number modulo the strip's own length. Facing down or
+; up would land on 2 to 3 or 6 to 7, the white flash, for as long as the
+; ghost faced that way. The eight frame strips every other ghost uses are
+; unaffected, 0 to 7 modulo 8 being the identity.
 ; DESIGN: it alternates once fewer than PACMAN_FLASH_UNITS units are left, on
 ; bit 0 of the countdown, so the flash costs one AND. The compare is a strict
 ; "less than", so the flashing span is one unit shorter than the constant. One
 ; clock drives all four, so they flash on the same frame, which is what makes
 ; it read as a warning rather than as four ghosts blinking.
+; The strip is blue in frames 0 and 1 and white in 2 and 3, and the skirt
+; picks between the two of a colour.
 adfrgh: LD A <- [frtk]
         CMP A, 15
         JC adflash           ; borrow: inside the last units of the window
-        LD A <- 0
+        JSR gwig             ; blue, and the skirt
         JSR adframe
         JMP adxy
 adflash: LD A <- [frtk]
         AND A <- 1
+        SHL A                ; 0 blue, 2 white
+        LD [adfr] <- A
+        JSR gwig
+        ADD A <- [adfr]
         JSR adframe
         JMP adxy
+
+; --- the skirt: A := 0 or 1, turning over every eight frames of the GPU
+; clock. One clock for every ghost, so the four ripple together, as the
+; arcade's do.
+gwig:   LD A <- [mainfr]
+        SHR A
+        SHR A
+        SHR A
+        AND A <- 1
+        RET
 adpacf: JSR setframe
 adxy:   LD A <- [aspr]
         OUTA GPU_SPRITE
@@ -5110,6 +5129,7 @@ pacnext: db 3
 t3:     db 0
 t4:     db 0
 aspr:   db 0
+adfr:   db 0                   ; a ghost's frame before the skirt is added
 gs0:    db 0
 gs1:    db 0
 gs2:    db 0
@@ -8535,431 +8555,27 @@ bigttl: db 0, 7, 14, 21, 28, 7, 35, 255       ; PAC-MAN
 biggame: db 42, 7, 28, 49, 255                ; GAME
 bigover: db 56, 63, 49, 70, 255               ; OVER
 .data
-; DESIGN: scripts/gensprites.mjs generates pacspr and the four ghostNspr
-; strips by maths, not hand-typed bitmaps, so a palette change is one edit.
-; See pacman-sprites.ts. $FC is Pac-Man yellow under default332()
-; (R=(i>>5)&7, G=(i>>2)&7, B=i&3): R7 G7 B0, RGB(255,255,0).
-pacspr: db 12, 12, 12
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00, $00, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00, $00, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00, $00, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00, $00, $00, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00, $00, $00, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $00, $00, $FC, $FC, $FC, $FC, $FC
-        db $00, $FC, $FC, $FC, $FC, $00, $00, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $00, $00, $00, $00, $FC, $FC, $FC, $00
-        db $00, $00, $FC, $FC, $00, $00, $00, $00, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $00, $00, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $00, $00, $00, $00, $FC, $FC, $FC, $FC
-        db $00, $FC, $FC, $00, $00, $00, $00, $00, $00, $FC, $FC, $00
-        db $00, $FC, $00, $00, $00, $00, $00, $00, $00, $00, $FC, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $00, $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $00, $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $00, $00, $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $00, $00, $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $00, $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $FC, $FC, $00, $00, $00, $00, $FC, $FC, $00, $00
-        db $00, $FC, $FC, $FC, $00, $00, $00, $00, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $00, $00, $FC, $FC, $FC, $FC, $00
-        db $FC, $FC, $FC, $FC, $FC, $00, $00, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $FC, $00, $00, $00, $00, $00, $00, $00, $00, $FC, $00
-        db $00, $FC, $FC, $00, $00, $00, $00, $00, $00, $FC, $FC, $00
-        db $FC, $FC, $FC, $FC, $00, $00, $00, $00, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $00, $00, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00
-        db $00, $00, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $FC, $00, $00
-        db $00, $00, $00, $00, $FC, $FC, $FC, $FC, $00, $00, $00, $00
-
-ghost0spr: db 4, 12, 12
-        db $00, $00, $00, $E0, $E0, $E0, $E0, $E0, $E0, $00, $00, $00
-        db $00, $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00, $00
-        db $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00
-        db $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00
-        db $E0, $FF, $FF, $FF, $FF, $E0, $E0, $FF, $FF, $FF, $FF, $E0
-        db $E0, $FF, $FF, $04, $04, $E0, $E0, $FF, $FF, $04, $04, $E0
-        db $E0, $FF, $FF, $04, $04, $E0, $E0, $FF, $FF, $04, $04, $E0
-        db $E0, $FF, $FF, $FF, $FF, $E0, $E0, $FF, $FF, $FF, $FF, $E0
-        db $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0
-        db $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0
-        db $E0, $E0, $E0, $00, $00, $E0, $E0, $00, $00, $E0, $E0, $E0
-        db $E0, $E0, $E0, $00, $00, $E0, $E0, $00, $00, $E0, $E0, $E0
-        db $00, $00, $00, $E0, $E0, $E0, $E0, $E0, $E0, $00, $00, $00
-        db $00, $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00, $00
-        db $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00
-        db $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00
-        db $E0, $FF, $FF, $FF, $FF, $E0, $E0, $FF, $FF, $FF, $FF, $E0
-        db $E0, $FF, $FF, $FF, $FF, $E0, $E0, $FF, $FF, $FF, $FF, $E0
-        db $E0, $FF, $04, $04, $FF, $E0, $E0, $FF, $04, $04, $FF, $E0
-        db $E0, $FF, $04, $04, $FF, $E0, $E0, $FF, $04, $04, $FF, $E0
-        db $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0
-        db $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0
-        db $E0, $E0, $E0, $00, $00, $E0, $E0, $00, $00, $E0, $E0, $E0
-        db $E0, $E0, $E0, $00, $00, $E0, $E0, $00, $00, $E0, $E0, $E0
-        db $00, $00, $00, $E0, $E0, $E0, $E0, $E0, $E0, $00, $00, $00
-        db $00, $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00, $00
-        db $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00
-        db $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00
-        db $E0, $FF, $FF, $FF, $FF, $E0, $E0, $FF, $FF, $FF, $FF, $E0
-        db $E0, $04, $04, $FF, $FF, $E0, $E0, $04, $04, $FF, $FF, $E0
-        db $E0, $04, $04, $FF, $FF, $E0, $E0, $04, $04, $FF, $FF, $E0
-        db $E0, $FF, $FF, $FF, $FF, $E0, $E0, $FF, $FF, $FF, $FF, $E0
-        db $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0
-        db $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0
-        db $E0, $E0, $E0, $00, $00, $E0, $E0, $00, $00, $E0, $E0, $E0
-        db $E0, $E0, $E0, $00, $00, $E0, $E0, $00, $00, $E0, $E0, $E0
-        db $00, $00, $00, $E0, $E0, $E0, $E0, $E0, $E0, $00, $00, $00
-        db $00, $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00, $00
-        db $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00
-        db $00, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $00
-        db $E0, $FF, $04, $04, $FF, $E0, $E0, $FF, $04, $04, $FF, $E0
-        db $E0, $FF, $04, $04, $FF, $E0, $E0, $FF, $04, $04, $FF, $E0
-        db $E0, $FF, $FF, $FF, $FF, $E0, $E0, $FF, $FF, $FF, $FF, $E0
-        db $E0, $FF, $FF, $FF, $FF, $E0, $E0, $FF, $FF, $FF, $FF, $E0
-        db $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0
-        db $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0, $E0
-        db $E0, $E0, $E0, $00, $00, $E0, $E0, $00, $00, $E0, $E0, $E0
-        db $E0, $E0, $E0, $00, $00, $E0, $E0, $00, $00, $E0, $E0, $E0
-
-ghost1spr: db 4, 12, 12
-        db $00, $00, $00, $F3, $F3, $F3, $F3, $F3, $F3, $00, $00, $00
-        db $00, $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00, $00
-        db $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00
-        db $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00
-        db $F3, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $FF, $FF, $F3
-        db $F3, $FF, $FF, $04, $04, $F3, $F3, $FF, $FF, $04, $04, $F3
-        db $F3, $FF, $FF, $04, $04, $F3, $F3, $FF, $FF, $04, $04, $F3
-        db $F3, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $FF, $FF, $F3
-        db $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3
-        db $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3
-        db $F3, $F3, $F3, $00, $00, $F3, $F3, $00, $00, $F3, $F3, $F3
-        db $F3, $F3, $F3, $00, $00, $F3, $F3, $00, $00, $F3, $F3, $F3
-        db $00, $00, $00, $F3, $F3, $F3, $F3, $F3, $F3, $00, $00, $00
-        db $00, $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00, $00
-        db $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00
-        db $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00
-        db $F3, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $FF, $FF, $F3
-        db $F3, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $FF, $FF, $F3
-        db $F3, $FF, $04, $04, $FF, $F3, $F3, $FF, $04, $04, $FF, $F3
-        db $F3, $FF, $04, $04, $FF, $F3, $F3, $FF, $04, $04, $FF, $F3
-        db $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3
-        db $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3
-        db $F3, $F3, $F3, $00, $00, $F3, $F3, $00, $00, $F3, $F3, $F3
-        db $F3, $F3, $F3, $00, $00, $F3, $F3, $00, $00, $F3, $F3, $F3
-        db $00, $00, $00, $F3, $F3, $F3, $F3, $F3, $F3, $00, $00, $00
-        db $00, $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00, $00
-        db $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00
-        db $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00
-        db $F3, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $FF, $FF, $F3
-        db $F3, $04, $04, $FF, $FF, $F3, $F3, $04, $04, $FF, $FF, $F3
-        db $F3, $04, $04, $FF, $FF, $F3, $F3, $04, $04, $FF, $FF, $F3
-        db $F3, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $FF, $FF, $F3
-        db $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3
-        db $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3
-        db $F3, $F3, $F3, $00, $00, $F3, $F3, $00, $00, $F3, $F3, $F3
-        db $F3, $F3, $F3, $00, $00, $F3, $F3, $00, $00, $F3, $F3, $F3
-        db $00, $00, $00, $F3, $F3, $F3, $F3, $F3, $F3, $00, $00, $00
-        db $00, $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00, $00
-        db $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00
-        db $00, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $00
-        db $F3, $FF, $04, $04, $FF, $F3, $F3, $FF, $04, $04, $FF, $F3
-        db $F3, $FF, $04, $04, $FF, $F3, $F3, $FF, $04, $04, $FF, $F3
-        db $F3, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $FF, $FF, $F3
-        db $F3, $FF, $FF, $FF, $FF, $F3, $F3, $FF, $FF, $FF, $FF, $F3
-        db $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3
-        db $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3, $F3
-        db $F3, $F3, $F3, $00, $00, $F3, $F3, $00, $00, $F3, $F3, $F3
-        db $F3, $F3, $F3, $00, $00, $F3, $F3, $00, $00, $F3, $F3, $F3
-
-ghost2spr: db 4, 12, 12
-        db $00, $00, $00, $1F, $1F, $1F, $1F, $1F, $1F, $00, $00, $00
-        db $00, $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00, $00
-        db $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00
-        db $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00
-        db $1F, $FF, $FF, $FF, $FF, $1F, $1F, $FF, $FF, $FF, $FF, $1F
-        db $1F, $FF, $FF, $04, $04, $1F, $1F, $FF, $FF, $04, $04, $1F
-        db $1F, $FF, $FF, $04, $04, $1F, $1F, $FF, $FF, $04, $04, $1F
-        db $1F, $FF, $FF, $FF, $FF, $1F, $1F, $FF, $FF, $FF, $FF, $1F
-        db $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F
-        db $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F
-        db $1F, $1F, $1F, $00, $00, $1F, $1F, $00, $00, $1F, $1F, $1F
-        db $1F, $1F, $1F, $00, $00, $1F, $1F, $00, $00, $1F, $1F, $1F
-        db $00, $00, $00, $1F, $1F, $1F, $1F, $1F, $1F, $00, $00, $00
-        db $00, $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00, $00
-        db $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00
-        db $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00
-        db $1F, $FF, $FF, $FF, $FF, $1F, $1F, $FF, $FF, $FF, $FF, $1F
-        db $1F, $FF, $FF, $FF, $FF, $1F, $1F, $FF, $FF, $FF, $FF, $1F
-        db $1F, $FF, $04, $04, $FF, $1F, $1F, $FF, $04, $04, $FF, $1F
-        db $1F, $FF, $04, $04, $FF, $1F, $1F, $FF, $04, $04, $FF, $1F
-        db $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F
-        db $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F
-        db $1F, $1F, $1F, $00, $00, $1F, $1F, $00, $00, $1F, $1F, $1F
-        db $1F, $1F, $1F, $00, $00, $1F, $1F, $00, $00, $1F, $1F, $1F
-        db $00, $00, $00, $1F, $1F, $1F, $1F, $1F, $1F, $00, $00, $00
-        db $00, $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00, $00
-        db $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00
-        db $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00
-        db $1F, $FF, $FF, $FF, $FF, $1F, $1F, $FF, $FF, $FF, $FF, $1F
-        db $1F, $04, $04, $FF, $FF, $1F, $1F, $04, $04, $FF, $FF, $1F
-        db $1F, $04, $04, $FF, $FF, $1F, $1F, $04, $04, $FF, $FF, $1F
-        db $1F, $FF, $FF, $FF, $FF, $1F, $1F, $FF, $FF, $FF, $FF, $1F
-        db $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F
-        db $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F
-        db $1F, $1F, $1F, $00, $00, $1F, $1F, $00, $00, $1F, $1F, $1F
-        db $1F, $1F, $1F, $00, $00, $1F, $1F, $00, $00, $1F, $1F, $1F
-        db $00, $00, $00, $1F, $1F, $1F, $1F, $1F, $1F, $00, $00, $00
-        db $00, $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00, $00
-        db $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00
-        db $00, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $00
-        db $1F, $FF, $04, $04, $FF, $1F, $1F, $FF, $04, $04, $FF, $1F
-        db $1F, $FF, $04, $04, $FF, $1F, $1F, $FF, $04, $04, $FF, $1F
-        db $1F, $FF, $FF, $FF, $FF, $1F, $1F, $FF, $FF, $FF, $FF, $1F
-        db $1F, $FF, $FF, $FF, $FF, $1F, $1F, $FF, $FF, $FF, $FF, $1F
-        db $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F
-        db $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F, $1F
-        db $1F, $1F, $1F, $00, $00, $1F, $1F, $00, $00, $1F, $1F, $1F
-        db $1F, $1F, $1F, $00, $00, $1F, $1F, $00, $00, $1F, $1F, $1F
-
-ghost3spr: db 4, 12, 12
-        db $00, $00, $00, $F0, $F0, $F0, $F0, $F0, $F0, $00, $00, $00
-        db $00, $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00, $00
-        db $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00
-        db $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00
-        db $F0, $FF, $FF, $FF, $FF, $F0, $F0, $FF, $FF, $FF, $FF, $F0
-        db $F0, $FF, $FF, $04, $04, $F0, $F0, $FF, $FF, $04, $04, $F0
-        db $F0, $FF, $FF, $04, $04, $F0, $F0, $FF, $FF, $04, $04, $F0
-        db $F0, $FF, $FF, $FF, $FF, $F0, $F0, $FF, $FF, $FF, $FF, $F0
-        db $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0
-        db $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0
-        db $F0, $F0, $F0, $00, $00, $F0, $F0, $00, $00, $F0, $F0, $F0
-        db $F0, $F0, $F0, $00, $00, $F0, $F0, $00, $00, $F0, $F0, $F0
-        db $00, $00, $00, $F0, $F0, $F0, $F0, $F0, $F0, $00, $00, $00
-        db $00, $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00, $00
-        db $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00
-        db $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00
-        db $F0, $FF, $FF, $FF, $FF, $F0, $F0, $FF, $FF, $FF, $FF, $F0
-        db $F0, $FF, $FF, $FF, $FF, $F0, $F0, $FF, $FF, $FF, $FF, $F0
-        db $F0, $FF, $04, $04, $FF, $F0, $F0, $FF, $04, $04, $FF, $F0
-        db $F0, $FF, $04, $04, $FF, $F0, $F0, $FF, $04, $04, $FF, $F0
-        db $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0
-        db $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0
-        db $F0, $F0, $F0, $00, $00, $F0, $F0, $00, $00, $F0, $F0, $F0
-        db $F0, $F0, $F0, $00, $00, $F0, $F0, $00, $00, $F0, $F0, $F0
-        db $00, $00, $00, $F0, $F0, $F0, $F0, $F0, $F0, $00, $00, $00
-        db $00, $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00, $00
-        db $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00
-        db $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00
-        db $F0, $FF, $FF, $FF, $FF, $F0, $F0, $FF, $FF, $FF, $FF, $F0
-        db $F0, $04, $04, $FF, $FF, $F0, $F0, $04, $04, $FF, $FF, $F0
-        db $F0, $04, $04, $FF, $FF, $F0, $F0, $04, $04, $FF, $FF, $F0
-        db $F0, $FF, $FF, $FF, $FF, $F0, $F0, $FF, $FF, $FF, $FF, $F0
-        db $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0
-        db $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0
-        db $F0, $F0, $F0, $00, $00, $F0, $F0, $00, $00, $F0, $F0, $F0
-        db $F0, $F0, $F0, $00, $00, $F0, $F0, $00, $00, $F0, $F0, $F0
-        db $00, $00, $00, $F0, $F0, $F0, $F0, $F0, $F0, $00, $00, $00
-        db $00, $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00, $00
-        db $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00
-        db $00, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $00
-        db $F0, $FF, $04, $04, $FF, $F0, $F0, $FF, $04, $04, $FF, $F0
-        db $F0, $FF, $04, $04, $FF, $F0, $F0, $FF, $04, $04, $FF, $F0
-        db $F0, $FF, $FF, $FF, $FF, $F0, $F0, $FF, $FF, $FF, $FF, $F0
-        db $F0, $FF, $FF, $FF, $FF, $F0, $F0, $FF, $FF, $FF, $FF, $F0
-        db $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0
-        db $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0, $F0
-        db $F0, $F0, $F0, $00, $00, $F0, $F0, $00, $00, $F0, $F0, $F0
-        db $F0, $F0, $F0, $00, $00, $F0, $F0, $00, $00, $F0, $F0, $F0
-
-frightspr: db 2, 12, 12
-        db $00, $00, $00, $27, $27, $27, $27, $27, $27, $00, $00, $00
-        db $00, $00, $27, $27, $27, $27, $27, $27, $27, $27, $00, $00
-        db $00, $27, $27, $27, $27, $27, $27, $27, $27, $27, $27, $00
-        db $00, $27, $27, $27, $27, $27, $27, $27, $27, $27, $27, $00
-        db $27, $27, $FF, $FF, $27, $27, $27, $27, $FF, $FF, $27, $27
-        db $27, $27, $FF, $FF, $27, $27, $27, $27, $FF, $FF, $27, $27
-        db $27, $27, $27, $27, $27, $27, $27, $27, $27, $27, $27, $27
-        db $27, $FF, $FF, $27, $27, $FF, $FF, $27, $27, $FF, $FF, $27
-        db $27, $27, $27, $FF, $FF, $27, $27, $FF, $FF, $27, $27, $27
-        db $27, $27, $27, $27, $27, $27, $27, $27, $27, $27, $27, $27
-        db $27, $27, $27, $00, $00, $27, $27, $00, $00, $27, $27, $27
-        db $27, $27, $27, $00, $00, $27, $27, $00, $00, $27, $27, $27
-        db $00, $00, $00, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00, $00
-        db $00, $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00, $00
-        db $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00
-        db $00, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $00
-        db $FF, $FF, $E0, $E0, $FF, $FF, $FF, $FF, $E0, $E0, $FF, $FF
-        db $FF, $FF, $E0, $E0, $FF, $FF, $FF, $FF, $E0, $E0, $FF, $FF
-        db $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-        db $FF, $E0, $E0, $FF, $FF, $E0, $E0, $FF, $FF, $E0, $E0, $FF
-        db $FF, $FF, $FF, $E0, $E0, $FF, $FF, $E0, $E0, $FF, $FF, $FF
-        db $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-        db $FF, $FF, $FF, $00, $00, $FF, $FF, $00, $00, $FF, $FF, $FF
-        db $FF, $FF, $FF, $00, $00, $FF, $FF, $00, $00, $FF, $FF, $FF
-
-eyesspr: db 4, 12, 12
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $FF, $FF, $FF, $FF, $00, $00, $FF, $FF, $FF, $FF, $00
-        db $00, $FF, $FF, $04, $04, $00, $00, $FF, $FF, $04, $04, $00
-        db $00, $FF, $FF, $04, $04, $00, $00, $FF, $FF, $04, $04, $00
-        db $00, $FF, $FF, $FF, $FF, $00, $00, $FF, $FF, $FF, $FF, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $FF, $FF, $FF, $FF, $00, $00, $FF, $FF, $FF, $FF, $00
-        db $00, $FF, $FF, $FF, $FF, $00, $00, $FF, $FF, $FF, $FF, $00
-        db $00, $FF, $04, $04, $FF, $00, $00, $FF, $04, $04, $FF, $00
-        db $00, $FF, $04, $04, $FF, $00, $00, $FF, $04, $04, $FF, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $FF, $FF, $FF, $FF, $00, $00, $FF, $FF, $FF, $FF, $00
-        db $00, $04, $04, $FF, $FF, $00, $00, $04, $04, $FF, $FF, $00
-        db $00, $04, $04, $FF, $FF, $00, $00, $04, $04, $FF, $FF, $00
-        db $00, $FF, $FF, $FF, $FF, $00, $00, $FF, $FF, $FF, $FF, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $FF, $04, $04, $FF, $00, $00, $FF, $04, $04, $FF, $00
-        db $00, $FF, $04, $04, $FF, $00, $00, $FF, $04, $04, $FF, $00
-        db $00, $FF, $FF, $FF, $FF, $00, $00, $FF, $FF, $FF, $FF, $00
-        db $00, $FF, $FF, $FF, $FF, $00, $00, $FF, $FF, $FF, $FF, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-        db $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
+; --- the sprites, one PNG strip each, beside this file. The IDE's sprite
+; editor opens them from the Files pane. .sprite reads the frame count the
+; PNG states and lays the strip out as CMD_SPRITE_DEF wants it.
+; DESIGN: the strips are drawn on the machine palette. $FC is Pac-Man
+; yellow under default332() (R=(i>>5)&7, G=(i>>2)&7, B=i&3): R7 G7 B0,
+; RGB(255,255,0). The pupils are index 4, which the editor shows in the
+; default palette's dark green: the program sets 4 to near black at start.
+; No sprite colour may sit in 1 to 3, which the maze fades rewrite.
+; DESIGN: Pac-Man is twelve frames, four facings times three mouth
+; positions. A ghost is eight, two per facing, the second with the other
+; skirt, so the body ripples as it moves. The frightened strip is four:
+; blue, blue, white, white, each pair a skirt and the other. The eyes are
+; eight, each facing twice, so a pair of eyes takes the same frame number
+; as the ghost it was.
+pacspr: .sprite('pacman.png')
+ghost0spr: .sprite('blinky.png')
+ghost1spr: .sprite('pinky.png')
+ghost2spr: .sprite('inky.png')
+ghost3spr: .sprite('clyde.png')
+frightspr: .sprite('fright.png')
+eyesspr: .sprite('eyes.png')
 ; DESIGN: scripts/genpacsound.mjs synthesises the seven samples the same way,
 ; from a handful of frequencies rather than from typed bytes. See
 ; pacman-sound.ts, and the sndinit block above for the defines that go with

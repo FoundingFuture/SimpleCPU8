@@ -444,14 +444,15 @@ In assembly:
 
 ```asm
 .data
-ball:   db 1, 16, 16
-        .image('ball.png')
+ship:   .sprite('ship.png')
+hill:   db 32, 16
+        .image('hill.png')
 ```
 
 | C | Assembly | Takes |
 |---|---|---|
 | `__image("x.png")` | `.image('x.png')` | a picture up to 256 by 256 |
-| `__sprite("x.png", n)` | a header and `.image` | a strip of n frames side by side, each up to 64 by 64. Without n, the count the sprite editor saved in the PNG |
+| `__sprite("x.png", n)` | `.sprite('x.png', n)` | a strip of n frames side by side, each up to 64 by 64. Without n, the count the sprite editor saved in the PNG |
 | `__palette("x.png")` | `.palette('x.png')` | a picture's 256 colours |
 | `__sample("x.wav")` | `.sample('x.wav')` | a sound, made 8 bit mono at 8000 a second |
 | `__file("x.bin")` | `.file('x.bin')` | any bytes as they are |

@@ -204,6 +204,37 @@ TEST_SUITE("assembler .ram and .data") {
     CHECK(a.assets[0] == RomAsset{"file", "one", 0, 3});
   }
 
+  TEST_CASE(".sprite places the CMD_SPRITE_DEF blob, each frame cut out of the strip") {
+    Assets assets;
+    ImageAsset strip;  // two 2 x 2 frames side by side, the PNG saying 2
+    strip.width = 4;
+    strip.height = 2;
+    strip.pixels = {1, 2, 3, 4, 5, 6, 7, 8};
+    strip.frames = 2;
+    assets.images["ship.png"] = strip;
+    Assembled a = assemble("NOP\n.data\ns: .sprite('ship.png')\none: .sprite('ship.png', 1)", &assets);
+    REQUIRE(a.errors.empty());
+    CHECK(a.cart == std::vector<uint8_t>{2, 2, 2, 1, 2, 5, 6, 3, 4, 7, 8, 1, 4, 2, 1, 2, 3, 4, 5, 6, 7, 8});
+    CHECK(a.assets[0] == RomAsset{"sprite", "s", 0, 11});
+  }
+
+  TEST_CASE(".sprite refuses a count that does not fit the strip") {
+    Assets assets;
+    ImageAsset strip;
+    strip.width = 4;
+    strip.height = 2;
+    strip.pixels.assign(8, 1);
+    assets.images["ship.png"] = strip;
+    auto error = [&](const std::string& src) {
+      Assembled a = assemble(src, &assets);
+      return a.errors.empty() ? std::string("no error") : a.errors.front().message;
+    };
+    CHECK(has(error("NOP\n.data\ns: .sprite('ship.png', 3)"), "does not divide into 3 frames"));
+    CHECK(has(error("NOP\n.data\ns: .sprite('ship.png', 0)"), "at least one frame"));
+    CHECK(has(error("NOP\n.data\ns: .sprite('ship.png', 17)"), "at most 16 frames"));
+    CHECK(has(error("NOP\n.data\ns: .sprite('gone.png')"), "unknown image: gone.png"));
+  }
+
   TEST_CASE("a missing asset is asked of the loader before it is an error") {
     Assets assets;
     assets.loadFile = [](std::string_view name) -> std::optional<std::vector<uint8_t>> {

@@ -10,6 +10,11 @@ the maze through the printf overlay. They print only when one of them
 changes. Any key starts a game from the attract screen, where the ghosts
 introduce themselves and chase Pac-Man. Steer with the arrows. The last
 life leads to a game over screen, and a key there goes back to the attract
-screen. Nothing halts. The mazes,
-sprites and sounds sit in .data as db lines. genmazes.mjs, gensprites.mjs
-and genpacsound.mjs of the browser project generated them.
+screen. Nothing halts. The ghosts' skirts ripple as they move.
+
+The sprites are PNG strips beside the source, placed with `.sprite`, so
+the IDE's sprite editor opens them. Pac-Man is twelve frames. Each ghost
+is eight, two per facing. The frightened ghost is four and the eyes are
+eight. The
+mazes and sounds sit in .data as db lines. genmazes.mjs and
+genpacsound.mjs of the browser project generated them.
