@@ -550,10 +550,18 @@ program needs a row of numbers, `POKE` them into a run of boxes and
 ## Drawing
 
 Six words draw on the 256 by 256 screen. `PAPER` fills it with a colour.
-`INK` picks the pen. `MOVE` puts the pen at a point without drawing.
-`DRAW` draws a line from the pen to a point. `CIRCLE` fills a disc
-around the pen. `PLOT` puts one white dot at a point. `PIXEL(X,Y)` reads
-the colour of a pixel back.
+`INK` picks the pen, and everything drawn after it takes that colour.
+The pen starts white. `MOVE` puts the pen at a point without drawing.
+`DRAW` draws a line from the pen to a point. `PLOT` puts one dot at a
+point. `CIRCLE` draws a ring around the pen. `PIXEL(X,Y)` reads the
+colour of a pixel back.
+
+`CIRCLE` takes up to three numbers: the radius across, the radius down
+and a fill colour. `CIRCLE 40` is a round ring. `CIRCLE 40,20` is an
+oval, twice as wide as it is tall. `CIRCLE 40,40,224` is a round ring
+filled with red. The ring is in the `INK` colour and the fill in the
+third number, so a disc can have a rim of another colour. The three may
+sit in brackets, as `CIRCLE(40,40,224)`.
 
 A colour is a number from 0 to 255. Multiply the red by 32 and the green
 by 4, then add the blue. Red and green go from 0 to 7, blue from 0 to
@@ -566,10 +574,10 @@ draw and print in the same run. Type this and see for yourself:
 
 ```basic
 10 PAPER 3
-20 INK 224
+20 INK 255
 30 MOVE 128,128
-40 CIRCLE 40
-50 INK 255
+40 CIRCLE 40,40,224
+50 INK 28
 60 MOVE 0,0
 70 DRAW 255,255
 80 PRINT PIXEL(100,128)
@@ -579,9 +587,10 @@ draw and print in the same run. Type this and see for yourself:
 224
 ```
 
-A red disc on blue appears, with a white line from corner to corner.
-The listing stays readable on top. The pixel left of the middle is red,
-so `PIXEL` says 224. The middle itself is under the line, so it is white. The text is white, so a white paper hides it.
+A red disc with a white rim appears on blue, with a green line from
+corner to corner. The listing stays readable on top. The pixel left of
+the middle is red, so `PIXEL` says 224. The middle itself is under the
+line, so it is green. The text is white, so a white paper hides it.
 
 `CLS` clears the text and paints the picture in the `PAPER` colour
 again. `PAPER` on its own repaints the picture and leaves the text.
@@ -892,11 +901,11 @@ Statements, in a program or at the prompt:
 | `POKE a,v` | puts byte v in box a |
 | `DOKE a,v` | puts word v in boxes a and a+1, high byte first |
 | `PAPER c` | fills the picture with colour c |
-| `INK c` | sets the pen colour |
+| `INK c` | sets the pen colour, which every drawing word uses |
 | `MOVE x,y` | puts the pen at x,y |
 | `DRAW x,y` | draws a line from the pen to x,y |
-| `CIRCLE r` | fills a disc of radius r around the pen |
-| `PLOT x,y` | puts a white dot at x,y |
+| `CIRCLE rx,ry,f` | a ring around the pen in the pen colour, ry and the fill colour f optional |
+| `PLOT x,y` | puts a dot at x,y |
 | `CALL n` or `JSR n` | runs machine code at slot n, the A register goes to box 4 |
 | `JMP n` | jumps to machine code at slot n and never comes back |
 | `!SAVE "N"` | saves the program into the cartridge as N |

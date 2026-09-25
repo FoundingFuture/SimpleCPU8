@@ -762,6 +762,47 @@ TEST_SUITE("it can draw, which is why the GPU is on the bus") {
     CHECK(has(flat(*s), "POINT IS NOT A VARIABLE"));
   }
 
+  TEST_CASE("every drawing word draws in INK, which starts white") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PAPER 0");
+    type(*s, "PLOT 5,5");
+    CHECK_EQ(s->gpu.vram[5 * 256 + 5], 255);
+    type(*s, "INK 28");
+    type(*s, "PLOT 10,10");
+    CHECK_EQ(s->gpu.vram[10 * 256 + 10], 28);
+    type(*s, "MOVE 20,20");
+    type(*s, "DRAW 40,20");
+    CHECK_EQ(s->gpu.vram[20 * 256 + 30], 28);
+  }
+
+  TEST_CASE("CIRCLE outlines in INK, takes a second radius, and fills when given a colour") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PAPER 0");
+    type(*s, "INK 224");
+    type(*s, "MOVE 100,100");
+    type(*s, "CIRCLE 20");
+    auto at = [&](int x, int y) { return s->gpu.vram[static_cast<size_t>(y * 256 + x)]; };
+    CHECK_EQ(at(120, 100), 224);
+    CHECK_EQ(at(100, 120), 224);
+    CHECK_EQ(at(100, 100), 0);  // an outline, so the middle stays paper
+
+    type(*s, "MOVE 60,180");
+    type(*s, "CIRCLE 30,10,3");
+    CHECK_EQ(at(90, 180), 224);   // the outline, 30 across
+    CHECK_EQ(at(60, 190), 224);   // and 10 down
+    CHECK_EQ(at(60, 180), 3);     // the fill
+    CHECK_EQ(at(60, 195), 0);     // below the ellipse, paper
+
+    type(*s, "MOVE 200,60");
+    type(*s, "CIRCLE(15,15,28)");
+    CHECK_EQ(at(215, 60), 224);
+    CHECK_EQ(at(200, 60), 28);
+    type(*s, "PLOT 1,1");
+    CHECK_EQ(at(1, 1), 224);  // the fill colour did not become the ink
+  }
+
   TEST_CASE("CLS clears the picture to the PAPER colour as well as the text") {
     auto s = boot();
     settle(*s);

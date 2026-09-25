@@ -165,6 +165,10 @@ unsigned char rt_routine_name(void);
 
 void rt_run(void);
 void rt_line(char *text);
+/* The pen colour INK sets. Every drawing word draws in it. The GPU keeps
+ * its own copy for lines and outlines, and PLOT passes this one.
+ */
+void rt_ink(int c);
 void rt_error(unsigned char code);
 /* A syntax error that names what should have come. The message then reads
  * EXPECTED what BUT FOUND the token the lexer stands on.

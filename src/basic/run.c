@@ -32,6 +32,13 @@ static char line_buf[LINEMAX];
 static char *err_what;
 static char err_found[24];
 int err_arg;
+static int ink;
+
+void rt_ink(int c)
+{
+    ink = c & 255;
+    gpu_set_color(ink);
+}
 
 static void rt_found_at(unsigned char at, char *text)
 {
@@ -392,8 +399,10 @@ static unsigned char statement(void)
 
     if (lx_is("LET")) lx_next();
 
-    /* Graphics, so a program can draw. Each is one GPU command. */
-    if (lx_is("INK")) { lx_next(); gpu_set_color(ex_int()); return 1; }
+    /* Graphics, so a program can draw. Each is one GPU command, or two
+     * for a filled CIRCLE. All draw in the INK colour.
+     */
+    if (lx_is("INK")) { lx_next(); rt_ink(ex_int()); return 1; }
     if (lx_is("PLOT")) {
         lx_next();
         {
@@ -402,7 +411,7 @@ static unsigned char statement(void)
             x = ex_int();
             if (lx_is(",")) lx_next();
             y = ex_int();
-            gpu_plot(x >> 8, x, y >> 8, y, 255);
+            gpu_plot(x >> 8, x, y >> 8, y, ink);
             return 1;
         }
     }
@@ -430,7 +439,41 @@ static unsigned char statement(void)
             return 1;
         }
     }
-    if (lx_is("CIRCLE")) { lx_next(); gpu_circle(ex_int()); return 1; }
+    /* CIRCLE rx, ry, fill: an outline around the pen in INK. ry is
+     * optional and makes an ellipse, fill is optional and fills the inside
+     * first. Brackets around the three are allowed, as for a function.
+     */
+    if (lx_is("CIRCLE")) {
+        lx_next();
+        {
+            int rx;
+            int ry;
+            int fill;
+            unsigned char bracket;
+            unsigned char filled;
+            bracket = 0;
+            filled = 0;
+            fill = 0;
+            if (lx_is("(")) { lx_next(); bracket = 1; }
+            rx = ex_int();
+            ry = rx;
+            if (lx_is(",")) { lx_next(); ry = ex_int(); }
+            if (lx_is(",")) { lx_next(); fill = ex_int(); filled = 1; }
+            if (bracket) {
+                if (!lx_is(")")) { rt_expect(")"); return 1; }
+                lx_next();
+            }
+            if (filled) {
+                gpu_set_color(fill);
+                out(GPU_RADIUS_Y, ry);
+                gpu_circle(rx);
+                gpu_set_color(ink);
+            }
+            out(GPU_RADIUS_Y, ry);
+            gpu_ring(rx);
+            return 1;
+        }
+    }
     if (lx_is("PAPER")) { lx_next(); term_paper(ex_int()); return 1; }
     if (lx_is("WAIT")) {
         lx_next();

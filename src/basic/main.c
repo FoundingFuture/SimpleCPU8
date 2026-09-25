@@ -11,6 +11,7 @@ int main(void)
     str_init();
     ed_new();
     bang_init();
+    rt_ink(255);
 
     term_puts("SimpleCPU-8 BASIC");
     term_nl();
