@@ -244,6 +244,7 @@ class Pass {
     bool changed = false;
     changed |= jumpsToNext();
     changed |= knownValues();
+    changed |= knownWords();
     changed |= deadTempStores();
     changed |= deadLoads();
     return changed;
@@ -375,6 +376,93 @@ class Pass {
         }
         if (l.devices) dropIf([](const std::string& k) { return k[0] == '['; });
       }
+      if (l.writesD1) dropIf([](const std::string& k) { return k.find("D1") != std::string::npos; });
+    }
+    return changed;
+  }
+
+  // Z alone: a load into D2 sets nothing else.
+  bool zDead(size_t i, int hops = 4) const {
+    for (size_t j = next(i); j < lines_.size(); j = next(j)) {
+      const Line& l = info_[j];
+      if (l.stmt) return true;
+      if (l.kind == Kind::Label) {
+        if (lines_[j].find("_ovf") != std::string::npos) return false;
+        continue;
+      }
+      if (l.kind != Kind::Ins) return false;
+      if (l.flow) {
+        if (l.mnem == "JSR" || l.mnem == "RET") return true;
+        if (l.mnem != "JMP" || hops == 0) return false;
+        const auto target = labels_.find(l.src);
+        return target != labels_.end() && target->second > 0 && zDead(target->second - 1, hops - 1);
+      }
+      if (l.setsZ) return true;
+    }
+    return false;
+  }
+
+  // The same for D2 and the words it was loaded from or stored to.
+  bool knownWords() {
+    bool changed = false;
+    std::vector<std::string> known;
+    auto has = [&](const std::string& k) { return std::find(known.begin(), known.end(), k) != known.end(); };
+    auto dropIf = [&](auto pred) { known.erase(std::remove_if(known.begin(), known.end(), pred), known.end()); };
+    auto wordKey = [](const std::string& operand) -> std::string {
+      if (operand.empty()) return "";
+      if (operand.front() != '[') {
+        if (operand.find("D1") != std::string::npos || operand.find("D2") != std::string::npos) return "";
+        return "#" + operand;
+      }
+      return keyOf(operand);
+    };
+    // A write to memory at spelling x: the words it may overlap go.
+    auto clobber = [&](const std::string& x) {
+      const std::string base = baseOf(x);
+      if (x.find("D2") != std::string::npos || x.find("[A]") != std::string::npos) {
+        dropIf([](const std::string& k) { return k[0] == '[' && !isTempBase(baseOf(k)); });
+      } else if (base.rfind("D1", 0) == 0) {
+        dropIf([](const std::string& k) { return k.find("D1") != std::string::npos; });
+      } else {
+        dropIf([&](const std::string& k) { return baseOf(k) == base; });
+      }
+    };
+    for (size_t i = 0; i < lines_.size(); i++) {
+      if (!alive_[i]) continue;
+      const Line& l = info_[i];
+      if (l.stmt) dropIf([](const std::string& k) { return isTempBase(baseOf(k)); });
+      if (l.kind == Kind::Skip) continue;
+      if (l.kind != Kind::Ins) {
+        known.clear();
+        continue;
+      }
+      if (l.mnem == "LD" && l.dst == "D2") {
+        const std::string k = wordKey(l.src);
+        if (!k.empty() && has(k) && zDead(i)) {
+          alive_[i] = false;
+          changed = true;
+          continue;
+        }
+        known.clear();
+        if (!k.empty()) known.push_back(k);
+        continue;
+      }
+      if (!l.wordStore.empty() && l.src == "D2") {
+        const std::string k = keyOf(l.wordStore);
+        if (!k.empty() && has(k)) {
+          alive_[i] = false;
+          changed = true;
+          continue;
+        }
+        clobber(l.wordStore);
+        if (!k.empty()) known.push_back(k);
+        continue;
+      }
+      const bool conditional = l.flow && isJump(l.mnem) && l.mnem != "JMP";
+      if ((l.flow && !conditional) || l.writesD2) known.clear();
+      if (!l.byteStore.empty()) clobber(l.byteStore);
+      if (!l.wordStore.empty()) clobber(l.wordStore);
+      if (l.devices) dropIf([](const std::string& k) { return k[0] == '['; });
       if (l.writesD1) dropIf([](const std::string& k) { return k.find("D1") != std::string::npos; });
     }
     return changed;

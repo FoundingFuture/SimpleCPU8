@@ -1219,8 +1219,9 @@ class Gen {
     lab(skip);
   }
 
-  // A condition as a value, 0 or 1 in `slot`.
-  CType boolValue(const ExprPtr& ep, int slot) {
+  // A condition as a value, 0 or 1 in `slot`. A byte context takes the
+  // low byte alone.
+  CType boolValue(const ExprPtr& ep, int slot, bool byteOnly = false) {
     const std::string yes = uniq("true");
     const std::string done = uniq("tdone");
     branch(ep, true, yes, slot);
@@ -1230,6 +1231,7 @@ class Gen {
     op("LD A <- 1");
     lab(done);
     op("LD " + lo(slot) + " <- A");
+    if (byteOnly) return T(BaseType::UChar);
     op("LD A <- 0");
     op("LD " + hi(slot) + " <- A");
     return T(BaseType::Int);
@@ -2189,6 +2191,13 @@ class Gen {
           op("LD " + lo(slot) + " <- A");
           return;
         }
+      }
+      const bool condition = (e.k == ExprKind::Bin && (isCompare(e.op) || e.op == "&&" || e.op == "||")) ||
+                             (e.k == ExprKind::Un && e.op == "!");
+      if (condition && !(e.k == ExprKind::Bin && isCompare(e.op) &&
+                         (isFloat(typeOf(e.l)) || isFloat(typeOf(e.r)) || isWide(typeOf(e.l)) || isWide(typeOf(e.r))))) {
+        boolValue(ep, slot, true);
+        return;
       }
       if (e.k == ExprKind::Un && e.op == "~" && !isFloat(typeOf(e.e))) {
         genLow(e.e, slot);

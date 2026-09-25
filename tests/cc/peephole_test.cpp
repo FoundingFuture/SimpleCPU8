@@ -66,6 +66,16 @@ TEST_SUITE("peephole") {
           lines({"LD A <- [c]", "LD [__t0+1] <- A", "LD A <- 1", "OUTA 2", "LD A <- [__t0+1]", "OUTA 3"}));
   }
 
+  TEST_CASE("a word stored from D2 is not loaded back into D2") {
+    CHECK(peephole(lines({"LD D2 <- [p]", "LD D2 <- D2+1", "LD [__t0] <- D2", "LD D2 <- [__t0]", "LD [q] <- D2",
+                          "RET"})) == lines({"LD D2 <- [p]", "LD D2 <- D2+1", "LD [q] <- D2", "RET"}));
+  }
+
+  TEST_CASE("a byte store into the word ends what D2 is known to hold") {
+    const auto in = lines({"LD D2 <- [p]", "LD [p+1] <- A", "LD D2 <- [p]", "LD [q] <- D2", "RET"});
+    CHECK(peephole(in) == in);
+  }
+
   TEST_CASE("a jump to the next line goes") {
     CHECK(peephole(lines({"JMP next", ":next:", "RET"})) == lines({":next:", "RET"}));
   }
