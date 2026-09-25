@@ -14,6 +14,14 @@
 ; the lives, the level pointer and the maze describe a game. Those are written
 ; again for every one.
 
+; Pac-Man's second sprite, drawn over the ghosts. See paclayer.
+.equ PACTOP, 6
+; The half shades the maze is anti-aliased with: the wall's, and the one
+; dots and pills share. Palette entries the fades write beside 1 to 3, so no
+; sprite colour may sit on them either. 4 between them is the pupils.
+.equ WALLDIM, 5
+.equ DOTDIM, 6
+
 ; --- silence first, before anything else runs. The audio chip survives a
 ; Reset, and so does data RAM, so a Reset pressed while the siren is looping
 ; would otherwise leave it droning over the whole of the redraw the Reset
@@ -91,6 +99,16 @@
 ; created hidden: the attract screen shows them when its chase begins, and
 ; newgame shows them under the fade-in of the first maze.
         OUT GPU_SPRITE, 1
+        OUT GPU_SRC_BANK, get_bankbyte(pacspr)
+        OUT GPU_SRC_HI, get_highbyte(pacspr)
+        OUT GPU_SRC_LO, get_lowbyte(pacspr)
+        OUT GPU_CMD, CMD_SPRITE_DEF
+; --- sprite 6 is Pac-Man again, above the ghosts. The GPU draws sprites in
+; id order, so sprite 1 is under the ghosts at 2 to 5 and sprite 6 over
+; them. The draw moves and animates the two together, and paclayer shows the
+; upper one only while no hunting ghost overlaps him. So a hunting ghost is
+; drawn over Pac-Man, and Pac-Man over a frightened ghost or a pair of eyes.
+        OUT GPU_SPRITE, PACTOP
         OUT GPU_SRC_BANK, get_bankbyte(pacspr)
         OUT GPU_SRC_HI, get_highbyte(pacspr)
         OUT GPU_SRC_LO, get_lowbyte(pacspr)
@@ -327,9 +345,16 @@ dkpad:  IN IO_CONTROLLER -> A
 ; shows and 0 hides. A command name is an OUT operand and not a value the
 ; CPU can hold. The loop therefore branches on the flag rather than carrying
 ; a byte.
+; DESIGN: Pac-Man's upper copy, sprite 6, is hidden here and never shown:
+; paclayer decides it on every draw, and only while pacvis says sprite 1 is
+; up, so the copy never outlives the sprite it copies.
 showall: LD A <- 1
+        LD [pacvis] <- A
         JMP spall
 hideall: LD A <- 0
+        LD [pacvis] <- A
+        OUT GPU_SPRITE, PACTOP
+        OUT GPU_CMD, CMD_SPRITE_HIDE
 spall:  LD [t4] <- A
         LD A <- 1
         LD [t3] <- A
@@ -1754,6 +1779,11 @@ wpcorn: LD A <- [nul]
         ADD A <- 1
         LD [ry1] <- A
         JSR rectxy
+        LD A <- 2
+        LD [wdx] <- A
+        LD A <- 2
+        LD [wdy] <- A
+        JSR wdim
         JMP wpctr
 wpctl2: LD A <- [nup]
         JZ wpctr
@@ -1769,6 +1799,16 @@ wpctl2: LD A <- [nup]
         LD [ry1] <- A
         JSR rectxy
 ; top right
+        LD A <- 3
+        LD [wdx] <- A
+        LD A <- 2
+        LD [wdy] <- A
+        JSR wdim
+        LD A <- 2
+        LD [wdx] <- A
+        LD A <- 3
+        LD [wdy] <- A
+        JSR wdim
 wpctr:  LD A <- [nur]
         JZ wpctr2
         LD A <- [px]
@@ -1790,6 +1830,11 @@ wpctr:  LD A <- [nur]
         ADD A <- 1
         LD [ry1] <- A
         JSR rectxy
+        LD A <- 5
+        LD [wdx] <- A
+        LD A <- 2
+        LD [wdy] <- A
+        JSR wdim
         JMP wpcbl
 wpctr2: LD A <- [nup]
         JZ wpcbl
@@ -1805,6 +1850,16 @@ wpctr2: LD A <- [nup]
         LD [ry1] <- A
         JSR rectxy
 ; bottom left
+        LD A <- 4
+        LD [wdx] <- A
+        LD A <- 2
+        LD [wdy] <- A
+        JSR wdim
+        LD A <- 5
+        LD [wdx] <- A
+        LD A <- 3
+        LD [wdy] <- A
+        JSR wdim
 wpcbl:  LD A <- [ndl]
         JZ wpcbl2
         LD A <- [px]
@@ -1826,6 +1881,11 @@ wpcbl:  LD A <- [ndl]
         ADD A <- 1
         LD [ry1] <- A
         JSR rectxy
+        LD A <- 2
+        LD [wdx] <- A
+        LD A <- 5
+        LD [wdy] <- A
+        JSR wdim
         JMP wpcbr
 wpcbl2: LD A <- [ndn]
         JZ wpcbr
@@ -1841,6 +1901,16 @@ wpcbl2: LD A <- [ndn]
         LD [ry1] <- A
         JSR rectxy
 ; bottom right
+        LD A <- 2
+        LD [wdx] <- A
+        LD A <- 4
+        LD [wdy] <- A
+        JSR wdim
+        LD A <- 3
+        LD [wdx] <- A
+        LD A <- 5
+        LD [wdy] <- A
+        JSR wdim
 wpcbr:  LD A <- [ndr]
         JZ wpcbr2
         LD A <- [px]
@@ -1863,6 +1933,11 @@ wpcbr:  LD A <- [ndr]
         ADD A <- 1
         LD [ry1] <- A
         JSR rectxy
+        LD A <- 5
+        LD [wdx] <- A
+        LD A <- 5
+        LD [wdy] <- A
+        JSR wdim
         JMP wpdone
 wpcbr2: LD A <- [ndn]
         JZ wpdone
@@ -1877,55 +1952,200 @@ wpcbr2: LD A <- [ndn]
         LD [ry0] <- A
         LD [ry1] <- A
         JSR rectxy
+        LD A <- 5
+        LD [wdx] <- A
+        LD A <- 4
+        LD [wdy] <- A
+        JSR wdim
+        LD A <- 4
+        LD [wdx] <- A
+        LD A <- 5
+        LD [wdy] <- A
+        JSR wdim
 wpdone: POP D1
         RET
 
-; a 2 by 2 dot in the middle of the cell at (px, py). px and py are maze
-; pixels, so mzxleft and mzytop go on the way out, as in rectxy.
-dotrect: OUT GPU_X_HI, 0
-        OUT GPU_Y_HI, 0
-        LD A <- [px]
-        ADD A <- 3
-        ADD A <- [mzxleft]
-        OUTA GPU_X
+; --- one wall pixel at (px + wdx, py + wdy) in the wall's half shade, then
+; the wall colour back. The rounds call it: an outer round gets the two
+; pixels outside its diagonal step, an inner corner the pixel it used to
+; leave dark, so every curve of the maze is anti-aliased. Straight runs lie
+; on the pixel grid and need nothing.
+; DESIGN: the half shade is a palette entry of its own, WALLDIM, that the
+; fades write beside the wall's, so the rim fades in and out with the wall.
+wdim:   LD A <- [px]
+        ADD A <- [wdx]
+        LD [rx0] <- A
+        LD [rx1] <- A
         LD A <- [py]
-        ADD A <- 3
-        ADD A <- [mzytop]
-        OUTA GPU_Y
-        OUT GPU_CMD, CMD_MOVE_TO
-        LD A <- [px]
-        ADD A <- 4
-        ADD A <- [mzxleft]
-        OUTA GPU_X
-        LD A <- [py]
-        ADD A <- 4
-        ADD A <- [mzytop]
-        OUTA GPU_Y
-        OUT GPU_CMD, CMD_RECT
+        ADD A <- [wdy]
+        LD [ry0] <- A
+        LD [ry1] <- A
+        OUT GPU_COLOR, WALLDIM
+        OUT GPU_CMD, CMD_SET_COLOR
+        JSR rectxy
+        OUT GPU_COLOR, 1
+        OUT GPU_CMD, CMD_SET_COLOR
         RET
 
-; a 4 by 4 pill at (px, py), offset like the dot
-pillrect: OUT GPU_X_HI, 0
-        OUT GPU_Y_HI, 0
-        LD A <- [px]
-        ADD A <- 2
-        ADD A <- [mzxleft]
-        OUTA GPU_X
-        LD A <- [py]
-        ADD A <- 2
-        ADD A <- [mzytop]
-        OUTA GPU_Y
-        OUT GPU_CMD, CMD_MOVE_TO
-        LD A <- [px]
-        ADD A <- 5
-        ADD A <- [mzxleft]
-        OUTA GPU_X
-        LD A <- [py]
-        ADD A <- 5
-        ADD A <- [mzytop]
-        OUTA GPU_Y
-        OUT GPU_CMD, CMD_RECT
+; --- a dot in the middle of the cell at (px, py): a 2 by 2 core in the
+; colour the caller set, entry 2, and a rim of half shade on its four sides.
+; The rim is what a round dot of that size covers in part, so it reads as
+; round and anti-aliased. The cell is 8 by 8 and the dot stays inside it, so
+; cellrect still paints it all out when he eats it.
+dotrect:        LD A <- 3
+        LD [cx0] <- A
+        LD A <- 3
+        LD [cy0] <- A
+        LD A <- 4
+        LD [cx1] <- A
+        LD A <- 4
+        LD [cy1] <- A
+        JSR cellpart
+        OUT GPU_COLOR, DOTDIM
+        OUT GPU_CMD, CMD_SET_COLOR
+        LD A <- 3
+        LD [cx0] <- A
+        LD A <- 2
+        LD [cy0] <- A
+        LD A <- 4
+        LD [cx1] <- A
+        LD A <- 2
+        LD [cy1] <- A
+        JSR cellpart
+        LD A <- 3
+        LD [cx0] <- A
+        LD A <- 5
+        LD [cy0] <- A
+        LD A <- 4
+        LD [cx1] <- A
+        LD A <- 5
+        LD [cy1] <- A
+        JSR cellpart
+        LD A <- 2
+        LD [cx0] <- A
+        LD A <- 3
+        LD [cy0] <- A
+        LD A <- 2
+        LD [cx1] <- A
+        LD A <- 4
+        LD [cy1] <- A
+        JSR cellpart
+        LD A <- 5
+        LD [cx0] <- A
+        LD A <- 3
+        LD [cy0] <- A
+        LD A <- 5
+        LD [cx1] <- A
+        LD A <- 4
+        LD [cy1] <- A
+        JSR cellpart
+        OUT GPU_COLOR, 2
+        OUT GPU_CMD, CMD_SET_COLOR
         RET
+
+; --- a pill: a 4 by 4 core in entry 3, its corners and a rim around its
+; sides in the half shade, a disc of about five pixels anti-aliased.
+pillrect:        LD A <- 2
+        LD [cx0] <- A
+        LD A <- 2
+        LD [cy0] <- A
+        LD A <- 5
+        LD [cx1] <- A
+        LD A <- 5
+        LD [cy1] <- A
+        JSR cellpart
+        OUT GPU_COLOR, DOTDIM
+        OUT GPU_CMD, CMD_SET_COLOR
+        LD A <- 2
+        LD [cx0] <- A
+        LD A <- 2
+        LD [cy0] <- A
+        LD A <- 2
+        LD [cx1] <- A
+        LD A <- 2
+        LD [cy1] <- A
+        JSR cellpart
+        LD A <- 5
+        LD [cx0] <- A
+        LD A <- 2
+        LD [cy0] <- A
+        LD A <- 5
+        LD [cx1] <- A
+        LD A <- 2
+        LD [cy1] <- A
+        JSR cellpart
+        LD A <- 2
+        LD [cx0] <- A
+        LD A <- 5
+        LD [cy0] <- A
+        LD A <- 2
+        LD [cx1] <- A
+        LD A <- 5
+        LD [cy1] <- A
+        JSR cellpart
+        LD A <- 5
+        LD [cx0] <- A
+        LD A <- 5
+        LD [cy0] <- A
+        LD A <- 5
+        LD [cx1] <- A
+        LD A <- 5
+        LD [cy1] <- A
+        JSR cellpart
+        LD A <- 3
+        LD [cx0] <- A
+        LD A <- 1
+        LD [cy0] <- A
+        LD A <- 4
+        LD [cx1] <- A
+        LD A <- 1
+        LD [cy1] <- A
+        JSR cellpart
+        LD A <- 3
+        LD [cx0] <- A
+        LD A <- 6
+        LD [cy0] <- A
+        LD A <- 4
+        LD [cx1] <- A
+        LD A <- 6
+        LD [cy1] <- A
+        JSR cellpart
+        LD A <- 1
+        LD [cx0] <- A
+        LD A <- 3
+        LD [cy0] <- A
+        LD A <- 1
+        LD [cx1] <- A
+        LD A <- 4
+        LD [cy1] <- A
+        JSR cellpart
+        LD A <- 6
+        LD [cx0] <- A
+        LD A <- 3
+        LD [cy0] <- A
+        LD A <- 6
+        LD [cx1] <- A
+        LD A <- 4
+        LD [cy1] <- A
+        JSR cellpart
+        OUT GPU_COLOR, 3
+        OUT GPU_CMD, CMD_SET_COLOR
+        RET
+
+; --- the rectangle from (px + cx0, py + cy0) to (px + cx1, py + cy1).
+cellpart: LD A <- [px]
+        ADD A <- [cx0]
+        LD [rx0] <- A
+        LD A <- [px]
+        ADD A <- [cx1]
+        LD [rx1] <- A
+        LD A <- [py]
+        ADD A <- [cy0]
+        LD [ry0] <- A
+        LD A <- [py]
+        ADD A <- [cy1]
+        LD [ry1] <- A
+        JMP rectxy
 
 ; --- fade the three maze entries up over 30 frames.
 ; DESIGN: no multiply, so each frame adds a fixed step and the last frame
@@ -1979,6 +2199,17 @@ fisnap: LD D1 <- palbuf+3
         LD [D1]+ <- A
         LD A <- 176
         LD [D1] <- A
+        LD D1 <- palbuf+WALLDIM*3
+        LD A <- 0
+        LD [D1]+ <- A
+        LD [D1]+ <- A
+        LD A <- 128
+        LD [D1]+ <- A
+        LD [D1]+ <- A
+        LD A <- 112
+        LD [D1]+ <- A
+        LD A <- 88
+        LD [D1] <- A
         OUT GPU_CMD, CMD_FETCH_PALETTE
         RET
 
@@ -2001,6 +2232,23 @@ fput:   LD D1 <- palbuf+3
         LD A <- [fg]
         LD [D1]+ <- A
         LD A <- [fdb]
+        LD [D1] <- A
+; the half shades, entries 5 and 6: each counter halved
+        LD D1 <- palbuf+WALLDIM*3
+        LD A <- 0
+        LD [D1]+ <- A
+        LD [D1]+ <- A
+        LD A <- [fwb]
+        SHR A
+        LD [D1]+ <- A
+        LD A <- [fr]
+        SHR A
+        LD [D1]+ <- A
+        LD A <- [fg]
+        SHR A
+        LD [D1]+ <- A
+        LD A <- [fdb]
+        SHR A
         LD [D1] <- A
         OUT GPU_CMD, CMD_FETCH_PALETTE
         RET
@@ -4053,16 +4301,82 @@ adxy:   LD A <- [aspr]
         JSR adcent
         OUTA GPU_SPRITE_Y
         OUT GPU_CMD, CMD_SPRITE_MOVE
+        LD A <- [aspr]
+        CMP A, 1
+        JZ adtop
         RET
+; Pac-Man: his upper copy goes to the same place, and paclayer decides
+; whether it shows. The ports cleared behind the move, so all four go again.
+adtop:  OUT GPU_SPRITE, PACTOP
+        OUT GPU_SPRITE_X_HI, 0
+        OUT GPU_SPRITE_Y_HI, 0
+        LD A <- [ax]
+        ADD A <- [mzxleft]
+        JSR adcent
+        OUTA GPU_SPRITE_X
+        LD A <- [ay]
+        ADD A <- [mzytop]
+        JSR adcent
+        OUTA GPU_SPRITE_Y
+        OUT GPU_CMD, CMD_SPRITE_MOVE
+        JMP paclayer
 
 ; Show the frame in A on this actor's sprite. The sprite is named again
-; because the data ports clear behind every command.
+; because the data ports clear behind every command. Pac-Man's frame goes to
+; his upper copy too.
 adframe: LD [gs0] <- A
         LD A <- [aspr]
         OUTA GPU_SPRITE
         LD A <- [gs0]
         OUTA GPU_SPRITE_FRAME
         OUT GPU_CMD, CMD_SPRITE_FRAME
+        LD A <- [aspr]
+        CMP A, 1
+        JZ adftop
+        RET
+adftop: OUT GPU_SPRITE, PACTOP
+        LD A <- [gs0]
+        OUTA GPU_SPRITE_FRAME
+        OUT GPU_CMD, CMD_SPRITE_FRAME
+        RET
+
+; --- which Pac-Man is seen: the one under the ghosts or the one over them.
+; The upper copy shows unless a hunting ghost, in the house or out of it,
+; overlaps his box. Then the ghost is drawn over him, as it catches him. A
+; frightened ghost or a pair of eyes is drawn under him, as he eats it.
+; DESIGN: the test is CMD_HIT_TEST on the sprites as they stand, so a ghost
+; drawn later in this walk is measured where it was last frame. One frame
+; behind costs nothing a player can see, and asking before the walk would
+; cost a second walk.
+; DESIGN: D1 walks the ghost records for their state bytes. The actor walk
+; reloads its own pointer from acur after every draw, so nothing here needs
+; to give D1 back.
+paclayer: LD A <- [pacvis]
+        JZ plhide
+        LD D1 <- blinky
+        LD A <- 2
+        LD [plspr] <- A
+plloop: LD A <- [D1+5]
+        CMP A, 2
+        JNC plnext           ; 2 frightened or 3 eyes: he may cover it
+        OUT GPU_SPRITE, 1
+        LD A <- [plspr]
+        OUTA GPU_SPRITE_B
+        OUT GPU_CMD, CMD_HIT_TEST
+        IN GPU_HIT -> A
+        OR A <- 0            ; IN sets no flags
+        JNZ plhide           ; a hunting ghost overlaps him: it stays in front
+plnext: LD D1 <- D1+8
+        LD A <- [plspr]
+        INC A
+        LD [plspr] <- A
+        SUB A <- 6
+        JNZ plloop
+        OUT GPU_SPRITE, PACTOP
+        OUT GPU_CMD, CMD_SPRITE_SHOW
+        RET
+plhide: OUT GPU_SPRITE, PACTOP
+        OUT GPU_CMD, CMD_SPRITE_HIDE
         RET
 
 ; --- put the strip this actor's state calls for onto its sprite, and only
@@ -4429,6 +4743,13 @@ foblack: LD D1 <- palbuf+3
         LD [D1]+ <- A
         LD [D1]+ <- A
         LD [D1] <- A
+        LD D1 <- palbuf+WALLDIM*3
+        LD [D1]+ <- A
+        LD [D1]+ <- A
+        LD [D1]+ <- A
+        LD [D1]+ <- A
+        LD [D1]+ <- A
+        LD [D1] <- A
         OUT GPU_CMD, CMD_FETCH_PALETTE
         RET
 
@@ -4451,32 +4772,19 @@ foblack: LD D1 <- palbuf+3
 ; phase measures all four rather than the one the scan named.
 ; DESIGN: 255 is the GPU's "nothing overlaps", not 0. See firstHit in gpu.ts,
 ; which is handed 0xff as its "none" for CMD_HIT_SCAN. Sprite 0 is never
-; defined here, so a real answer is 2 to 5, one of the four ghosts.
-; DESIGN: IN sets no flags on this machine, so the SUB below is what tests the
-; port read. A JZ straight after the IN would branch on whatever the last ALU
-; operation happened to leave, which is the stale-flag bug the invaders demo
-; shipped with and the repository's own gotchas call out.
-; What it would cost HERE is not the phantom catch it cost there, and the
-; difference is worth stating because it is the reason no test can kill this
-; line. A stale flag reading as "not zero" falls through to the narrow phase,
-; which measures properly and decides properly, so a false alarm costs cycles
-; and nothing else. A stale flag reading as "zero" is the real one: it takes
-; the early exit on a frame where a ghost IS overlapping, and the catch is
-; missed. Deleting the SUB leaves every test green, and NOT by luck. The
-; standing flag is clear on every frame, structurally: contact is called from
-; mainplay straight after modestep, and all four of modestep's exits end on a
-; not-taken conditional or on a load of a nonzero byte. Measured by breaking
-; at the SUB below, whose input flags are the ones that JZ would read, over
-; 400 samples of a playing board. Z clear 400 times, set 0.
-; So the guard that makes the mutant harmless lives in the CALLER, not here,
-; and that is the hazard worth naming. Reordering the frame loop, or giving
-; modestep an exit that ends on a zero, arms the bug with no test to catch it.
-; The SUB is what keeps this line correct on its own terms.
+; defined here, so a ghost is 2 to 5. Sprite 6, PACTOP, is Pac-Man's own
+; upper copy and overlaps him whenever it shows. The scan answers the lowest
+; sprite, so a ghost wins over the copy, and anything from 6 up means no
+; ghost is near.
+; DESIGN: IN sets no flags on this machine, so the CMP below is what tests
+; the port read. A branch straight after the IN would read whatever the last
+; ALU operation left, which is the stale-flag bug the invaders demo shipped
+; with and the repository's own gotchas call out.
 contact: OUT GPU_SPRITE, 1
         OUT GPU_CMD, CMD_HIT_SCAN
         IN GPU_HIT -> A
-        SUB A <- 255
-        JZ ctno              ; nothing overlaps his box, so no ghost is near
+        CMP A, PACTOP
+        JNC ctno             ; 255 or his own upper copy: no ghost is near
 ; --- narrow phase. Both sprites are the same size and both records hold a
 ; tile ORIGIN, so the offset from origin to centre is identical for the two of
 ; them and cancels: the distance between the origins IS the distance between
@@ -5132,6 +5440,14 @@ pacnext: db 3
 t3:     db 0
 t4:     db 0
 aspr:   db 0
+pacvis: db 0                   ; sprite 1 is shown, so its upper copy may be
+plspr:  db 0                   ; the ghost sprite paclayer is testing
+wdx:    db 0                   ; wdim's offset into the tile
+wdy:    db 0
+cx0:    db 0                   ; cellpart's corners, offsets into the tile
+cy0:    db 0
+cx1:    db 0
+cy1:    db 0
 adfr:   db 0                   ; a ghost's frame before the skirt is added
 gs0:    db 0
 gs1:    db 0

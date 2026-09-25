@@ -8,8 +8,8 @@ the pixel is the average of what its samples hit. An edge against the maze
 takes the colour darkened toward black by how much of the pixel the shape
 covers. An edge inside the sprite, such as an eye on the body, mixes the two
 colours. The result is matched to the nearest 3-3-2 palette entry outside 0
-to 4: 0 is transparent, the maze fades rewrite 1 to 3, and 4 is the pupils,
-which the program sets to near black. A pixel that is all pupil is 4.
+to 6. 0 is transparent and the maze fades rewrite 1 to 3, 5 and 6. 4 is the
+pupils, which the program sets to near black. A pixel all pupil is 4.
 
 The PNGs are the source the ROM is built from, and the sprite editor opens
 them. Running this again replaces any hand edits to them.
@@ -33,7 +33,8 @@ for i in range(256):
     PALETTE.append((round(((i >> 5) & 7) * 255 / 7), round(((i >> 2) & 7) * 255 / 7), round((i & 3) * 255 / 3)))
 PUPIL = 4
 PUPIL_RGB = (24, 24, 24)  # what the program loads into index 4
-RESERVED = {0, 1, 2, 3, PUPIL}
+WALLDIM, DOTDIM = 5, 6  # the maze's anti-aliasing shades, which the fades write
+RESERVED = {0, 1, 2, 3, PUPIL, WALLDIM, DOTDIM}
 
 
 def rgb(index):
@@ -102,6 +103,11 @@ def pacman(facing, half_angle):
     # The wedge's apex sits a little behind the centre, so the lips meet.
     ax, ay = C - 0.7 * dx, C - 0.7 * dy
 
+    # The eye sits above the mouth and a little forward. Facing left it is
+    # mirrored, so it stays on top. Facing up or down it goes to the left
+    # side, above or below the mouth's line.
+    ex, ey = {0: (0.9, -3.3), 2: (-0.9, -3.3), 3: (-3.3, -0.9), 1: (-3.3, 0.9)}[facing]
+
     def scene(x, y):
         if (x - C) ** 2 + (y - C) ** 2 > R * R:
             return None
@@ -109,6 +115,8 @@ def pacman(facing, half_angle):
             a = math.degrees(math.atan2(y - ay, x - ax) - heading)
             if abs((a + 180) % 360 - 180) <= half_angle:
                 return None
+        if (x - C - ex) ** 2 + (y - C - ey) ** 2 <= 1.05 ** 2:
+            return PUPIL
         return 0xFC
 
     return render(scene)

@@ -178,4 +178,40 @@ TEST_CASE("pacman: the ghosts wear eight frame strips, and their skirts ripple a
   CHECK(odd);
 }
 
+// Sprite 6 is Pac-Man again, drawn above the ghosts. It follows sprite 1 in
+// place and frame, and it hides only while a hunting ghost overlaps him.
+// So a hunting ghost covers Pac-Man, and Pac-Man covers a frightened one.
+TEST_CASE("pacman: the top copy of Pac-Man follows him, and hides under a hunting ghost") {
+  std::ifstream in(std::string(SC8_ROM_DIR) + "/pacman.rom", std::ios::binary);
+  REQUIRE_MESSAGE(in, "pacman.rom is not built");
+  std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
+  CartridgeResult r = decodeCartridge(bytes);
+  REQUIRE_MESSAGE(r.cartridge, r.error);
+  Computer c;
+  c.setSeed(1);
+  c.insert(std::move(*r.cartridge));
+  runFrames(c, 70);
+  c.typeText(" ");
+  runFrames(c, 80);
+
+  REQUIRE(c.gpu().sprites[1]);
+  REQUIRE(c.gpu().sprites[6]);
+  CHECK(c.gpu().sprites[6]->frames == 12);
+  int shown = 0;
+  for (int i = 0; i < 400; i++) {
+    runFrames(c, 1);
+    const Sprite& pac = *c.gpu().sprites[1];
+    const Sprite& top = *c.gpu().sprites[6];
+    if (!pac.visible) {
+      CHECK_FALSE(top.visible);
+      continue;
+    }
+    CHECK(top.x == pac.x);
+    CHECK(top.y == pac.y);
+    CHECK(top.frame == pac.frame);
+    if (top.visible) shown++;
+  }
+  CHECK(shown > 0);
+}
+
 #endif
