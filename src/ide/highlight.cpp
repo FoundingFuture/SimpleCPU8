@@ -341,9 +341,12 @@ bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, I
   char name[512];
   ImFormatString(name, sizeof name, "%s/%s_%08X", parent->Name, id, itemId);
   ImGuiWindow* box = ImGui::FindWindowByName(name);
-  if (!box || box->Hidden) return changed;
-
   ImGuiContext& g = *ImGui::GetCurrentContext();
+  // A pane behind another tab still runs its body, but the box is not
+  // submitted then. Its draw list is last frame's, and after a minute
+  // unused Dear ImGui frees it, so drawing into it would crash.
+  if (!box || box->Hidden || box->LastFrameActive != g.FrameCount) return changed;
+
   const float lineHeight = g.FontSize;
   float scrollX = 0.0f;
   if (const ImGuiInputTextState* state = ImGui::GetInputTextState(itemId)) scrollX = state->Scroll.x;
