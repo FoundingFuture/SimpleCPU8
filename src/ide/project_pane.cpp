@@ -860,7 +860,7 @@ void Ide::editorPane(const char* name) {
     }
     ImGui::SetItemTooltip("Enter at the end of a numbered line numbers the next one.\n"
                           "Enter on a bare number takes it away again.\n"
-                          "%s-I opens a numbered line under the caret's line.\n"
+                          "%s-I or Shift+Enter opens a numbered line under the caret's line.\n"
                           "A line typed out of order moves to its place when the caret leaves it.",
                           ImGui::GetIO().ConfigMacOSXBehaviors ? "Cmd" : "Ctrl");
   } else if (kind == DocKind::Microcode) {

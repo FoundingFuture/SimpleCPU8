@@ -51,7 +51,13 @@ bool BasicAssist::sortText(std::string& text) {
 
 int BasicAssist::event(ImGuiInputTextCallbackData* data) {
   if (data->EventFlag == ImGuiInputTextFlags_CallbackCharFilter) {
-    if (data->EventChar == '\n') enter_ = true;
+    if (data->EventChar != '\n') return 0;
+    // Shift+Enter does what Cmd-I does, so its newline is dropped.
+    if (ImGui::GetIO().KeyShift) {
+      shiftEnter_ = true;
+      return 1;
+    }
+    enter_ = true;
     return 0;
   }
   if (data->EventFlag != ImGuiInputTextFlags_CallbackAlways) return 0;
@@ -63,7 +69,8 @@ int BasicAssist::event(ImGuiInputTextCallbackData* data) {
   const int column = static_cast<int>(before.size() - lineStart);
 
   const ImGuiIO& io = ImGui::GetIO();
-  const bool insert = (io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_I, false);
+  const bool insert = shiftEnter_ || ((io.KeyCtrl || io.KeySuper) && ImGui::IsKeyPressed(ImGuiKey_I, false));
+  shiftEnter_ = false;
   const bool selecting = data->SelectionStart != data->SelectionEnd;
 
   if (enter_) {

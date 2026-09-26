@@ -4,9 +4,10 @@
 // Enter at the end of a numbered line opens the next line with a number
 // already on it. Enter on a line that is only a number takes the number
 // away again, which is how the numbering stops. Cmd-I (Ctrl-I elsewhere)
-// opens a numbered line under the caret's line from anywhere in it. The
-// number is ten on, or halfway to the next line. With no number free, the
-// program is renumbered in tens first, GOTO, GOSUB and THEN included.
+// or Shift+Enter opens a numbered line under the caret's line from
+// anywhere in it. The number is ten on, or halfway to the next line. With
+// no number free, the program is renumbered in tens first, GOTO, GOSUB and
+// THEN included.
 //
 // A line typed out of order moves to its place when the caret leaves it,
 // or when the editor loses the keyboard. basic/lines.h does the text
@@ -39,6 +40,7 @@ class BasicAssist {
   int event(ImGuiInputTextCallbackData* data);
 
   bool enter_ = false;
+  bool shiftEnter_ = false;
   int lastLine_ = -1;
   std::string note_;
 };
