@@ -35,7 +35,10 @@ PaneTarget& previewTarget();
 
 // A multiline or single line text input over a std::string. The string
 // keeps spare capacity, so a resize callback grows it as the text grows.
-bool inputMultiline(const char* id, std::string& text, ImVec2 size, ImGuiInputTextFlags flags = 0);
+// `callback` gets every event but the resize, which the string needs, with
+// `user` as its UserData. Pass the flags that ask for those events.
+bool inputMultiline(const char* id, std::string& text, ImVec2 size, ImGuiInputTextFlags flags = 0,
+                    ImGuiInputTextCallback callback = nullptr, void* user = nullptr);
 bool inputLine(const char* label, std::string& text, const char* hint = "", ImGuiInputTextFlags flags = 0);
 
 std::string hex(unsigned v, int digits);

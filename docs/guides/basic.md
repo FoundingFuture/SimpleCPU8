@@ -712,6 +712,16 @@ editor, in its place. There is nothing to send across and nothing to
 forget. While a program runs, the two wait. The changes go across when
 the program stops at `READY`.
 
+The editor keeps the line numbers for you. Press Enter at the end of a
+numbered line and the next line starts with a number already. That
+number is ten more, or halfway to the line after. Press Enter on a line
+that holds only a number and the number goes away again. Cmd-I opens a
+numbered line under the line you are on, wherever the cursor is in it.
+Outside a Mac it is Ctrl-I. When no number is free between two lines, the
+editor numbers the whole program again in tens. `GOTO`, `GOSUB` and
+`THEN` change with it, and the Messages pane says so. A line typed with
+a number out of order moves to its place when you leave it.
+
 `NEW` on the small screen empties the editor as well. The file on disk
 keeps the old program until you save, and the Messages pane says so.
 Save writes the editor's text to the file.

@@ -858,6 +858,11 @@ void Ide::editorPane(const char* name) {
     } else {
       ImGui::TextDisabled("Run in BASIC boots the interpreter; from then on this text and the computer stay in step");
     }
+    ImGui::SetItemTooltip("Enter at the end of a numbered line numbers the next one.\n"
+                          "Enter on a bare number takes it away again.\n"
+                          "%s-I opens a numbered line under the caret's line.\n"
+                          "A line typed out of order moves to its place when the caret leaves it.",
+                          ImGui::GetIO().ConfigMacOSXBehaviors ? "Cmd" : "Ctrl");
   } else if (kind == DocKind::Microcode) {
     ImGui::SameLine();
     if (ImGui::SmallButton("Apply to machine")) {
@@ -901,7 +906,19 @@ void Ide::editorPane(const char* name) {
     ImGui::SameLine();
     ImGui::TextDisabled(settings_.formatAssembly ? "laid out in columns on every save" : "Format lays it out in columns");
   }
-  if (codeEditor("##doc", d->text, syntaxOf(d->name), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) {
+  if (kind == DocKind::Basic) {
+    if (assistDoc_ != d->name) {
+      basicAssist_.reset();
+      assistDoc_ = d->name;
+    }
+    if (codeEditor("##doc", d->text, Syntax::Basic, ImVec2(-1.0f, -1.0f),
+                   ImGuiInputTextFlags_AllowTabInput | BasicAssist::FLAGS, BasicAssist::callback, &basicAssist_)) {
+      d->dirty = true;
+    }
+    // Leaving the editor puts a line typed out of order in its place too.
+    if (ImGui::IsItemDeactivated() && BasicAssist::sortText(d->text)) d->dirty = true;
+    if (std::string n = basicAssist_.takeNote(); !n.empty()) note(n);
+  } else if (codeEditor("##doc", d->text, syntaxOf(d->name), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) {
     d->dirty = true;
   }
   ImGui::End();

@@ -67,7 +67,7 @@ add_custom_command(
   COMMENT "Embedding the BASIC sources"
   VERBATIM)
 
-add_library(sc8_basic STATIC basic_rom.cpp program.cpp "${SC8_BASIC_DATA_H}" "${SC8_BASIC_ASM_H}"
+add_library(sc8_basic STATIC basic_rom.cpp program.cpp lines.cpp "${SC8_BASIC_DATA_H}" "${SC8_BASIC_ASM_H}"
             "${SC8_BASIC_SRC_H}")
 target_include_directories(sc8_basic
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/.."

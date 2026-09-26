@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "asm/asm.h"
+#include "ide/basic_assist.h"
 #include "ide/filedialog.h"
 #include "ide/guide.h"
 #include "ide/settings.h"
@@ -438,6 +439,10 @@ class Ide {
   // BASIC sync state. syncDoc_ names the document in step with the
   // machine, syncBase_ the program both agreed on at the last exchange.
   std::string syncDoc_;
+  // The editor's line numbering for .bas documents, and the document it
+  // last watched.
+  BasicAssist basicAssist_;
+  std::string assistDoc_;
   std::vector<uint8_t> syncBase_;
   bool basicBooted_ = false;  // the machine runs the interpreter
   // Commands still go through the keyboard: RUN after a push, for one.

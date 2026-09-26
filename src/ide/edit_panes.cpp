@@ -66,10 +66,36 @@ int resizeCallback(ImGuiInputTextCallbackData* data) {
   return 0;
 }
 
+// The string a box grows, and the caller's own callback for the rest.
+struct Chain {
+  std::string* text;
+  ImGuiInputTextCallback callback;
+  void* user;
+};
+
+int chainCallback(ImGuiInputTextCallbackData* data) {
+  auto* chain = static_cast<Chain*>(data->UserData);
+  if (data->EventFlag == ImGuiInputTextFlags_CallbackResize) {
+    chain->text->resize(static_cast<size_t>(data->BufTextLen));
+    data->Buf = chain->text->data();
+    return 0;
+  }
+  data->UserData = chain->user;
+  const int r = chain->callback(data);
+  data->UserData = chain;
+  return r;
+}
+
 }  // namespace
 
-bool inputMultiline(const char* id, std::string& text, ImVec2 size, ImGuiInputTextFlags flags) {
+bool inputMultiline(const char* id, std::string& text, ImVec2 size, ImGuiInputTextFlags flags,
+                    ImGuiInputTextCallback callback, void* user) {
   if (text.capacity() < text.size() + 256) text.reserve(text.size() + 4096);
+  if (callback) {
+    Chain chain{&text, callback, user};
+    return ImGui::InputTextMultiline(id, text.data(), text.capacity() + 1, size,
+                                     flags | ImGuiInputTextFlags_CallbackResize, chainCallback, &chain);
+  }
   return ImGui::InputTextMultiline(id, text.data(), text.capacity() + 1, size,
                                    flags | ImGuiInputTextFlags_CallbackResize, resizeCallback, &text);
 }

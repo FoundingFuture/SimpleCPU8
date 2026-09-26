@@ -325,8 +325,9 @@ std::vector<Span> lexLine(Syntax syntax, std::string_view line, LexState& state)
   return line.empty() ? std::vector<Span>{} : std::vector<Span>{{0, line.size(), Token::Plain}};
 }
 
-bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, ImGuiInputTextFlags flags) {
-  if (syntax == Syntax::Plain) return panes::inputMultiline(id, text, size, flags);
+bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, ImGuiInputTextFlags flags,
+                ImGuiInputTextCallback callback, void* user) {
+  if (syntax == Syntax::Plain) return panes::inputMultiline(id, text, size, flags, callback, user);
 
   ImGuiWindow* parent = ImGui::GetCurrentWindow();
   const ImGuiID itemId = ImGui::GetID(id);
@@ -334,7 +335,7 @@ bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, I
   // The box draws its text transparent; the caret and the selection keep
   // their own colours.
   ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 0, 0, 0));
-  const bool changed = panes::inputMultiline(id, text, size, flags);
+  const bool changed = panes::inputMultiline(id, text, size, flags, callback, user);
   ImGui::PopStyleColor();
 
   // The box's scrolling child, named the way BeginChildEx names it.
