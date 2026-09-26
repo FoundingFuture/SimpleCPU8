@@ -717,10 +717,11 @@ numbered line and the next line starts with a number already. That
 number is ten more, or halfway to the line after. Press Enter on a line
 that holds only a number and the number goes away again. Shift+Enter
 opens a numbered line under the line you are on, wherever the cursor is
-in it. Cmd-I does the same, or Ctrl-I outside a Mac. When no number is free between two lines, the
-editor numbers the whole program again in tens. `GOTO`, `GOSUB` and
-`THEN` change with it, and the Messages pane says so. A line typed with
-a number out of order moves to its place when you leave it.
+in it. Cmd-I does the same, or Ctrl-I outside a Mac. When no number is
+free between two lines, the editor numbers the whole program again in
+tens. `GOTO`, `GOSUB` and `THEN` change with it, and the Messages pane
+says so. A line typed with a number out of order moves to its place when
+you leave it. A file opened out of order is put in order at once.
 
 `NEW` on the small screen empties the editor as well. The file on disk
 keeps the old program until you save, and the Messages pane says so.

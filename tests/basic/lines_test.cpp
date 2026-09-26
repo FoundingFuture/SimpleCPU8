@@ -66,6 +66,13 @@ TEST_SUITE("the editor keeps BASIC lines in number order") {
     CHECK_EQ(caret, 1);
   }
 
+  TEST_CASE("a program typed in any order comes out low to high") {
+    CHECK_EQ(sorted("10 for i = 1 to 10\n25 circle 40\n6 paper 0\n7 ink 80\n30 next i\n5 x = 80\n"
+                    "20 move x,128\n26 x=x+10\n\n\n"),
+             "5 x = 80\n6 paper 0\n7 ink 80\n10 for i = 1 to 10\n20 move x,128\n25 circle 40\n"
+             "26 x=x+10\n30 next i\n\n\n");
+  }
+
   TEST_CASE("equal numbers keep their order") {
     CHECK_EQ(sorted("20 X\n10 A\n20 Y"), "10 A\n20 X\n20 Y");
   }

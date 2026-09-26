@@ -915,8 +915,10 @@ void Ide::editorPane(const char* name) {
                    ImGuiInputTextFlags_AllowTabInput | BasicAssist::FLAGS, BasicAssist::callback, &basicAssist_)) {
       d->dirty = true;
     }
-    // Leaving the editor puts a line typed out of order in its place too.
-    if (ImGui::IsItemDeactivated() && BasicAssist::sortText(d->text)) d->dirty = true;
+    // Whenever the box is not being typed in, the text stands in number
+    // order: a file opened out of order, lines typed on the machine's
+    // screen, the editor just left.
+    if (!ImGui::IsItemActive() && BasicAssist::sortText(d->text)) d->dirty = true;
     if (std::string n = basicAssist_.takeNote(); !n.empty()) note(n);
   } else if (codeEditor("##doc", d->text, syntaxOf(d->name), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) {
     d->dirty = true;
