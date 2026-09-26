@@ -119,6 +119,11 @@ void ed_new(void);
 void ed_store(int line, char *text);
 unsigned int ed_find(int line);
 void ed_list(unsigned int first, unsigned int last);
+/* Number the lines again from start in steps of step, and change the
+ * line numbers after GOTO, GOSUB and THEN to match. Nothing changes when
+ * it cannot finish: E_RENUM past 65535, E_LINELONG, E_MEMORY.
+ */
+void ed_renum(unsigned int start, unsigned int step);
 
 /* run.c: statements. */
 extern int vars[NVARS];
@@ -156,6 +161,7 @@ extern unsigned char loop_back;
 #define E_STRCMP  24  /* strings compared with something other than = <> < > <= >= */
 #define E_NOTVAR  25  /* a name that is not a variable, assigned or read */
 #define E_ROUTINE 26  /* CALL, JMP or USR given a name at the prompt, where only numbers work */
+#define E_RENUM   27  /* RENUM would number a line past 65535 */
 
 /* CALL, JMP and USR take a routine's slot. A name there works only in a
  * project the builder resolved, so a name that is no variable gets its

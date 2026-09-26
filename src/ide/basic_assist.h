@@ -11,8 +11,9 @@
 //
 // A line typed out of order moves to its place when the caret leaves it.
 // While the box is not being typed in, the pane keeps the whole text in
-// order with sortText, so a file opened out of order is sorted at once. basic/lines.h does the text
-// work. This class watches the box through its callback.
+// order with sortText, so a file opened out of order is sorted at once.
+// basic/lines.h does the text work. This class watches the box through
+// its callback.
 #pragma once
 
 #include <string>

@@ -89,3 +89,168 @@ void ed_list(unsigned int first, unsigned int last)
         p = p + prog[p + 2];
     }
 }
+
+/* ---- RENUM ---- */
+
+static char renum_buf[256];
+
+static unsigned char upper_of(unsigned char c)
+{
+    if (c >= 97 && c <= 122) return c - 32;
+    return c;
+}
+
+static unsigned char is_letter(unsigned char c)
+{
+    c = upper_of(c);
+    return c >= 65 && c <= 90;
+}
+
+static unsigned char is_digit(unsigned char c) { return c >= 48 && c <= 57; }
+
+/* True when the n characters at w spell kw, case ignored. */
+static unsigned char word_is(unsigned char *w, unsigned int n, char *kw)
+{
+    unsigned int i;
+    i = 0;
+    while (i < n) {
+        if (kw[i] == 0 || upper_of(w[i]) != kw[i]) return 0;
+        i = i + 1;
+    }
+    return kw[n] == 0;
+}
+
+/* The number line `old` gets, or 0 when there is no such line. */
+static unsigned int renum_of(unsigned int old, unsigned int start, unsigned int step)
+{
+    unsigned int p;
+    unsigned int n;
+    p = 0;
+    n = start;
+    while (lineno_at(p)) {
+        if (lineno_at(p) == old) return n;
+        n = n + step;
+        p = p + prog[p + 2];
+    }
+    return 0;
+}
+
+/* The text of the line at p with its references renumbered, into
+ * renum_buf. Returns its length, or 251 when it would be too long. Strings
+ * are copied as they are, and REM and ! end the scan, since the rest of
+ * their line is not BASIC.
+ */
+static unsigned int renum_text(unsigned int p, unsigned int start, unsigned int step)
+{
+    unsigned char *src;
+    unsigned int i;
+    unsigned int o;
+    unsigned int j;
+    unsigned int num;
+    unsigned int nn;
+    unsigned int d;
+    unsigned char c;
+    unsigned char digits[6];
+    unsigned char nd;
+    unsigned char big;
+    src = &prog[p + 3];
+    i = 0;
+    o = 0;
+    while (src[i]) {
+        if (o > 250) return 251;
+        c = src[i];
+        if (c == 34) {
+            renum_buf[o] = c; o = o + 1; i = i + 1;
+            while (src[i] && src[i] != 34 && o <= 250) { renum_buf[o] = src[i]; o = o + 1; i = i + 1; }
+            if (src[i] == 34) { renum_buf[o] = 34; o = o + 1; i = i + 1; }
+        } else if (c == 33) {
+            while (src[i] && o <= 250) { renum_buf[o] = src[i]; o = o + 1; i = i + 1; }
+        } else if (is_letter(c)) {
+            j = i;
+            while (is_letter(src[j]) || is_digit(src[j]) || src[j] == 36) j = j + 1;
+            if (word_is(&src[i], j - i, "REM")) {
+                while (src[i] && o <= 250) { renum_buf[o] = src[i]; o = o + 1; i = i + 1; }
+            } else {
+                d = word_is(&src[i], j - i, "GOTO") || word_is(&src[i], j - i, "GOSUB") ||
+                    word_is(&src[i], j - i, "THEN");
+                while (i < j && o <= 250) { renum_buf[o] = src[i]; o = o + 1; i = i + 1; }
+                if (d) {
+                    while (src[i] == 32 && o <= 250) { renum_buf[o] = 32; o = o + 1; i = i + 1; }
+                    if (is_digit(src[i])) {
+                        j = i;
+                        num = 0;
+                        big = 0;
+                        while (is_digit(src[j])) {
+                            /* past 65535 names no line, so it stays as typed */
+                            if (num > 6553 || (num == 6553 && src[j] > 53)) big = 1;
+                            else num = num * 10 + (src[j] - 48);
+                            j = j + 1;
+                        }
+                        nn = (num && !big) ? renum_of(num, start, step) : 0;
+                        if (nn) {
+                            nd = 0;
+                            while (nn) { digits[nd] = 48 + nn % 10; nd = nd + 1; nn = nn / 10; }
+                            while (nd && o <= 250) { nd = nd - 1; renum_buf[o] = digits[nd]; o = o + 1; }
+                            i = j;
+                        } else {
+                            while (i < j && o <= 250) { renum_buf[o] = src[i]; o = o + 1; i = i + 1; }
+                        }
+                    }
+                }
+            }
+        } else {
+            renum_buf[o] = c; o = o + 1; i = i + 1;
+        }
+    }
+    if (o > 250) return 251;
+    renum_buf[o] = 0;
+    return o;
+}
+
+void ed_renum(unsigned int start, unsigned int step)
+{
+    unsigned int p;
+    unsigned int n;
+    unsigned int len;
+    unsigned int total;
+
+    /* The last number must fit: stop before any addition passes 65535. */
+    p = 0;
+    n = start;
+    while (lineno_at(p)) {
+        p = p + prog[p + 2];
+        if (lineno_at(p)) {
+            if (n > 65535 - step) { rt_error(E_RENUM); return; }
+            n = n + step;
+        }
+    }
+    /* Measure first, so a line or the program that would grow too long
+     * stops RENUM before anything has changed.
+     */
+    p = 0;
+    total = prog_len;
+    while (lineno_at(p)) {
+        len = renum_text(p, start, step);
+        if (len > 250) { rt_error(E_LINELONG); return; }
+        total = total + len + 4 - prog[p + 2];
+        if (total >= PROGMAX) { rt_error(E_MEMORY); return; }
+        p = p + prog[p + 2];
+    }
+    /* The references, while the lines still have their old numbers. */
+    p = 0;
+    while (lineno_at(p)) {
+        len = renum_text(p, start, step);
+        if (len + 4 != prog[p + 2]) ed_store(lineno_at(p), renum_buf);
+        else memcpy(&prog[p + 3], renum_buf, len);
+        p = p + prog[p + 2];
+    }
+    /* Then the numbers themselves. */
+    p = 0;
+    n = start;
+    while (lineno_at(p)) {
+        prog[p] = n >> 8;
+        prog[p + 1] = n;
+        n = n + step;
+        p = p + prog[p + 2];
+    }
+}

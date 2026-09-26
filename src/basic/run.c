@@ -160,6 +160,7 @@ static void say_error(void)
     else if (err == E_SAVEBIG) term_puts("THE PROGRAM IS TOO LONG TO SAVE");
     else if (err == E_NEEDSTR) term_puts("A NUMBER CANNOT BE USED AS A STRING");
     else if (err == E_STRCMP) term_puts("STRINGS ARE COMPARED WITH = <> < > <= OR >=");
+    else if (err == E_RENUM) term_puts("RENUM WOULD NUMBER A LINE PAST 65535");
     else if (err == E_ROUTINE) {
         term_puts(err_found);
         term_puts(" IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: USE ITS NUMBER HERE");
@@ -686,6 +687,22 @@ void rt_line(char *text)
     if (lx_is("RUN")) { rt_run(); return; }
     if (lx_is("LIST")) { do_list(); if (err) say_error(); return; }
     if (lx_is("NEW")) { ed_new(); str_init(); term_puts("READY"); term_nl(); return; }
+    /* RENUM start, step: 10 and 10 unless given. */
+    if (lx_is("RENUM")) {
+        unsigned int start;
+        unsigned int step;
+        lx_next();
+        start = 10;
+        step = 10;
+        if (lx_tok != T_END) {
+            start = ex_int();
+            if (lx_is(",")) { lx_next(); step = ex_int(); }
+        }
+        if (!err && (start == 0 || step == 0)) rt_error(E_RANGE);
+        if (!err) ed_renum(start, step);
+        if (err) say_error();
+        return;
+    }
 
     /* A loop typed at the prompt lives on that one line, and a FOR a
      * program left open has no line to go back to now.

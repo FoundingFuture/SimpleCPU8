@@ -370,6 +370,53 @@ TEST_SUITE("stored programs") {
     CHECK_FALSE(has(after(text(*s), "LIST"), "GONE"));
   }
 
+  TEST_CASE("RENUM numbers the lines again, and GOTO, GOSUB and THEN follow") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "5 PRINT \"GOTO 5\"");
+    type(*s, "7 IF A THEN 20");
+    type(*s, "20 GOSUB 5: GOTO 7");
+    type(*s, "30 REM GOTO 5");
+    type(*s, "31 GOTO 99");
+    type(*s, "RENUM 100,50");
+    const auto& ram = s->m->ram;
+    const size_t at = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
+    const size_t len = static_cast<size_t>((ram[basic::SYS_PROG_LEN] << 8) | ram[basic::SYS_PROG_LEN + 1]);
+    CHECK_EQ(basic::decodeProgram(std::span<const uint8_t>(ram.data() + at, len)),
+             "100 PRINT \"GOTO 5\"\n150 IF A THEN 200\n200 GOSUB 100: GOTO 150\n250 REM GOTO 5\n300 GOTO 99\n");
+  }
+
+  TEST_CASE("RENUM on its own counts in tens, and a program still runs after it") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "1 A=0");
+    type(*s, "2 A=A+1");
+    type(*s, "3 IF A<3 THEN 2");
+    type(*s, "4 PRINT A*111");
+    type(*s, "RENUM");
+    type(*s, "LIST");
+    const std::string t = after(text(*s), "LIST");
+    CHECK(has(t, "10 A=0"));
+    CHECK(has(t, "30 IF A<3 THEN 20"));
+    CHECK(has(t, "40 PRINT A*111"));
+    type(*s, "RUN");
+    CHECK(has(after(text(*s), "RUN"), "333"));
+  }
+
+  TEST_CASE("RENUM that would pass 65535 says so and changes nothing") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 GOTO 20");
+    type(*s, "20 END");
+    type(*s, "RENUM 65000,1000");
+    CHECK(has(flat(*s), "RENUM WOULD NUMBER A LINE PAST 65535"));
+    type(*s, "CLS");
+    type(*s, "LIST");
+    CHECK(has(text(*s), "10 GOTO 20"));
+    type(*s, "RENUM 10,0");
+    CHECK(has(flat(*s), "NUMBER OUT OF RANGE"));
+  }
+
   TEST_CASE("empties itself on NEW") {
     auto s = boot();
     settle(*s);

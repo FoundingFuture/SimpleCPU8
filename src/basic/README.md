@@ -6,12 +6,13 @@ C++. Seven of the files are the browser project's, extracted from
 packages/ui/src/basic/ with extract.mjs. The script writes each TypeScript
 string constant to a file with its exact value. bang.c and store.c are new
 in this tree.
-This BASIC differs from the browser's in its drawing words. `INK`
-replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in expr.c.
-`PLOT` draws in the INK colour, where it drew white. `CIRCLE rx, ry,
-fill` draws a ring in INK with an optional fill, where `CIRCLE r` filled
-a disc. main.c sets INK to white at boot. A refresh from upstream undoes
-all of this, so redo it after one.
+This BASIC differs from the browser's in its drawing words and in
+RENUM. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
+expr.c. `PLOT` draws in the INK colour, where it drew white. `CIRCLE rx,
+ry, fill` draws a ring in INK with an optional fill, where `CIRCLE r`
+filled a disc. main.c sets INK to white at boot. `RENUM start, step` is
+new: ed_renum in edit.c, called from rt_line in run.c. A refresh from
+upstream undoes all of this, so redo it after one.
 
 ## Files
 
@@ -23,7 +24,7 @@ all of this, so redo it after one.
 | lex.c | The tokenizer. |
 | expr.c | Expression evaluation, numbers and strings. |
 | strings.c | The string heap and the string functions. |
-| edit.c | The program store: insert, replace, delete and list lines. |
+| edit.c | The program store: insert, replace, delete, list and renumber lines. |
 | run.c | The statements: RUN, GOTO, GOSUB, FOR, IF, PRINT, POKE, DOKE, CALL, JMP, the break check. |
 | bang.c | The bang statement and its vector at $8000. See docs/storage-design.md. |
 | store.c | The storage driver: LOAD, SAVE, DELETE and CATALOG through the storage device. |

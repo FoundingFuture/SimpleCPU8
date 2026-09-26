@@ -242,6 +242,13 @@ lands between 10 and 20.
 line 40, and `LIST 20-` shows everything from line 20 on. A long program
 no longer scrolls away before you find the line you want.
 
+After many lines squeezed in between others, the numbers get crowded.
+`RENUM 100,50` numbers the program again: the first line becomes 100,
+the next 150, the one after that 200. `RENUM` on its own starts at 10 and counts in
+tens. Every `GOTO`, `GOSUB` and `THEN` changes with the line it names,
+so the program runs as before. A number inside quotes or after `REM`
+stays as you typed it.
+
 To replace a line, type it again with the same number. To delete a line,
 type its number and nothing else. `NEW` throws the whole program away.
 
@@ -890,6 +897,7 @@ Commands you type at the prompt:
 | `RUN` | runs the stored program from its lowest line |
 | `LIST` | prints the stored program, or part of it: `LIST 20`, `LIST 20-40`, `LIST -40`, `LIST 20-` |
 | `NEW` | throws the stored program away |
+| `RENUM s,i` | numbers the lines again from s in steps of i, 10 and 10 when left out |
 
 Statements, in a program or at the prompt:
 
