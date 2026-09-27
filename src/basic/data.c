@@ -46,7 +46,8 @@ static int sv_line;
 
 /* The caller's place in its own line. A walk moves the lexer into DATA
  * lines, and lx_restore reads the caller's token again from its start.
- * The callers stand on a name or a bracket, which reads back the same.
+ * The callers stand on a name, a bracket, a colon or the end of the line,
+ * all of which read back the same.
  */
 static char *sv_text;
 static unsigned int sv_pos;
@@ -235,7 +236,10 @@ static unsigned char rd_seek(void)
     return 0;
 }
 
-/* The next value into dv_*, with the cursor moved past it. */
+/* The next value into dv_*, with the cursor moved past it. A READ of the
+ * wrong kind still takes the value: rd_pos moves before dt_read_int and
+ * dt_read_str check dv_kind, so the next READ goes on to the value after it.
+ */
 static unsigned char rd_next(void)
 {
     if (!rd_seek()) return 0;
@@ -300,13 +304,22 @@ void dt_restore_line(int line)
 /* DESIGN: the IDE writes the program into memory between two commands, and
  * nothing tells the interpreter. A hash taken after each command finds the
  * change. It runs only at the prompt and only while READ is part way.
+ *
+ * The hash is probabilistic, not exact: two different programs of the same
+ * length can hash the same, which misses an edit about once in 65536. An
+ * exact signal would need a system page byte the IDE bumps on every write,
+ * which nothing does yet. djb2's step, multiplying by 33 with a shift and
+ * an add rather than a real multiply, is used because it mixes every byte
+ * into every bit of h, so two byte changes cannot cancel each other the way
+ * they could when the step was linear over GF(2) (a rotate and an XOR),
+ * where a value written back unchanged 16 bytes from another undoes it.
  */
 static unsigned int prog_hash(void)
 {
     unsigned int h;
     unsigned int i;
     h = prog_len;
-    for (i = 0; i < prog_len; i++) h = ((h << 1) | (h >> 15)) ^ prog[i];
+    for (i = 0; i < prog_len; i++) h = (h << 5) + h + prog[i];
     return h;
 }
 

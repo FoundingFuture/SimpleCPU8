@@ -1751,4 +1751,16 @@ TEST_SUITE("DATA, READ and RESTORE") {
     type(*s, "READ B");
     CHECK_EQ(intVar(*s, 'B'), 7);
   }
+
+  TEST_CASE("an IDE swap of two values 16 bytes apart still reads from the first value again") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA 1,2,3,4");
+    type(*s, "110 DATA 5,6,7,8");
+    type(*s, "READ A");
+    CHECK_EQ(intVar(*s, 'A'), 1);
+    setProgram(*s, "100 DATA 5,2,3,4\n110 DATA 1,6,7,8\n");
+    type(*s, "READ B");
+    CHECK_EQ(intVar(*s, 'B'), 5);
+  }
 }
