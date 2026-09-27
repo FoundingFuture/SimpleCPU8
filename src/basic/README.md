@@ -4,8 +4,8 @@ The BASIC interpreter runs on the CPU. It is written in the machine's own C
 dialect and compiled by simplecpu-cc. So this directory holds C sources, not
 C++. Seven of the files are the browser project's, extracted from
 packages/ui/src/basic/ with extract.mjs. The script writes each TypeScript
-string constant to a file with its exact value. bang.c and store.c are new
-in this tree.
+string constant to a file with its exact value. bang.c, store.c and data.c
+are new in this tree.
 This BASIC differs from the browser's in its drawing words, in RENUM and
 in DATA. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
 expr.c. `PLOT` draws in the INK colour, where it drew white. `CIRCLE rx,
@@ -28,7 +28,7 @@ A refresh from upstream undoes all of this, so redo it after one.
 | expr.c | Expression evaluation, numbers and strings. |
 | strings.c | The string heap and the string functions. |
 | edit.c | The program store: insert, replace, delete, list and renumber lines. |
-| run.c | The statements: RUN, GOTO, GOSUB, FOR, IF, PRINT, POKE, DOKE, CALL, JMP, the break check. |
+| run.c | The statements: RUN, GOTO, GOSUB, FOR, IF, PRINT, POKE, DOKE, CALL, JMP, READ, RESTORE, the break check. DATA's own reading lives in data.c. |
 | bang.c | The bang statement and its vector at $8000. See docs/storage-design.md. |
 | store.c | The storage driver: LOAD, SAVE, DELETE and CATALOG through the storage device. |
 | data.c | DATA lines: placement at RUN, DATA(n), READ and RESTORE. See docs/basic-data-design.md. |

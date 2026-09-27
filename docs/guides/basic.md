@@ -248,9 +248,9 @@ no longer scrolls away before you find the line you want.
 After many lines squeezed in between others, the numbers get crowded.
 `RENUM 100,50` numbers the program again: the first line becomes 100,
 the next 150, the one after that 200. `RENUM` on its own starts at 10 and counts in
-tens. Every `GOTO`, `GOSUB` and `THEN` changes with the line it names,
-so the program runs as before. A number inside quotes or after `REM`
-stays as you typed it.
+tens. Every `GOTO`, `GOSUB`, `THEN` and `RESTORE` changes with the line it
+names, and so does one inside `DATA(`, so the program runs as before. A
+number inside quotes or after `REM` stays as you typed it.
 
 To replace a line, type it again with the same number. To delete a line,
 type its number and nothing else. `NEW` throws the whole program away.

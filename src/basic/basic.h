@@ -126,8 +126,9 @@ void ed_store(int line, char *text);
 unsigned int ed_find(int line);
 void ed_list(unsigned int first, unsigned int last);
 /* Number the lines again from start in steps of step, and change the
- * line numbers after GOTO, GOSUB and THEN to match. Nothing changes when
- * it cannot finish: E_RENUM past 65535, E_LINELONG, E_MEMORY.
+ * line numbers after GOTO, GOSUB, THEN and RESTORE to match, and inside
+ * DATA(. Nothing changes when it cannot finish: E_RENUM past 65535,
+ * E_LINELONG, E_MEMORY.
  */
 void ed_renum(unsigned int start, unsigned int step);
 
@@ -142,7 +143,7 @@ extern unsigned char loop_back;
  */
 #define E_OK      0
 #define E_SYNTAX  1   /* a line not understood; the message says what was expected */
-#define E_NOLINE  2   /* GOTO, GOSUB or THEN to a line that is not there */
+#define E_NOLINE  2   /* GOTO, GOSUB, THEN, RESTORE or DATA( to a line that is not there */
 #define E_STACK   3   /* no longer raised: split into 15 to 18 */
 #define E_MEMORY  4   /* the program memory is full */
 #define E_TYPE    5   /* a string where a number is needed */

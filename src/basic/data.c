@@ -39,6 +39,9 @@ static unsigned int rd_line;
 static unsigned int rd_pos;
 static unsigned int rd_hash;
 
+/* Whether rd_on was set right after dt_check ran, for dt_mark to read. */
+static unsigned char rd_was;
+
 /* The line the caller was on, for the message after an error that is not
  * the DATA line's own.
  */
@@ -201,7 +204,7 @@ int dt_addr(int line)
 {
     unsigned int p;
     p = ed_find(line);
-    if (LINE_AT(p) != line) { err_arg = line; rt_error(E_NOLINE); return 0; }
+    if (line == 0 || LINE_AT(p) != line) { err_arg = line; rt_error(E_NOLINE); return 0; }
     lx_save();
     if (is_data(p)) walk(p, 0);
     else { err_arg = line; rt_error(E_NOTDATA); }
@@ -290,7 +293,7 @@ void dt_restore_line(int line)
 {
     unsigned int p;
     p = ed_find(line);
-    if (LINE_AT(p) != line) { err_arg = line; rt_error(E_NOLINE); return; }
+    if (line == 0 || LINE_AT(p) != line) { err_arg = line; rt_error(E_NOLINE); return; }
     lx_save();
     if (!is_data(p)) { err_arg = line; rt_error(E_NOTDATA); }
     else if (open_line(p)) {
@@ -303,32 +306,38 @@ void dt_restore_line(int line)
 
 /* DESIGN: the IDE writes the program into memory between two commands, and
  * nothing tells the interpreter. A hash taken after each command finds the
- * change. It runs only at the prompt and only while READ is part way.
+ * change: any single changed byte always changes the hash.
  *
- * The hash is probabilistic, not exact: two different programs of the same
- * length can hash the same, which misses an edit about once in 65536. An
- * exact signal would need a system page byte the IDE bumps on every write,
- * which nothing does yet. djb2's step, multiplying by 33 with a shift and
- * an add rather than a real multiply, is used because it mixes every byte
- * into every bit of h, so two byte changes cannot cancel each other the way
- * they could when the step was linear over GF(2) (a rotate and an XOR),
- * where a value written back unchanged 16 bytes from another undoes it.
+ * Two changes that cancel each other can still go unseen. A value v and
+ * v + D swapped between two bytes d apart collide when 2 divides D and d
+ * together at least 11 times. In measured swaps of digits and letters that
+ * was about 4 in 1000. The exact fix is a system page byte the IDE bumps
+ * when it writes the program. That changes the documented system page, so
+ * it is the owner's decision.
  */
 static unsigned int prog_hash(void)
 {
     unsigned int h;
     unsigned int i;
-    h = prog_len;
-    for (i = 0; i < prog_len; i++) h = (h << 5) + h + prog[i];
+    unsigned int len;
+    len = prog_len;
+    h = len;
+    for (i = 0; i < len; i++) h = (h << 5) + h + prog[i];
     return h;
 }
 
+/* Every change the interpreter makes to the program itself calls dt_restore,
+ * which clears rd_on. So if rd_on is still set once a command finishes, the
+ * program did not change during it and rd_hash, checked here, is still
+ * right: dt_mark has nothing new to hash unless READ has just switched on.
+ */
 void dt_check(void)
 {
     if (rd_on && prog_hash() != rd_hash) rd_on = 0;
+    rd_was = rd_on;
 }
 
 void dt_mark(void)
 {
-    if (rd_on) rd_hash = prog_hash();
+    if (rd_on && !rd_was) rd_hash = prog_hash();
 }

@@ -43,9 +43,10 @@ void sortLines(std::vector<std::string>& lines, int& caret, bool glue = false);
 std::optional<int> numberAfter(const std::vector<std::string>& lines, int after);
 
 // Every numbered line numbered again from `start` in steps of `step`, in
-// the order they stand. GOTO, GOSUB and THEN followed by a number that
-// names a line are changed to match. A number in a string or after REM
-// is left as it is, and so is one naming a line that does not exist.
+// the order they stand. GOTO, GOSUB, THEN and RESTORE followed by a number
+// that names a line are changed to match, and so is one inside DATA(. A
+// number in a string or after REM is left as it is, and so is one naming a
+// line that does not exist.
 void renumberLines(std::vector<std::string>& lines, int start = 10, int step = 10);
 
 }  // namespace sc8::basic

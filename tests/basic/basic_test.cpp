@@ -1715,6 +1715,19 @@ TEST_SUITE("DATA, READ and RESTORE") {
     CHECK(has(flat(*s), "THERE IS NO LINE 99 IN LINE 10"));
   }
 
+  TEST_CASE("line 0 names no line, even after NEW") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA 1,2");
+    type(*s, "NEW");
+    type(*s, "RESTORE 0");
+    CHECK(has(flat(*s), "THERE IS NO LINE 0"));
+    CHECK_EQ(s->m->ram[0x12], 2);
+    type(*s, "PRINT DATA(0)");
+    CHECK(has(flat(*s), "THERE IS NO LINE 0"));
+    CHECK_EQ(s->m->ram[0x12], 2);
+  }
+
   TEST_CASE("READ of the wrong kind of value names the READ line") {
     auto s = boot();
     settle(*s);
@@ -1762,6 +1775,39 @@ TEST_SUITE("DATA, READ and RESTORE") {
     setProgram(*s, "100 DATA 5,2,3,4\n110 DATA 1,6,7,8\n");
     type(*s, "READ B");
     CHECK_EQ(intVar(*s, 'B'), 5);
+  }
+
+  TEST_CASE("a first value with one, two or five hex digits is a value, not an address") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA $10,1");
+    type(*s, "RUN");
+    const int end = programEnd(*s);
+    CHECK_EQ(s->m->ram[static_cast<size_t>(end)], 16);
+    CHECK_EQ(s->m->ram[static_cast<size_t>(end + 1)], 1);
+    type(*s, "100 DATA $12345");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "A DATA VALUE IS ONE BYTE: -128 TO 255 IN LINE 100"));
+  }
+
+  TEST_CASE("NEW makes READ start again") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA 1,2");
+    type(*s, "READ A");
+    CHECK_EQ(intVar(*s, 'A'), 1);
+    type(*s, "NEW");
+    type(*s, "100 DATA 7");
+    type(*s, "READ B");
+    CHECK_EQ(intVar(*s, 'B'), 7);
+  }
+
+  TEST_CASE("DATA after THEN is a syntax error") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 IF 1 THEN DATA 5");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "EXPECTED A STATEMENT BUT FOUND DATA"));
   }
 
   TEST_CASE("POKE with a list writes each value to the next box") {
