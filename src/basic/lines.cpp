@@ -122,8 +122,8 @@ std::optional<int> numberAfter(const std::vector<std::string>& lines, int after)
 namespace {
 
 // The body's references rewritten through the map: a number after GOTO,
-// GOSUB or THEN. Strings are skipped, and REM and ! end the scan, since
-// the rest of their line is not BASIC.
+// GOSUB, THEN, RESTORE or DATA(. Strings are skipped, and REM and ! end the
+// scan, since the rest of their line is not BASIC.
 std::string rewriteReferences(const std::string& body, const std::map<int, int>& renamed) {
   std::string out;
   size_t i = 0;
@@ -155,7 +155,16 @@ std::string rewriteReferences(const std::string& body, const std::map<int, int>&
       out.append(body, i, std::string::npos);
       break;
     }
-    if (word != "GOTO" && word != "GOSUB" && word != "THEN") continue;
+    if (word == "DATA") {
+      // DATA( names a line. DATA and a value is a DATA line.
+      size_t k = i;
+      while (k < body.size() && body[k] == ' ') k++;
+      if (k == body.size() || body[k] != '(') continue;
+      out.append(body, i, k + 1 - i);
+      i = k + 1;
+    } else if (word != "GOTO" && word != "GOSUB" && word != "THEN" && word != "RESTORE") {
+      continue;
+    }
     while (i < body.size() && body[i] == ' ') out += body[i++];
     size_t k = i;
     while (k < body.size() && std::isdigit(static_cast<unsigned char>(body[k]))) k++;

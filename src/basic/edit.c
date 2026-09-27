@@ -215,7 +215,8 @@ static unsigned int renum_of(unsigned int old, unsigned int start, unsigned int 
 }
 
 /* The text of the line at p with its references renumbered, into
- * renum_buf. Returns its length, or 251 when it would be too long. Strings
+ * renum_buf. A reference is the number after GOTO, GOSUB, THEN, RESTORE or
+ * DATA(. Returns its length, or 251 when it would be too long. Strings
  * are copied as they are, and REM and ! end the scan, since the rest of
  * their line is not BASIC.
  */
@@ -232,6 +233,8 @@ static unsigned int renum_text(unsigned int p, unsigned int start, unsigned int 
     unsigned char digits[6];
     unsigned char nd;
     unsigned char big;
+    unsigned char dp;
+    unsigned int k;
     src = &prog[p + 3];
     i = 0;
     o = 0;
@@ -251,8 +254,18 @@ static unsigned int renum_text(unsigned int p, unsigned int start, unsigned int 
                 while (src[i] && o <= 250) { renum_buf[o] = src[i]; o = o + 1; i = i + 1; }
             } else {
                 d = word_is(&src[i], j - i, "GOTO") || word_is(&src[i], j - i, "GOSUB") ||
-                    word_is(&src[i], j - i, "THEN");
+                    word_is(&src[i], j - i, "THEN") || word_is(&src[i], j - i, "RESTORE");
+                /* DATA( names a line. DATA and a value is a DATA line. */
+                dp = word_is(&src[i], j - i, "DATA");
                 while (i < j && o <= 250) { renum_buf[o] = src[i]; o = o + 1; i = i + 1; }
+                if (dp) {
+                    k = i;
+                    while (src[k] == 32) k = k + 1;
+                    if (src[k] == 40) {
+                        while (i <= k && o <= 250) { renum_buf[o] = src[i]; o = o + 1; i = i + 1; }
+                        d = 1;
+                    }
+                }
                 if (d) {
                     while (src[i] == 32 && o <= 250) { renum_buf[o] = 32; o = o + 1; i = i + 1; }
                     if (is_digit(src[i])) {

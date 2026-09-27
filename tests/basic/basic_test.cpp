@@ -1774,4 +1774,17 @@ TEST_SUITE("DATA, READ and RESTORE") {
     type(*s, "POKE $9C50,9: PRINT PEEK($9C50)");
     CHECK(has(after(text(*s), "PEEK($9C50)"), "9"));
   }
+
+  TEST_CASE("RENUM changes RESTORE n and DATA(n) and leaves a DATA line's values") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "5 RESTORE 7: A=DATA (7)");
+    type(*s, "7 DATA 5, 7");
+    type(*s, "RENUM");
+    const auto& ram = s->m->ram;
+    const size_t at = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
+    const size_t len = static_cast<size_t>((ram[basic::SYS_PROG_LEN] << 8) | ram[basic::SYS_PROG_LEN + 1]);
+    CHECK_EQ(basic::decodeProgram(std::span<const uint8_t>(ram.data() + at, len)),
+             "10 RESTORE 20: A=DATA (20)\n20 DATA 5, 7\n");
+  }
 }

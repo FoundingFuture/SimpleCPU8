@@ -98,4 +98,8 @@ TEST_SUITE("the editor numbers a new line") {
   TEST_CASE("a reference to a line that does not exist is left as it is") {
     CHECK_EQ(renumbered("1 GOTO 99\n2 goto 1"), "10 GOTO 99\n20 goto 10");
   }
+
+  TEST_CASE("renumbering moves RESTORE and DATA( along and leaves a DATA line's values") {
+    CHECK_EQ(renumbered("5 RESTORE 7: A=DATA (7)\n7 DATA 5, 7\n"), "10 RESTORE 20: A=DATA (20)\n20 DATA 5, 7\n");
+  }
 }
