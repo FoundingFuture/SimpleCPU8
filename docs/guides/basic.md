@@ -14,6 +14,7 @@ one idea and one small program to type in.
 - [A stored program](#a-stored-program)
 - [Remembering things](#remembering-things)
 - [Memory as numbered boxes](#memory-as-numbered-boxes)
+- [Tables of numbers](#tables-of-numbers)
 - [Making decisions](#making-decisions)
 - [Doing things again](#doing-things-again)
 - [Working with words](#working-with-words)
@@ -379,6 +380,56 @@ word HERE appears at column 10, row 5.
 to 65535 fits. `DOKE 40000,1000` puts 3 in box 40000 and 232 in box
 40001, because 3 times 256 plus 232 is 1000. `DEEK(40000)` reads it back
 as 1000. You will not need them for a long while.
+
+## Tables of numbers
+
+A program needs a list of numbers that never changes: the notes of
+a tune, the shape of a character, the walls of a level. `DATA` holds such
+a list, and `READ` takes the values one at a time.
+
+```basic
+10 FOR I=1 TO 4
+20 READ N
+30 PRINT N*N;" ";
+40 NEXT I
+100 DATA 3,5,7,9
+```
+
+```text
+9 25 49 81
+```
+
+Each `READ` takes the next value. When one `DATA` line runs out, `READ`
+carries on with the next one. `RESTORE` sends it back to the first value,
+and `RESTORE 100` to the first value of line 100. `READ A$` takes a
+string, written in quotes in the `DATA` line.
+
+`DATA` must be the first word of its line. A running program passes over
+a `DATA` line and does nothing.
+
+When the program starts, `RUN` also puts every value in memory, one byte
+each. So a value must fit in a box: 0 to 255, or -128 to -1. A `DATA`
+line that starts with three or four hex digits says which box the bytes
+go to. The next lines carry on from there.
+
+```basic
+10 PRINT PEEK(40000);" ";PEEK(40003)
+100 DATA $9C40,10,20,30
+110 DATA 40,50,60
+```
+
+```text
+10 40
+```
+
+`$9C40` is 40000, so 10, 20 and 30 go to boxes 40000 to 40002, and line
+110 carries on at 40003. `READ` skips the address and gives 10 first.
+`DATA(110)` gives the box line 110 starts at, 40003. Numbers stop at
+32767, so `PRINT DATA(110)` shows -25533. `PEEK` and `POKE` still find
+the right box.
+
+`POKE` takes a list too. `POKE 40000,1,2,3` puts 1 in box 40000, 2 in
+40001 and 3 in 40002.
 
 ## Making decisions
 
@@ -925,7 +976,10 @@ Statements, in a program or at the prompt:
 | `REM text` | a remark, ignored |
 | `CLS` | clears the text and paints the picture in the `PAPER` colour |
 | `WAIT n` | pauses n frames, 60 to a second |
-| `POKE a,v` | puts byte v in box a |
+| `POKE a,v,w` | puts byte v in box a, w in box a+1, one box for each value |
+| `DATA v,w` | holds values for `READ`, placed in memory by `RUN` |
+| `READ V` | takes the next `DATA` value |
+| `RESTORE` or `RESTORE n` | makes `READ` start again, at the first value or at line n |
 | `DOKE a,v` | puts word v in boxes a and a+1, high byte first |
 | `PAPER c` | fills the picture with colour c |
 | `INK c` | sets the pen colour, which every drawing word uses |
@@ -948,6 +1002,7 @@ Functions, used inside an expression:
 | `ABS(n)` | n without its sign |
 | `PEEK(a)` | the byte in box a |
 | `DEEK(a)` | the word in boxes a and a+1 |
+| `DATA(n)` | the box where line n's `DATA` bytes go |
 | `PIXEL(x,y)` | the colour of the pixel at x,y |
 | `KEY()` | the code of the key pressed since the last look, or 0 |
 | `PAD()` | the keys held down, added up as bits |

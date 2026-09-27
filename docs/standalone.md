@@ -236,7 +236,7 @@ into the executable, so a SAVE lives only for that session. `simplecpu
 SAVE or DELETE writes that file back. Copy basic.rom to make a workspace
 of your own, and keep as many as you like.
 
-BASIC gets DATA, READ and RESTORE, designed and not built yet. Two parts
+BASIC has DATA, READ and RESTORE. Two parts
 go past the classic form. `DATA(n)` gives the RAM address of line n's
 bytes, so the GPU or a C routine reads a table in place. A line can open
 with a three or four digit hex number. RUN then drops that line's bytes at

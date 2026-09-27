@@ -11,8 +11,11 @@ RENUM. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
 expr.c. `PLOT` draws in the INK colour, where it drew white. `CIRCLE rx,
 ry, fill` draws a ring in INK with an optional fill, where `CIRCLE r`
 filled a disc. main.c sets INK to white at boot. `RENUM start, step` is
-new: ed_renum in edit.c, called from rt_line in run.c. A refresh from
-upstream undoes all of this, so redo it after one.
+new: ed_renum in edit.c, called from rt_line in run.c.
+DATA, READ, RESTORE and DATA(n) are new in data.c. POKE takes a list of
+values in run.c. lex.c records where each token starts, `lx_tokpos`, and
+has a raw mode for strings, `lx_raw`, that data.c reads DATA lines with.
+A refresh from upstream undoes all of this, so redo it after one.
 
 ## Files
 
@@ -28,6 +31,7 @@ upstream undoes all of this, so redo it after one.
 | run.c | The statements: RUN, GOTO, GOSUB, FOR, IF, PRINT, POKE, DOKE, CALL, JMP, the break check. |
 | bang.c | The bang statement and its vector at $8000. See docs/storage-design.md. |
 | store.c | The storage driver: LOAD, SAVE, DELETE and CATALOG through the storage device. |
+| data.c | DATA lines: placement at RUN, DATA(n), READ and RESTORE. See docs/basic-data-design.md. |
 | basic_rom.h, basic_rom.cpp | sc8::basicRom(), the embedded ROM bytes, basicAsm() the assembly and basicSources() the C, for a project that holds BASIC and C. |
 | extract.mjs | The extraction script. Needs Node 22 with --experimental-strip-types. |
 

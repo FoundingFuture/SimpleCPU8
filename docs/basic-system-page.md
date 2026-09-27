@@ -164,5 +164,8 @@ they always had. Code 3 is no longer raised: codes 15 to 18 split it.
 | 25 | E_NOTVAR | `name IS NOT A VARIABLE: ...` |
 | 26 | E_ROUTINE | `name IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: ...` |
 | 27 | E_RENUM | `RENUM WOULD NUMBER A LINE PAST 65535` |
+| 28 | E_NODATA | `READ FOUND NO MORE DATA` |
+| 29 | E_NOTDATA | `LINE n HOLDS NO DATA` |
+| 30 | E_DATABYTE | `A DATA VALUE IS ONE BYTE: -128 TO 255` |
 
 The codes are in src/basic/basic.h and the messages in run.c.
