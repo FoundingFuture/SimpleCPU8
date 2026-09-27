@@ -219,10 +219,7 @@ int programEnd(const Session& s) {
 
 // An integer variable, A to Z, read out of memory. A letter owns eleven
 // word slots, high byte first.
-// Not read by Task 1's own tests, only by the READ tests Task 3 adds to
-// this file, so it stays [[maybe_unused]] until that suite calls it: the
-// build is warning free, and -Wunused-function would otherwise fail it.
-[[maybe_unused]] int16_t intVar(const Session& s, char letter) {
+int16_t intVar(const Session& s, char letter) {
   const auto& ram = s.m->ram;
   const size_t vars = static_cast<size_t>((ram[12] << 8) | ram[13]);
   const size_t at = vars + static_cast<size_t>(letter - 'A') * 22;
@@ -1603,5 +1600,55 @@ TEST_SUITE("DATA, READ and RESTORE") {
     setProgram(*s, program);
     type(*s, "RUN");
     CHECK(has(flat(*s), "THE PROGRAM MEMORY IS FULL: 6144 BYTES AT MOST IN LINE 1000"));
+  }
+
+  TEST_CASE("DATA(n) gives the address, after an address too, and writes nothing") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA $9C40,10,20,30");
+    type(*s, "110 DATA 40");
+    type(*s, "120 DATA $9D00");
+    type(*s, "130 DATA 5");
+    type(*s, "A=DATA(100)");
+    type(*s, "B=DATA(110)");
+    type(*s, "C=DATA(120)");
+    type(*s, "D=DATA(130)");
+    CHECK_EQ(intVar(*s, 'A'), static_cast<int16_t>(0x9c40));
+    CHECK_EQ(intVar(*s, 'B'), static_cast<int16_t>(0x9c43));
+    CHECK_EQ(intVar(*s, 'C'), static_cast<int16_t>(0x9d00));
+    CHECK_EQ(intVar(*s, 'D'), static_cast<int16_t>(0x9d00));
+    CHECK_EQ(s->m->ram[0x9c40], 0);
+  }
+
+  TEST_CASE("DATA(n) of a line in the data area matches where RUN puts it") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 A=DATA(110)");
+    type(*s, "100 DATA 1,2");
+    type(*s, "110 DATA 3");
+    type(*s, "RUN");
+    CHECK_EQ(intVar(*s, 'A'), static_cast<int16_t>(programEnd(*s) + 2));
+    CHECK_EQ(s->m->ram[static_cast<size_t>(programEnd(*s) + 2)], 3);
+  }
+
+  TEST_CASE("DATA(n) inside a longer expression leaves the rest of the line") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA $9C40,1");
+    type(*s, "A=DATA(100)+1: B=7");
+    CHECK_EQ(intVar(*s, 'A'), static_cast<int16_t>(0x9c41));
+    CHECK_EQ(intVar(*s, 'B'), 7);
+  }
+
+  TEST_CASE("DATA(n) of a line without DATA, or of no line, says so") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "20 END");
+    type(*s, "PRINT DATA(20)");
+    CHECK(has(flat(*s), "LINE 20 HOLDS NO DATA"));
+    CHECK_EQ(s->m->ram[0x12], 29);
+    type(*s, "PRINT DATA(99)");
+    CHECK(has(flat(*s), "THERE IS NO LINE 99"));
+    CHECK_EQ(s->m->ram[0x12], 2);
   }
 }

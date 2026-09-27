@@ -156,6 +156,21 @@ static int fn_call(void)
         if (width == 1) return peek(SYS_USR + 1);
         return (peek(SYS_USR) << 8) | peek(SYS_USR + 1);
     }
+    /* DATA(n): where line n's bytes go. The walk runs while the lexer
+     * stands on the closing bracket, which data.c reads back after it.
+     */
+    if (lx_is("DATA")) {
+        lx_next();
+        if (!lx_is("(")) { rt_expect("( AFTER DATA"); return 0; }
+        lx_next();
+        a = ex_int();
+        if (err) return 0;
+        if (!lx_is(")")) { rt_expect(")"); return 0; }
+        a = dt_addr(a);
+        if (err) return 0;
+        lx_next();
+        return a;
+    }
     if (lx_is("PEEK")) {
         lx_next();
         if (lx_is("(")) lx_next();

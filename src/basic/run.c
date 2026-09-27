@@ -161,6 +161,7 @@ static void say_error(void)
     else if (err == E_NEEDSTR) term_puts("A NUMBER CANNOT BE USED AS A STRING");
     else if (err == E_STRCMP) term_puts("STRINGS ARE COMPARED WITH = <> < > <= OR >=");
     else if (err == E_RENUM) term_puts("RENUM WOULD NUMBER A LINE PAST 65535");
+    else if (err == E_NOTDATA) { term_puts("LINE "); term_putn(err_arg); term_puts(" HOLDS NO DATA"); }
     else if (err == E_DATABYTE) term_puts("A DATA VALUE IS ONE BYTE: -128 TO 255");
     else if (err == E_ROUTINE) {
         term_puts(err_found);

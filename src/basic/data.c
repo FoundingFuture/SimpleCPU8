@@ -35,6 +35,31 @@ static unsigned char dt_fixed;
  */
 static int sv_line;
 
+/* The caller's place in its own line. A walk moves the lexer into DATA
+ * lines, and lx_restore reads the caller's token again from its start.
+ * The callers stand on a name or a bracket, which reads back the same.
+ */
+static char *sv_text;
+static unsigned int sv_pos;
+
+static void lx_save(void)
+{
+    sv_text = lx_text;
+    sv_pos = lx_tokpos;
+    sv_line = err_line;
+}
+
+/* After an error the lexer stays where it failed and err_line names the
+ * line the error is in.
+ */
+static void lx_restore(void)
+{
+    lx_raw = 0;
+    if (err) return;
+    err_line = sv_line;
+    lx_seek(sv_text, sv_pos);
+}
+
 /* Is the line at p a DATA line. Leaves the lexer on its first word. */
 static unsigned char is_data(unsigned int p)
 {
@@ -159,4 +184,16 @@ void dt_pack(void)
     sv_line = 0;
     walk(PROGMAX, 1);
     lx_raw = 0;
+}
+
+int dt_addr(int line)
+{
+    unsigned int p;
+    p = ed_find(line);
+    if (LINE_AT(p) != line) { err_arg = line; rt_error(E_NOLINE); return 0; }
+    lx_save();
+    if (is_data(p)) walk(p, 0);
+    else { err_arg = line; rt_error(E_NOTDATA); }
+    lx_restore();
+    return dt_at;
 }

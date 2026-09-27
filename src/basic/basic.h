@@ -168,6 +168,7 @@ extern unsigned char loop_back;
 #define E_NOTVAR  25  /* a name that is not a variable, assigned or read */
 #define E_ROUTINE 26  /* CALL, JMP or USR given a name at the prompt, where only numbers work */
 #define E_RENUM   27  /* RENUM would number a line past 65535 */
+#define E_NOTDATA 29  /* RESTORE n or DATA(n) of a line that holds no DATA */
 #define E_DATABYTE 30 /* a DATA value that does not fit in a byte */
 
 /* CALL, JMP and USR take a routine's slot. A name there works only in a
@@ -251,5 +252,9 @@ void sto_autorun(void);
  * bytes go and READ takes the values. docs/basic-data-design.md.
  */
 void dt_pack(void);
+/* The address line's bytes go to, the same one RUN places them at. Writes
+ * nothing, so it answers before a RUN and after an edit.
+ */
+int dt_addr(int line);
 
 #endif
