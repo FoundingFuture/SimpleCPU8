@@ -6,8 +6,8 @@ C++. Seven of the files are the browser project's, extracted from
 packages/ui/src/basic/ with extract.mjs. The script writes each TypeScript
 string constant to a file with its exact value. bang.c and store.c are new
 in this tree.
-This BASIC differs from the browser's in its drawing words and in
-RENUM. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
+This BASIC differs from the browser's in its drawing words, in RENUM and
+in DATA. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
 expr.c. `PLOT` draws in the INK colour, where it drew white. `CIRCLE rx,
 ry, fill` draws a ring in INK with an optional fill, where `CIRCLE r`
 filled a disc. main.c sets INK to white at boot. `RENUM start, step` is
@@ -39,7 +39,7 @@ A refresh from upstream undoes all of this, so redo it after one.
 
 CMakeLists.txt runs three custom commands in the build tree, in order:
 
-1. simplecpu-cc compiles the nine C files, passed by bare name from this
+1. simplecpu-cc compiles the ten C files, passed by bare name from this
    directory so `#include "basic.h"` resolves, into basic.asm and ROM.h.
 2. simplecpu-asm burns basic.asm into basic.rom with the optimal microcode
    and the title BASIC.

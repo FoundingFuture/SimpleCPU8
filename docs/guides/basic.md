@@ -408,9 +408,10 @@ string, written in quotes in the `DATA` line.
 a `DATA` line and does nothing.
 
 When the program starts, `RUN` also puts every value in memory, one byte
-each. So a value must fit in a box: 0 to 255, or -128 to -1. A `DATA`
-line that starts with three or four hex digits says which box the bytes
-go to. The next lines carry on from there.
+each. So a value must fit in a box: 0 to 255, or -128 to -1. A number
+written with a dollar sign in front is hex, so `$0F` is 15. A `DATA`
+line that starts with such a number, three or four digits after the `$`,
+says which box the bytes go to. The next lines carry on from there.
 
 ```basic
 10 PRINT PEEK(40000);" ";PEEK(40003)
