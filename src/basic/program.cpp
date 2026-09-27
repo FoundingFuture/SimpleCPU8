@@ -1,9 +1,69 @@
 #include "basic/program.h"
 
 #include <algorithm>
+#include <cctype>
 #include <map>
 
 namespace sc8::basic {
+
+const std::set<std::string, std::less<>>& basicKeywords() {
+  static const std::set<std::string, std::less<>> words = {
+      "ABS",  "AND",   "ASC",   "CALL",   "CATALOG", "CHR$",  "CIRCLE", "CLS",  "DEEK",  "DELETE",
+      "DOKE", "DRAW",  "END",   "FOR",    "GOSUB",   "GOTO",  "IF",     "INK",  "INKEY$", "INPUT",
+      "JMP",  "JSR",   "KEY",   "LEN",    "LET",     "LIST",  "LOAD",   "MID$", "MOD",   "MOVE",
+      "NEW",  "NEXT",  "NOT",   "OR",     "PAD",     "PAPER", "PEEK",   "PIXEL", "PLOT", "POKE",
+      "PRINT", "REM",  "RENUM", "RETURN", "RND",   "RUN",     "SAVE",  "STEP",   "STOP", "STR$",  "THEN",
+      "TO",   "USR",   "VAL",   "WAIT"};
+  return words;
+}
+
+namespace {
+
+bool isNameStart(char c) { return std::isalpha(static_cast<unsigned char>(c)) != 0 || c == '_'; }
+bool isDigit(char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }
+bool isNameChar(char c) { return isNameStart(c) || isDigit(c); }
+bool isHexDigit(char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; }
+
+}  // namespace
+
+// The walk is lexBasic's in src/ide/highlight.cpp. A number runs over
+// name characters the way the highlighter's does, so `1to` stays as typed.
+std::string canonicalLine(std::string_view body) {
+  std::string out;
+  out.reserve(body.size());
+  size_t i = 0;
+  while (i < body.size()) {
+    const char c = body[i];
+    size_t end = i + 1;
+    if (c == '"') {
+      end = body.find('"', i + 1);
+      end = end == std::string_view::npos ? body.size() : end + 1;
+    } else if (c == '$' && i + 1 < body.size() && isHexDigit(body[i + 1])) {
+      while (end < body.size() && isHexDigit(body[end])) end++;
+    } else if (isDigit(c)) {
+      while (end < body.size() && (isNameChar(body[end]) || body[end] == '.')) end++;
+    } else if (isNameStart(c)) {
+      while (end < body.size() && isNameChar(body[end])) end++;
+      if (end < body.size() && body[end] == '$') end++;
+      std::string w(body.substr(i, end - i));
+      for (char& ch : w) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+      if (basicKeywords().count(w)) {
+        out += w;
+        i = end;
+        if (w == "REM") {
+          out += body.substr(i);
+          i = body.size();
+        }
+        continue;
+      }
+    } else if (c == '!') {
+      end = body.size();
+    }
+    out += body.substr(i, end - i);
+    i = end;
+  }
+  return out;
+}
 
 std::vector<uint8_t> encodeProgram(const std::string& text) {
   // The map keeps the lines sorted and makes a repeated number a
@@ -29,7 +89,7 @@ std::vector<uint8_t> encodeProgram(const std::string& text) {
     if (body.size() > 250) body.resize(250);
     if (n <= 0 || n > 65535) continue;
     if (body.empty()) lines.erase(n);
-    else lines[n] = body;
+    else lines[n] = canonicalLine(body);
   }
   std::vector<uint8_t> out;
   for (const auto& [n, body] : lines) {
@@ -161,7 +221,7 @@ std::string patchText(const std::string& text, std::span<const uint8_t> program)
     if (lastRow[n] != r) continue;
     const auto it = want.find(n);
     if (it == want.end()) continue;
-    kept.push_back({n, body == it->second ? rows[r] : std::to_string(n) + " " + it->second});
+    kept.push_back({n, canonicalLine(body) == it->second ? rows[r] : std::to_string(n) + " " + it->second});
   }
   // The program's lines the document lacks, each before the first
   // numbered row above it.

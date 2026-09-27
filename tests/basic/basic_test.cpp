@@ -1372,4 +1372,28 @@ TEST_SUITE("basic program codec") {
     CHECK_EQ(basic::patchText("10 A\n10 B\n", changed), "10 PRINT 1\n");
     CHECK_EQ(basic::encodeProgram(basic::patchText(text, program)), program);
   }
+  TEST_CASE("encode capitalizes the BASIC words and nothing else") {
+    auto encoded = [](const std::string& line) { return basic::decodeProgram(basic::encodeProgram(line + "\n")); };
+    CHECK_EQ(encoded("10 for i = 1 to 10 : print \"Hallo, World!\" ; i : next i"),
+             "10 FOR i = 1 TO 10 : PRINT \"Hallo, World!\" ; i : NEXT i\n");
+    CHECK_EQ(encoded("20 a$ = chr$(65) + mid$(b$, 2)"), "20 a$ = CHR$(65) + MID$(b$, 2)\n");
+    CHECK_EQ(encoded("30 rem print this"), "30 REM print this\n");
+    CHECK_EQ(encoded("40 ! print this"), "40 ! print this\n");
+    CHECK_EQ(encoded("50 print \"a\" ; forx ; \"b\""), "50 PRINT \"a\" ; forx ; \"b\"\n");
+    CHECK_EQ(encoded("60 print \"unterminated to end"), "60 PRINT \"unterminated to end\n");
+    CHECK_EQ(encoded("70 poke $f000, peek($F001)"), "70 POKE $f000, PEEK($F001)\n");
+  }
+  TEST_CASE("a line already in capitals encodes to the same bytes") {
+    const std::vector<uint8_t> p = basic::encodeProgram("10 PRINT \"x\"\n");
+    CHECK(p == std::vector<uint8_t>{0, 10, 13, 'P', 'R', 'I', 'N', 'T', ' ', '"', 'x', '"', 0, 0, 0, 3});
+  }
+  TEST_CASE("a lowercase document keeps its spelling where the machine did not change it") {
+    const std::string text = "10 for i = 1 to 3\n20   print i\n30 next i\n";
+    const auto stored = basic::encodeProgram(text);
+    CHECK_EQ(basic::decodeProgram(stored), "10 FOR i = 1 TO 3\n20 PRINT i\n30 NEXT i\n");
+    CHECK_EQ(basic::patchText(text, stored), text);
+    // The machine changes line 20 and adds 40. Only those rows are rewritten.
+    const auto machine = basic::encodeProgram(basic::decodeProgram(stored) + "20 PRINT i * 2\n40 END\n");
+    CHECK_EQ(basic::patchText(text, machine), "10 for i = 1 to 3\n20 PRINT i * 2\n30 next i\n40 END\n");
+  }
 }

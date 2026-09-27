@@ -4,6 +4,7 @@
 #include <cctype>
 #include <set>
 
+#include "basic/program.h"
 #include "core/isa.h"
 #include "ide/panes.h"
 #include "imgui_internal.h"
@@ -234,17 +235,6 @@ std::vector<Span> lexAssembly(std::string_view s) {
 
 // ---- BASIC
 
-const std::set<std::string, std::less<>>& basicKeywords() {
-  static const std::set<std::string, std::less<>> words = {
-      "ABS",  "AND",   "ASC",   "CALL",   "CATALOG", "CHR$",  "CIRCLE", "CLS",  "DEEK",  "DELETE",
-      "DOKE", "DRAW",  "END",   "FOR",    "GOSUB",   "GOTO",  "IF",     "INK",  "INKEY$", "INPUT",
-      "JMP",  "JSR",   "KEY",   "LEN",    "LET",     "LIST",  "LOAD",   "MID$", "MOD",   "MOVE",
-      "NEW",  "NEXT",  "NOT",   "OR",     "PAD",     "PAPER", "PEEK",   "PIXEL", "PLOT", "POKE",
-      "PRINT", "REM",  "RENUM", "RETURN", "RND",   "RUN",     "SAVE",  "STEP",   "STOP", "STR$",  "THEN",
-      "TO",   "USR",   "VAL",   "WAIT"};
-  return words;
-}
-
 std::vector<Span> lexBasic(std::string_view s) {
   Spans out;
   size_t i = 0;
@@ -275,7 +265,7 @@ std::vector<Span> lexBasic(std::string_view s) {
         out.add(end, s.size(), Token::Comment);
         break;
       }
-      if (basicKeywords().count(w)) out.add(i, end, Token::Keyword);
+      if (basic::basicKeywords().count(w)) out.add(i, end, Token::Keyword);
       i = end;
     } else if (c == '!') {
       // The bang statement.

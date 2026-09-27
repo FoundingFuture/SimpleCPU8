@@ -76,7 +76,9 @@ READY
 `READY` means BASIC is waiting for you. The `>` is the prompt, and the
 white block after it is the cursor. Whatever you type appears at the
 cursor. Press Enter to send a line to the machine. Backspace rubs out the
-last letter. Small letters are turned into capitals as you type.
+last letter. Small letters are turned into capitals as you type. The
+IDE puts the BASIC words in capitals when it sends a program to the
+machine. Everything else stays as you wrote it.
 
 F5 restarts the machine. Everything you typed is gone afterwards, so
 read the chapter on saving before you rely on it.
