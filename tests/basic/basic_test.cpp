@@ -1763,4 +1763,15 @@ TEST_SUITE("DATA, READ and RESTORE") {
     type(*s, "READ B");
     CHECK_EQ(intVar(*s, 'B'), 5);
   }
+
+  TEST_CASE("POKE with a list writes each value to the next box") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "POKE $9C40,1,2,3");
+    CHECK_EQ(s->m->ram[0x9c40], 1);
+    CHECK_EQ(s->m->ram[0x9c41], 2);
+    CHECK_EQ(s->m->ram[0x9c42], 3);
+    type(*s, "POKE $9C50,9: PRINT PEEK($9C50)");
+    CHECK(has(after(text(*s), "PEEK($9C50)"), "9"));
+  }
 }

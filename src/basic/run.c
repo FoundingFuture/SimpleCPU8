@@ -541,11 +541,15 @@ static unsigned char statement(void)
         lx_next();
         {
             int a;
-            int v;
             a = ex_int();
             if (lx_is(",")) lx_next();
-            v = ex_int();
-            poke(a, v);
+            poke(a, ex_int());
+            /* POKE a, 1, 2, 3 fills the boxes after a in turn. */
+            while (lx_is(",")) {
+                lx_next();
+                a = a + 1;
+                poke(a, ex_int());
+            }
             return 1;
         }
     }
