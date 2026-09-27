@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "basic/lines.h"
+#include "basic/program.h"
 
 namespace sc8 {
 
@@ -41,8 +42,11 @@ int BasicAssist::callback(ImGuiInputTextCallbackData* data) {
 }
 
 bool BasicAssist::sortText(std::string& text) {
+  std::string canonical = basic::canonicalText(text);
+  bool changed = canonical != text;
+  if (changed) text = std::move(canonical);
   auto lines = basic::splitLines(text);
-  if (basic::linesInOrder(lines)) return false;
+  if (basic::linesInOrder(lines)) return changed;
   int caret = 0;
   basic::sortLines(lines, caret);
   text = basic::joinLines(lines);
@@ -131,7 +135,18 @@ int BasicAssist::event(ImGuiInputTextCallbackData* data) {
   }
 
   const std::string_view now(data->Buf, static_cast<size_t>(data->CursorPos));
-  lastLine_ = static_cast<int>(std::count(now.begin(), now.end(), '\n'));
+  const int caretLine = static_cast<int>(std::count(now.begin(), now.end(), '\n'));
+  if (caretLine != lastLine_) {
+    // The caret left a line: the rows it is not on take the stored
+    // spelling. That keeps their size, so the caret stays where it is.
+    const std::string_view all(data->Buf, static_cast<size_t>(data->BufTextLen));
+    const std::string canonical = basic::canonicalText(all, caretLine);
+    if (canonical != all && canonical.size() == all.size()) {
+      std::copy(canonical.begin(), canonical.end(), data->Buf);
+      data->BufDirty = true;
+    }
+  }
+  lastLine_ = caretLine;
   return 0;
 }
 

@@ -10,9 +10,11 @@
 // THEN included.
 //
 // A line typed out of order moves to its place when the caret leaves it.
-// While the box is not being typed in, the pane keeps the whole text in
-// order with sortText, so a file opened out of order is sorted at once.
-// basic/lines.h does the text work. This class watches the box through
+// A line the caret leaves also takes the stored spelling, its reserved
+// words in capitals, so the editor shows what the machine holds. While the
+// box is not being typed in, the pane runs sortText over the whole text.
+// A file opened lowercase or out of order is put right at once.
+// basic/lines.h does the text work. BasicAssist watches the box through
 // its callback.
 #pragma once
 
@@ -31,11 +33,12 @@ class BasicAssist {
 
   // Forget the caret, for another document.
   void reset() { lastLine_ = -1; }
-  // What the editor did that the user should hear about, once.
+  // What the editor did, for the Messages pane, once.
   std::string takeNote() { return std::move(note_); }
 
-  // The whole text in number order, for when the box is not active.
-  // True when it changed.
+  // The whole text in number order, with the reserved words of every
+  // numbered row in capitals as they are stored. For when the box is not
+  // active. True when it changed.
   static bool sortText(std::string& text);
 
  private:

@@ -1383,6 +1383,16 @@ TEST_SUITE("basic program codec") {
     CHECK_EQ(encoded("60 print \"unterminated to end"), "60 PRINT \"unterminated to end\n");
     CHECK_EQ(encoded("70 poke $f000, peek($F001)"), "70 POKE $f000, PEEK($F001)\n");
   }
+  TEST_CASE("the editor's text takes the stored spelling of every numbered row") {
+    const std::string text = "10 print i\r\n  20   goto 10\nnot a line: print\n\n30 rem for\n";
+    const std::string canonical = basic::canonicalText(text);
+    CHECK_EQ(canonical, "10 PRINT i\r\n  20   GOTO 10\nnot a line: print\n\n30 REM for\n");
+    CHECK_EQ(canonical.size(), text.size());
+    CHECK_EQ(basic::encodeProgram(canonical), basic::encodeProgram(text));
+    CHECK_EQ(basic::patchText(canonical, basic::encodeProgram(text)), canonical);
+    // The row being typed in is left alone.
+    CHECK_EQ(basic::canonicalText("10 print\n20 prin\n30 goto 10\n", 1), "10 PRINT\n20 prin\n30 GOTO 10\n");
+  }
   TEST_CASE("a line already in capitals encodes to the same bytes") {
     const std::vector<uint8_t> p = basic::encodeProgram("10 PRINT \"x\"\n");
     CHECK(p == std::vector<uint8_t>{0, 10, 13, 'P', 'R', 'I', 'N', 'T', ' ', '"', 'x', '"', 0, 0, 0, 3});

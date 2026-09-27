@@ -861,7 +861,8 @@ void Ide::editorPane(const char* name) {
     ImGui::SetItemTooltip("Enter at the end of a numbered line numbers the next one.\n"
                           "Enter on a bare number takes it away again.\n"
                           "%s-I or Shift+Enter opens a numbered line under the caret's line.\n"
-                          "A line typed out of order moves to its place when the caret leaves it.",
+                          "A line typed out of order moves to its place when the caret leaves it.\n"
+                          "Its BASIC words turn to capitals then, as the computer stores them.",
                           ImGui::GetIO().ConfigMacOSXBehaviors ? "Cmd" : "Ctrl");
   } else if (kind == DocKind::Microcode) {
     ImGui::SameLine();
@@ -916,8 +917,8 @@ void Ide::editorPane(const char* name) {
       d->dirty = true;
     }
     // Whenever the box is not being typed in, the text stands in number
-    // order: a file opened out of order, lines typed on the machine's
-    // screen, the editor just left.
+    // order with its reserved words in capitals: a file opened out of
+    // order, lines typed on the machine's screen, the editor just left.
     if (!ImGui::IsItemActive() && BasicAssist::sortText(d->text)) d->dirty = true;
     if (std::string n = basicAssist_.takeNote(); !n.empty()) note(n);
   } else if (codeEditor("##doc", d->text, syntaxOf(d->name), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) {

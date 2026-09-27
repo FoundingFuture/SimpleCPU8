@@ -37,6 +37,11 @@ const std::set<std::string, std::less<>>& basicKeywords();
 // numbers and spacing stay as written.
 std::string canonicalLine(std::string_view body);
 
+// The editor's text with canonicalLine applied to the body of every
+// numbered row but row `skip`, the one being typed in. The number, the
+// spaces around it and rows without a number stay. The size never changes.
+std::string canonicalText(std::string_view text, int skip = -1);
+
 // Text to stored bytes, the way typing the lines in would go. Lines are
 // sorted by number. A later line with the same number replaces an earlier
 // one. A numbered line with no text deletes. A line with no number is

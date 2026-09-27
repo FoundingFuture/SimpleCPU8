@@ -65,6 +65,33 @@ std::string canonicalLine(std::string_view body) {
   return out;
 }
 
+std::string canonicalText(std::string_view text, int skip) {
+  std::string out;
+  out.reserve(text.size());
+  int row = 0;
+  size_t at = 0;
+  while (at <= text.size()) {
+    size_t end = text.find('\n', at);
+    if (end == std::string_view::npos) end = text.size();
+    const std::string_view line = text.substr(at, end - at);
+    size_t i = 0;
+    while (i < line.size() && line[i] == ' ') i++;
+    const size_t digits = i;
+    while (i < line.size() && isDigit(line[i])) i++;
+    if (row == skip || i == digits) {
+      out += line;
+    } else {
+      while (i < line.size() && line[i] == ' ') i++;
+      out += line.substr(0, i);
+      out += canonicalLine(line.substr(i));
+    }
+    if (end < text.size()) out += '\n';
+    at = end + 1;
+    row++;
+  }
+  return out;
+}
+
 std::vector<uint8_t> encodeProgram(const std::string& text) {
   // The map keeps the lines sorted and makes a repeated number a
   // replacement, which is what the interpreter does on entry.

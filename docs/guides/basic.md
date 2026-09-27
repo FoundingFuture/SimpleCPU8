@@ -76,9 +76,7 @@ READY
 `READY` means BASIC is waiting for you. The `>` is the prompt, and the
 white block after it is the cursor. Whatever you type appears at the
 cursor. Press Enter to send a line to the machine. Backspace rubs out the
-last letter. Small letters are turned into capitals as you type. The
-IDE puts the BASIC words in capitals when it sends a program to the
-machine. Everything else stays as you wrote it.
+last letter. Small letters are turned into capitals as you type.
 
 F5 restarts the machine. Everything you typed is gone afterwards, so
 read the chapter on saving before you rely on it.
@@ -731,6 +729,11 @@ free between two lines, the editor numbers the whole program again in
 tens. `GOTO`, `GOSUB` and `THEN` change with it, and the Messages pane
 says so. A line typed with a number out of order moves to its place when
 you leave it. A file opened out of order is put in order at once.
+
+The editor shows the program as the machine holds it. Type `print` and
+it turns into `PRINT` when you leave the line, as every BASIC word does.
+Names, strings and the rest of a `REM` stay as you typed them. A file
+with its BASIC words in small letters is put in capitals when it opens.
 
 `NEW` on the small screen empties the editor as well. The file on disk
 keeps the old program until you save, and the Messages pane says so.
