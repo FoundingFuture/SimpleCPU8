@@ -161,6 +161,7 @@ static void say_error(void)
     else if (err == E_NEEDSTR) term_puts("A NUMBER CANNOT BE USED AS A STRING");
     else if (err == E_STRCMP) term_puts("STRINGS ARE COMPARED WITH = <> < > <= OR >=");
     else if (err == E_RENUM) term_puts("RENUM WOULD NUMBER A LINE PAST 65535");
+    else if (err == E_NODATA) term_puts("READ FOUND NO MORE DATA");
     else if (err == E_NOTDATA) { term_puts("LINE "); term_putn(err_arg); term_puts(" HOLDS NO DATA"); }
     else if (err == E_DATABYTE) term_puts("A DATA VALUE IS ONE BYTE: -128 TO 255");
     else if (err == E_ROUTINE) {
@@ -293,6 +294,47 @@ static unsigned char statement(void)
     if (lx_is("CLS")) { lx_next(); term_cls(); return 1; }
     if (lx_is("END") || lx_is("STOP")) { lx_next(); running = 0; return 0; }
     if (lx_is("INPUT")) { lx_next(); do_input(); return 1; }
+
+    /* READ A, B$: the next DATA values, across lines. */
+    if (lx_is("READ")) {
+        lx_next();
+        for (;;) {
+            if (lx_tok != T_NAME) { rt_expect("A VARIABLE AFTER READ"); return 1; }
+            if (IS_STRVAR) {
+                unsigned char letter;
+                unsigned int s;
+                letter = lx_word[0] - 65;
+                s = dt_read_str();
+                if (err) return 1;
+                svar[letter] = s;
+            } else if (IS_INTVAR) {
+                int slot;
+                int v;
+                slot = var_slot();
+                v = dt_read_int();
+                if (err) return 1;
+                vars[slot] = v;
+            } else {
+                rt_error(E_NOTVAR);
+                return 1;
+            }
+            lx_next();
+            if (!lx_is(",")) return 1;
+            lx_next();
+        }
+    }
+
+    if (lx_is("RESTORE")) {
+        lx_next();
+        if (lx_tok == T_END || lx_is(":")) { dt_restore(); return 1; }
+        {
+            int n;
+            n = ex_int();
+            if (err) return 1;
+            dt_restore_line(n);
+            return 1;
+        }
+    }
 
     if (lx_is("GOTO")) {
         lx_next();

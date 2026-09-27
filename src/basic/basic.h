@@ -168,6 +168,7 @@ extern unsigned char loop_back;
 #define E_NOTVAR  25  /* a name that is not a variable, assigned or read */
 #define E_ROUTINE 26  /* CALL, JMP or USR given a name at the prompt, where only numbers work */
 #define E_RENUM   27  /* RENUM would number a line past 65535 */
+#define E_NODATA  28  /* READ past the last DATA value */
 #define E_NOTDATA 29  /* RESTORE n or DATA(n) of a line that holds no DATA */
 #define E_DATABYTE 30 /* a DATA value that does not fit in a byte */
 
@@ -256,5 +257,16 @@ void dt_pack(void);
  * nothing, so it answers before a RUN and after an edit.
  */
 int dt_addr(int line);
+/* The next DATA value for READ, into a number or a string. */
+int dt_read_int(void);
+unsigned int dt_read_str(void);
+/* READ starts again at the first value, or at the first of line n. */
+void dt_restore(void);
+void dt_restore_line(int line);
+/* Around each command at the prompt. A READ part way through a program
+ * that changed between two commands starts again at the first value.
+ */
+void dt_check(void);
+void dt_mark(void);
 
 #endif

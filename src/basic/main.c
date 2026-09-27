@@ -22,7 +22,9 @@ int main(void)
     for (;;) {
         term_putc(62);
         term_readline(input);
+        dt_check();
         rt_line(input);
+        dt_mark();
         if (running == 0) { term_puts("READY"); term_nl(); }
     }
     return 0;

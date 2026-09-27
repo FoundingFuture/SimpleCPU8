@@ -1651,4 +1651,104 @@ TEST_SUITE("DATA, READ and RESTORE") {
     CHECK(has(flat(*s), "THERE IS NO LINE 99"));
     CHECK_EQ(s->m->ram[0x12], 2);
   }
+
+  TEST_CASE("READ runs across lines and never returns the address") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 FOR I=1 TO 6: READ A: PRINT A;: NEXT I");
+    type(*s, "100 DATA $9C40,10,20,30");
+    type(*s, "110 DATA 40,50,60");
+    type(*s, "RUN");
+    CHECK(has(after(text(*s), "RUN"), "102030405060"));
+  }
+
+  TEST_CASE("READ takes strings, and a value as written") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 READ A$,B,C$,D$: PRINT A$;B;C$;D$;\"!\"");
+    type(*s, "100 DATA \"HI\",-1,\"A,B\",\"\"");
+    type(*s, "RUN");
+    CHECK(has(after(text(*s), "RUN"), "HI-1A,B!"));
+  }
+
+  TEST_CASE("RESTORE starts again, and RESTORE n starts at line n") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 READ A,B: RESTORE: READ C: RESTORE 110: READ D: PRINT A;B;C;D");
+    type(*s, "100 DATA 1,2");
+    type(*s, "110 DATA $9C40,3");
+    type(*s, "RUN");
+    CHECK(has(after(text(*s), "RUN"), "1213"));
+  }
+
+  TEST_CASE("each RUN reads from the first value again") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 READ A: PRINT A*11");
+    type(*s, "100 DATA 5,6");
+    type(*s, "RUN");
+    type(*s, "RUN");
+    CHECK_EQ(countOf(text(*s), "55"), 2);
+    CHECK_FALSE(has(text(*s), "66"));
+  }
+
+  TEST_CASE("READ past the last value says so") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 READ A,B");
+    type(*s, "100 DATA 1");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "READ FOUND NO MORE DATA IN LINE 10"));
+    CHECK_EQ(s->m->ram[0x12], 28);
+  }
+
+  TEST_CASE("RESTORE n of a line without DATA, or of no line, says so") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 RESTORE 20");
+    type(*s, "20 END");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "LINE 20 HOLDS NO DATA IN LINE 10"));
+    CHECK_EQ(s->m->ram[0x12], 29);
+    type(*s, "10 RESTORE 99");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "THERE IS NO LINE 99 IN LINE 10"));
+  }
+
+  TEST_CASE("READ of the wrong kind of value names the READ line") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 READ A");
+    type(*s, "100 DATA \"X\"");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "A STRING CANNOT BE USED AS A NUMBER IN LINE 10"));
+    type(*s, "10 READ A$");
+    type(*s, "100 DATA 5");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "A NUMBER CANNOT BE USED AS A STRING IN LINE 10"));
+  }
+
+  TEST_CASE("a program changed at the prompt reads from the first value again") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA 1,2");
+    type(*s, "READ A");
+    type(*s, "READ B");
+    CHECK_EQ(intVar(*s, 'A'), 1);
+    CHECK_EQ(intVar(*s, 'B'), 2);
+    type(*s, "110 DATA 3");
+    type(*s, "READ C");
+    CHECK_EQ(intVar(*s, 'C'), 1);
+  }
+
+  TEST_CASE("a program the IDE rewrote reads from the first value again") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA 1,2");
+    type(*s, "READ A");
+    // Same length, so only the bytes tell the programs apart.
+    setProgram(*s, "100 DATA 7,2\n");
+    type(*s, "READ B");
+    CHECK_EQ(intVar(*s, 'B'), 7);
+  }
 }

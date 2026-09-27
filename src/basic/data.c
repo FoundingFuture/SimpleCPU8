@@ -30,6 +30,15 @@ static unsigned char line_fixed;
 static unsigned int dt_at;
 static unsigned char dt_fixed;
 
+/* Where READ is: rd_on is 0 until the first value is found, then rd_line
+ * is the offset of the DATA line and rd_pos where its next value starts.
+ * rd_hash is the program's hash at the end of the last command.
+ */
+static unsigned char rd_on;
+static unsigned int rd_line;
+static unsigned int rd_pos;
+static unsigned int rd_hash;
+
 /* The line the caller was on, for the message after an error that is not
  * the DATA line's own.
  */
@@ -181,6 +190,7 @@ static void walk(unsigned int stop, unsigned char place)
 
 void dt_pack(void)
 {
+    rd_on = 0;
     sv_line = 0;
     walk(PROGMAX, 1);
     lx_raw = 0;
@@ -196,4 +206,116 @@ int dt_addr(int line)
     else { err_arg = line; rt_error(E_NOTDATA); }
     lx_restore();
     return dt_at;
+}
+
+/* Stand the lexer on the next value READ takes. Returns 0 after an error. */
+static unsigned char rd_seek(void)
+{
+    unsigned int p;
+    p = 0;
+    if (rd_on) {
+        err_line = LINE_AT(rd_line);
+        lx_raw = 1;
+        lx_seek((char *)&prog[rd_line + 3], rd_pos);
+        if (lx_tok != T_END) return 1;
+        p = rd_line + prog[rd_line + 2];
+    }
+    while (LINE_AT(p)) {
+        if (is_data(p)) {
+            if (!open_line(p)) return 0;
+            rd_on = 1;
+            rd_line = p;
+            rd_pos = lx_tokpos;
+            if (lx_tok != T_END) return 1;
+        }
+        p = p + prog[p + 2];
+    }
+    err_line = sv_line;
+    rt_error(E_NODATA);
+    return 0;
+}
+
+/* The next value into dv_*, with the cursor moved past it. */
+static unsigned char rd_next(void)
+{
+    if (!rd_seek()) return 0;
+    if (!value()) return 0;
+    if (!sep()) return 0;
+    rd_pos = lx_tokpos;
+    return 1;
+}
+
+int dt_read_int(void)
+{
+    int v;
+    v = 0;
+    lx_save();
+    if (rd_next()) {
+        if (dv_kind == V_STR) { err_line = sv_line; rt_error(E_TYPE); }
+        else v = dv_num;
+    }
+    lx_restore();
+    return v;
+}
+
+unsigned int dt_read_str(void)
+{
+    unsigned int s;
+    unsigned char i;
+    s = 0;
+    lx_save();
+    if (rd_next()) {
+        if (dv_kind != V_STR) { err_line = sv_line; rt_error(E_NEEDSTR); }
+        else if (dv_len) {
+            s = str_new(dv_len);
+            if (s) {
+                for (i = 0; i < dv_len; i++) heap[s + 1 + i] = lx_text[dv_str + i];
+            }
+        }
+    }
+    lx_restore();
+    return s;
+}
+
+void dt_restore(void)
+{
+    rd_on = 0;
+}
+
+void dt_restore_line(int line)
+{
+    unsigned int p;
+    p = ed_find(line);
+    if (LINE_AT(p) != line) { err_arg = line; rt_error(E_NOLINE); return; }
+    lx_save();
+    if (!is_data(p)) { err_arg = line; rt_error(E_NOTDATA); }
+    else if (open_line(p)) {
+        rd_on = 1;
+        rd_line = p;
+        rd_pos = lx_tokpos;
+    }
+    lx_restore();
+}
+
+/* DESIGN: the IDE writes the program into memory between two commands, and
+ * nothing tells the interpreter. A hash taken after each command finds the
+ * change. It runs only at the prompt and only while READ is part way.
+ */
+static unsigned int prog_hash(void)
+{
+    unsigned int h;
+    unsigned int i;
+    h = prog_len;
+    for (i = 0; i < prog_len; i++) h = ((h << 1) | (h >> 15)) ^ prog[i];
+    return h;
+}
+
+void dt_check(void)
+{
+    if (rd_on && prog_hash() != rd_hash) rd_on = 0;
+}
+
+void dt_mark(void)
+{
+    if (rd_on) rd_hash = prog_hash();
 }

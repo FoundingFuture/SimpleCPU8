@@ -14,6 +14,7 @@ void ed_new(void)
     prog[1] = 0;
     prog[2] = 3;
     prog_len = 3;
+    dt_restore();
 }
 
 static unsigned int lineno_at(unsigned int p)
@@ -52,6 +53,7 @@ void ed_store(int line, char *text)
     unsigned int rec;
     unsigned int i;
 
+    dt_restore();
     p = ed_find(line);
     if (lineno_at(p) == line) remove_at(p);
 
@@ -291,6 +293,7 @@ void ed_renum(unsigned int start, unsigned int step)
     unsigned int len;
     unsigned int total;
 
+    dt_restore();
     /* The last number must fit: stop before any addition passes 65535. */
     p = 0;
     n = start;
