@@ -199,6 +199,36 @@ int countOf(const std::string& t, const std::string& needle) {
   return n;
 }
 
+// The program, written into memory the way the IDE's writeProgram does.
+// It is faster than typing a long program and it is the path the IDE takes.
+void setProgram(Session& s, const std::string& program) {
+  auto& ram = s.m->ram;
+  const std::vector<uint8_t> bytes = basic::encodeProgram(program);
+  const size_t at = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
+  std::copy(bytes.begin(), bytes.end(), ram.begin() + static_cast<long>(at));
+  ram[basic::SYS_PROG_LEN] = static_cast<uint8_t>(bytes.size() >> 8);
+  ram[basic::SYS_PROG_LEN + 1] = static_cast<uint8_t>(bytes.size() & 255);
+}
+
+// Where the program ends in memory, which is where its data area starts.
+int programEnd(const Session& s) {
+  const auto& ram = s.m->ram;
+  return ((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]) +
+         ((ram[basic::SYS_PROG_LEN] << 8) | ram[basic::SYS_PROG_LEN + 1]);
+}
+
+// An integer variable, A to Z, read out of memory. A letter owns eleven
+// word slots, high byte first.
+// Not read by Task 1's own tests, only by the READ tests Task 3 adds to
+// this file, so it stays [[maybe_unused]] until that suite calls it: the
+// build is warning free, and -Wunused-function would otherwise fail it.
+[[maybe_unused]] int16_t intVar(const Session& s, char letter) {
+  const auto& ram = s.m->ram;
+  const size_t vars = static_cast<size_t>((ram[12] << 8) | ram[13]);
+  const size_t at = vars + static_cast<size_t>(letter - 'A') * 22;
+  return static_cast<int16_t>((ram[at] << 8) | ram[at + 1]);
+}
+
 }  // namespace
 
 TEST_SUITE("it boots") {
@@ -1446,5 +1476,132 @@ TEST_SUITE("basic program codec") {
     // The machine changes line 20 and adds 40. Only those rows are rewritten.
     const auto machine = basic::encodeProgram(basic::decodeProgram(stored) + "20 PRINT i * 2\n40 END\n");
     CHECK_EQ(basic::patchText(text, machine), "10 for i = 1 to 3\n20 PRINT i * 2\n30 next i\n40 END\n");
+  }
+}
+
+TEST_SUITE("DATA, READ and RESTORE") {
+  TEST_CASE("RUN places a line's bytes at its address, and the next line carries on") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 END");
+    type(*s, "100 DATA $9C40,10,20,30");
+    type(*s, "110 DATA 40,50,60");
+    type(*s, "RUN");
+    for (int i = 0; i < 6; i++) CHECK_EQ(s->m->ram[static_cast<size_t>(0x9c40 + i)], 10 * (i + 1));
+  }
+
+  TEST_CASE("a second address moves the cursor again") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA $9C40,1,2");
+    type(*s, "110 DATA $9D00,3");
+    type(*s, "120 DATA 4");
+    type(*s, "RUN");
+    CHECK_EQ(s->m->ram[0x9c40], 1);
+    CHECK_EQ(s->m->ram[0x9c41], 2);
+    CHECK_EQ(s->m->ram[0x9d00], 3);
+    CHECK_EQ(s->m->ram[0x9d01], 4);
+  }
+
+  TEST_CASE("a negative value and a string place as bytes") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA $9C40,-1,-128,\"A,B\",\"\",$0FF,0255");
+    type(*s, "RUN");
+    CHECK_EQ(s->m->ram[0x9c40], 255);
+    CHECK_EQ(s->m->ram[0x9c41], 128);
+    CHECK_EQ(s->m->ram[0x9c42], 'A');
+    CHECK_EQ(s->m->ram[0x9c43], ',');
+    CHECK_EQ(s->m->ram[0x9c44], 'B');
+    CHECK_EQ(s->m->ram[0x9c45], 255);
+    CHECK_EQ(s->m->ram[0x9c46], 255);
+    CHECK_EQ(s->m->ram[0x9c47], 0);
+  }
+
+  TEST_CASE("lines before any address go to the free memory after the program") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 END");
+    type(*s, "100 DATA 7,8");
+    type(*s, "RUN");
+    const int end = programEnd(*s);
+    CHECK_EQ(s->m->ram[static_cast<size_t>(end)], 7);
+    CHECK_EQ(s->m->ram[static_cast<size_t>(end + 1)], 8);
+  }
+
+  TEST_CASE("a DATA line typed in small letters places its bytes") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 data $9c40,1");
+    type(*s, "RUN");
+    CHECK_EQ(s->m->ram[0x9c40], 1);
+  }
+
+  TEST_CASE("a value that is not a byte stops RUN at its line") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 PRINT \"RAN\"");
+    type(*s, "100 DATA 1,256");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "A DATA VALUE IS ONE BYTE: -128 TO 255 IN LINE 100"));
+    CHECK_FALSE(has(after(text(*s), "RUN"), "RAN"));
+    CHECK_EQ(s->m->ram[0x12], 30);
+    type(*s, "100 DATA -129");
+    type(*s, "RUN");
+    CHECK_EQ(s->m->ram[0x12], 30);
+    type(*s, "100 DATA 1,$100");
+    type(*s, "RUN");
+    CHECK_EQ(s->m->ram[0x12], 30);
+    type(*s, "100 DATA 65546");
+    type(*s, "RUN");
+    CHECK_EQ(s->m->ram[0x12], 30);
+  }
+
+  TEST_CASE("an expression or a name in DATA is a syntax error at its line") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA 1+2");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "SYNTAX ERROR IN LINE 100: EXPECTED , OR THE END OF THE LINE BUT FOUND +"));
+    type(*s, "CLS");
+    type(*s, "100 DATA X");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "SYNTAX ERROR IN LINE 100: EXPECTED A NUMBER OR A STRING BUT FOUND X"));
+  }
+
+  TEST_CASE("DATA after a colon is a syntax error") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 PRINT 1: DATA 5");
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "EXPECTED A STATEMENT BUT FOUND DATA"));
+  }
+
+  TEST_CASE("DATA reached by a program, or typed at the prompt, does nothing") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 DATA 1,2");
+    type(*s, "20 PRINT 7");
+    type(*s, "RUN");
+    CHECK(has(after(text(*s), "RUN"), "7"));
+    CHECK_FALSE(has(text(*s), "?"));
+    type(*s, "DATA 1,2");
+    CHECK_FALSE(has(text(*s), "?"));
+  }
+
+  TEST_CASE("DATA that does not fit after the program stops RUN") {
+    auto s = boot();
+    settle(*s);
+    // 23 remarks of 248 bytes, one of 145 and a DATA line of 248 leave 44
+    // bytes free, and the line holds 120 values.
+    std::string program;
+    for (int n = 1; n <= 23; n++) program += std::to_string(n) + " REM " + std::string(240, 'X') + "\n";
+    program += "24 REM " + std::string(137, 'X') + "\n";
+    program += "1000 DATA 1";
+    for (int i = 1; i < 120; i++) program += ",1";
+    program += "\n";
+    setProgram(*s, program);
+    type(*s, "RUN");
+    CHECK(has(flat(*s), "THE PROGRAM MEMORY IS FULL: 6144 BYTES AT MOST IN LINE 1000"));
   }
 }

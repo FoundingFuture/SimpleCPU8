@@ -72,6 +72,12 @@ extern int lx_num;         /* its value, when it is a number */
 extern char lx_word[12];   /* its text, when it is a name or a keyword */
 extern unsigned char lx_len;  /* how long that text is */
 extern unsigned int lx_str;  /* heap offset, when it is a string */
+extern unsigned int lx_tokpos;  /* where the token last read starts in lx_text */
+/* 1 while data.c reads a DATA line. A string then stays in the text:
+ * lx_str is the index of its first character and lx_len its length.
+ * Nothing goes on the heap, so walking DATA lines leaves no garbage.
+ */
+extern unsigned char lx_raw;
 
 #define T_END    0
 #define T_NUM    1
@@ -162,6 +168,7 @@ extern unsigned char loop_back;
 #define E_NOTVAR  25  /* a name that is not a variable, assigned or read */
 #define E_ROUTINE 26  /* CALL, JMP or USR given a name at the prompt, where only numbers work */
 #define E_RENUM   27  /* RENUM would number a line past 65535 */
+#define E_DATABYTE 30 /* a DATA value that does not fit in a byte */
 
 /* CALL, JMP and USR take a routine's slot. A name there works only in a
  * project the builder resolved, so a name that is no variable gets its
@@ -239,5 +246,10 @@ void bang_run(char *text);
 
 unsigned char sto_bang(char *text);
 void sto_autorun(void);
+
+/* data.c: DATA lines. RUN places their bytes, DATA(n) finds where a line's
+ * bytes go and READ takes the values. docs/basic-data-design.md.
+ */
+void dt_pack(void);
 
 #endif

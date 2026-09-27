@@ -538,7 +538,7 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
       // and the program boots into BASIC. They keep their system page.
       // Every public function in the user's files is a root: BASIC calls
       // them by slot, which the compiler cannot see. The interpreter's
-      // build line names its own nine files, which would leave the user's
+      // build line names its own files, which would leave the user's
       // out, so it is turned into a plain comment of the same length.
       ccOpts.zpReserve = 32;
       for (const auto& [name, text] : basicSources()) {

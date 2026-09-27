@@ -161,6 +161,7 @@ static void say_error(void)
     else if (err == E_NEEDSTR) term_puts("A NUMBER CANNOT BE USED AS A STRING");
     else if (err == E_STRCMP) term_puts("STRINGS ARE COMPARED WITH = <> < > <= OR >=");
     else if (err == E_RENUM) term_puts("RENUM WOULD NUMBER A LINE PAST 65535");
+    else if (err == E_DATABYTE) term_puts("A DATA VALUE IS ONE BYTE: -128 TO 255");
     else if (err == E_ROUTINE) {
         term_puts(err_found);
         term_puts(" IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: USE ITS NUMBER HERE");
@@ -279,6 +280,14 @@ static unsigned char statement(void)
      * what a driver makes of its text is the driver's business.
      */
     if (lx_is("!")) { bang_run(&lx_text[lx_pos]); lx_tok = T_END; return 1; }
+    /* RUN, DATA(n) and READ read a DATA line. Running it does nothing.
+     * DATA must open its line, because that is where they look for it.
+     */
+    if (lx_is("DATA")) {
+        if (lx_tokpos) { rt_expect("A STATEMENT"); return 1; }
+        lx_tok = T_END;
+        return 1;
+    }
     if (lx_is("PRINT")) { lx_next(); do_print(); return 1; }
     if (lx_is("CLS")) { lx_next(); term_cls(); return 1; }
     if (lx_is("END") || lx_is("STOP")) { lx_next(); running = 0; return 0; }
@@ -625,6 +634,11 @@ void rt_run(void)
     pc = 0;
     from_for = 0;
     loop_back = 0;
+
+    /* The DATA lines' bytes go where they belong before line 1 runs. */
+    dt_pack();
+    if (err) { say_error(); running = 0; return; }
+    err_line = 0;
 
     while (running) {
         unsigned int here;

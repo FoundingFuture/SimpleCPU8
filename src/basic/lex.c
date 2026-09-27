@@ -8,6 +8,8 @@ int lx_num;
 char lx_word[12];
 unsigned int lx_str;
 unsigned char lx_len;
+unsigned int lx_tokpos;
+unsigned char lx_raw;
 
 static unsigned char upper(unsigned char c)
 {
@@ -58,6 +60,7 @@ void lx_next(void)
     unsigned int start;
 
     while (lx_text[lx_pos] == 32) lx_pos = lx_pos + 1;
+    lx_tokpos = lx_pos;
     c = lx_text[lx_pos];
 
     if (c == 0) { lx_tok = T_END; lx_len = 0; return; }
@@ -100,14 +103,19 @@ void lx_next(void)
             lx_pos = lx_pos + 1;
             i = i + 1;
         }
-        lx_str = str_new(i);
-        if (lx_str) {
-            unsigned char j;
-            for (j = 0; j < i; j++) heap[lx_str + 1 + j] = lx_text[start + j];
+        if (lx_raw) {
+            lx_str = start;
+            lx_len = i;
+        } else {
+            lx_str = str_new(i);
+            if (lx_str) {
+                unsigned char j;
+                for (j = 0; j < i; j++) heap[lx_str + 1 + j] = lx_text[start + j];
+            }
+            lx_len = 0;
         }
         if (lx_text[lx_pos] == 34) lx_pos = lx_pos + 1;
         lx_tok = T_STR;
-        lx_len = 0;
         return;
     }
 
