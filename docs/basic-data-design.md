@@ -34,8 +34,10 @@ map is a separate design. This one knows nothing of fonts.
 110 DATA 40, 50, 60
 ```
 
-Line 10 prints `102030405060`. Line 20 prints the address `$E000` as a
-number, 57344. At RUN the six bytes 10 to 60 land at `$E000` to `$E005`.
+Line 10 prints `102030405060`. Line 20 prints -8192. A BASIC number runs
+from -32768 to 32767, so an address past `$7FFF` prints negative. POKE,
+PEEK and DATA(n) wrap it back to `$E000`. At RUN the six bytes 10 to 60
+land at `$E000` to `$E005`.
 Line 30 writes 1, 2 and 3 to `$E010` to `$E012`.
 
 | Word | Form | Does |
