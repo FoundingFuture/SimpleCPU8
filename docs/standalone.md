@@ -236,6 +236,14 @@ into the executable, so a SAVE lives only for that session. `simplecpu
 SAVE or DELETE writes that file back. Copy basic.rom to make a workspace
 of your own, and keep as many as you like.
 
+BASIC gets DATA, READ and RESTORE, designed and not built yet. Two parts
+go past the classic form. `DATA(n)` gives the RAM address of line n's
+bytes, so the GPU or a C routine reads a table in place. A line can open
+with a three or four digit hex number. RUN then drops that line's bytes at
+that address, and the bytes of the lines after it. POKE takes a list of
+values. docs/basic-data-design.md is the design. A font the GPU reads from
+RAM and a text mode game that defines its characters in DATA come after it.
+
 ## The storage device
 
 A fifth device on the bus, on ports $50 to $5F. It gives the running

@@ -163,5 +163,6 @@ they always had. Code 3 is no longer raised: codes 15 to 18 split it.
 | 24 | E_STRCMP | `STRINGS ARE COMPARED WITH = <> < > <= OR >=` |
 | 25 | E_NOTVAR | `name IS NOT A VARIABLE: ...` |
 | 26 | E_ROUTINE | `name IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: ...` |
+| 27 | E_RENUM | `RENUM WOULD NUMBER A LINE PAST 65535` |
 
 The codes are in src/basic/basic.h and the messages in run.c.
