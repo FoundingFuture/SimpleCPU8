@@ -1810,6 +1810,19 @@ TEST_SUITE("DATA, READ and RESTORE") {
     CHECK(has(flat(*s), "EXPECTED A STATEMENT BUT FOUND DATA"));
   }
 
+  TEST_CASE("READ inside a subroutine carries on across calls") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 GOSUB 100");
+    type(*s, "20 GOSUB 100");
+    type(*s, "30 GOSUB 100");
+    type(*s, "40 END");
+    type(*s, "100 READ A: PRINT A;: RETURN");
+    type(*s, "200 DATA 4,5,6");
+    type(*s, "RUN");
+    CHECK(has(after(text(*s), "RUN"), "456"));
+  }
+
   TEST_CASE("POKE with a list writes each value to the next box") {
     auto s = boot();
     settle(*s);
