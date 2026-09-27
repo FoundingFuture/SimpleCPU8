@@ -76,7 +76,9 @@ READY
 `READY` means BASIC is waiting for you. The `>` is the prompt, and the
 white block after it is the cursor. Whatever you type appears at the
 cursor. Press Enter to send a line to the machine. Backspace rubs out the
-last letter. Small letters are turned into capitals as you type.
+last letter. Letters come out small, and Shift gives a capital. When
+you store a numbered line, BASIC puts its own words in capitals, so
+`LIST` shows `print` as `PRINT`. A string keeps its small letters.
 
 F5 restarts the machine. Everything you typed is gone afterwards, so
 read the chapter on saving before you rely on it.
@@ -276,8 +278,9 @@ characters.
 ## Remembering things
 
 A variable is a box with a name. You put a number in it, and later you
-take the number out. The name is one capital letter, or a letter and a
-digit. `A`, `B`, `Z`, `A0` and `T9` are all variable names. That gives
+take the number out. The name is one letter, or a letter and a digit.
+`A`, `B`, `Z`, `A0` and `T9` are all variable names. A small letter
+names the same box as its capital, so `a` is `A`. That gives
 you 286 boxes for numbers.
 
 ```basic

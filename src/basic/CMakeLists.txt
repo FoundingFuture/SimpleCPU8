@@ -9,7 +9,7 @@
 # computer boots BASIC with no file beside the executable.
 
 set(SC8_BASIC_SOURCES main.c term.c lex.c expr.c strings.c edit.c run.c bang.c store.c)
-set(SC8_BASIC_HEADERS basic.h)
+set(SC8_BASIC_HEADERS basic.h keywords.h)
 
 set(SC8_BASIC_ASM "${CMAKE_CURRENT_BINARY_DIR}/basic.asm" CACHE INTERNAL "the assembly simplecpu-cc writes for BASIC")
 set(SC8_BASIC_ROM_H "${CMAKE_CURRENT_BINARY_DIR}/ROM.h")

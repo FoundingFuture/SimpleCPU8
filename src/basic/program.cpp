@@ -4,16 +4,22 @@
 #include <cctype>
 #include <map>
 
+#include "basic/keywords.h"
+
 namespace sc8::basic {
 
 const std::set<std::string, std::less<>>& basicKeywords() {
-  static const std::set<std::string, std::less<>> words = {
-      "ABS",  "AND",   "ASC",   "CALL",   "CATALOG", "CHR$",  "CIRCLE", "CLS",  "DEEK",  "DELETE",
-      "DOKE", "DRAW",  "END",   "FOR",    "GOSUB",   "GOTO",  "IF",     "INK",  "INKEY$", "INPUT",
-      "JMP",  "JSR",   "KEY",   "LEN",    "LET",     "LIST",  "LOAD",   "MID$", "MOD",   "MOVE",
-      "NEW",  "NEXT",  "NOT",   "OR",     "PAD",     "PAPER", "PEEK",   "PIXEL", "PLOT", "POKE",
-      "PRINT", "REM",  "RENUM", "RETURN", "RND",   "RUN",     "SAVE",  "STEP",   "STOP", "STR$",  "THEN",
-      "TO",   "USR",   "VAL",   "WAIT"};
+  static const std::set<std::string, std::less<>> words = [] {
+    std::set<std::string, std::less<>> w;
+    const std::string_view all = BASIC_KEYWORDS;
+    size_t at = 0;
+    while ((at = all.find_first_not_of(' ', at)) != std::string_view::npos) {
+      const size_t end = all.find(' ', at);
+      w.emplace(all.substr(at, end - at));
+      at = end;
+    }
+    return w;
+  }();
   return words;
 }
 
@@ -28,6 +34,8 @@ bool isHexDigit(char c) { return std::isxdigit(static_cast<unsigned char>(c)) !=
 
 // The walk is lexBasic's in src/ide/highlight.cpp. A number runs over
 // name characters the way the highlighter's does, so `1to` stays as typed.
+// keywords_up in edit.c is the machine's copy of this rule. The "small
+// letters" tests type lines on the machine and hold the two to one result.
 std::string canonicalLine(std::string_view body) {
   std::string out;
   out.reserve(body.size());

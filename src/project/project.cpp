@@ -542,7 +542,7 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
       // out, so it is turned into a plain comment of the same length.
       ccOpts.zpReserve = 32;
       for (const auto& [name, text] : basicSources()) {
-        if (name == "basic.h") {
+        if (name.ends_with(".h")) {
           ccOpts.extra[name] = text;
           continue;
         }

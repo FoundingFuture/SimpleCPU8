@@ -18,7 +18,10 @@ namespace sc8 {
 // DIFFERENCE from main.ts. The browser gave a layout-aware character per
 // key, so shift-1 arrived as the bang character on its own. raylib reports
 // physical keys on a US layout, so a US shift table applies shift here. A
-// non-US layout gets US symbols for the symbol keys.
+// non-US layout gets US symbols for the symbol keys. main.ts also sent
+// every letter as a capital. Here a letter is small unless shift is held,
+// so a string can hold small letters. BASIC puts its own words in
+// capitals when it stores a line.
 int keyCodeFor(int raylibKey, bool shift, bool ctrl);
 
 // The controller bit a raylib key drives, or 0. Arrows and WASD, Z and

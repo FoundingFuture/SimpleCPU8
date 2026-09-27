@@ -1,5 +1,6 @@
 
 #include "basic.h"
+#include "keywords.h"
 
 /* A line is two bytes of number, one of record length, then the text. A line
  * number of zero ends the program, and BASIC has no line zero, so nothing is
@@ -42,6 +43,8 @@ static void remove_at(unsigned int p)
     prog_len = prog_len - len;
 }
 
+static void keywords_up(unsigned char *t);
+
 void ed_store(int line, char *text)
 {
     unsigned int p;
@@ -68,6 +71,7 @@ void ed_store(int line, char *text)
     prog[p + 2] = rec;
     for (i = 0; i < n; i++) prog[p + 3 + i] = text[i];
     prog[p + 3 + n] = 0;
+    keywords_up(&prog[p + 3]);
     prog_len = prog_len + rec;
 }
 
@@ -118,6 +122,79 @@ static unsigned char word_is(unsigned char *w, unsigned int n, char *kw)
         i = i + 1;
     }
     return kw[n] == 0;
+}
+
+/* ---- Reserved words in capitals ---- */
+
+static unsigned char is_hex(unsigned char c)
+{
+    c = upper_of(c);
+    return is_digit(c) || (c >= 65 && c <= 70);
+}
+
+/* A letter, a digit or an underscore: what a name goes on with. */
+static unsigned char is_name(unsigned char c)
+{
+    return is_letter(c) || is_digit(c) || c == 95;
+}
+
+/* True when the n characters at w spell a word of BASIC_KEYWORDS, case
+ * ignored. The string holds each word between two spaces.
+ */
+static unsigned char is_keyword(unsigned char *w, unsigned int n)
+{
+    char *k;
+    unsigned int i;
+    k = BASIC_KEYWORDS;
+    while (k[1]) {
+        k = k + 1;
+        i = 0;
+        while (i < n && k[i] == upper_of(w[i])) i = i + 1;
+        if (i == n && k[n] == 32) return 1;
+        while (*k != 32) k = k + 1;
+    }
+    return 0;
+}
+
+/* The reserved words of a stored line in capitals, so a line typed in
+ * small letters is kept the way the IDE sends one. canonicalLine in
+ * program.cpp is the IDE's copy of the rule. Strings, the rest of a line
+ * after REM or a bang, names, numbers and spacing stay as typed.
+ */
+static void keywords_up(unsigned char *t)
+{
+    unsigned int i;
+    unsigned int j;
+    unsigned int k;
+    unsigned char rem;
+    i = 0;
+    while (t[i]) {
+        if (t[i] == 34) {
+            i = i + 1;
+            while (t[i] && t[i] != 34) i = i + 1;
+            if (t[i]) i = i + 1;
+        } else if (t[i] == 36 && is_hex(t[i + 1])) {
+            i = i + 1;
+            while (is_hex(t[i])) i = i + 1;
+        } else if (is_digit(t[i])) {
+            /* A number runs over letters, as the IDE's does: 1TO stays. */
+            while (is_name(t[i]) || t[i] == 46) i = i + 1;
+        } else if (is_letter(t[i]) || t[i] == 95) {
+            j = i;
+            while (is_name(t[j])) j = j + 1;
+            if (t[j] == 36) j = j + 1;
+            if (is_keyword(&t[i], j - i)) {
+                rem = word_is(&t[i], j - i, "REM");
+                for (k = i; k < j; k++) t[k] = upper_of(t[k]);
+                if (rem) return;
+            }
+            i = j;
+        } else if (t[i] == 33) {
+            return;
+        } else {
+            i = i + 1;
+        }
+    }
 }
 
 /* The number line `old` gets, or 0 when there is no such line. */

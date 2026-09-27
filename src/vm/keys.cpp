@@ -101,15 +101,18 @@ int keyCodeFor(int key, bool shift, bool ctrl) {
   }
   int c = keypadChar(key);
   if (c < 0) {
-    // raylib's printable codes are the ASCII of the unshifted US key.
-    // Letters are already uppercase, as the browser's toUpperCase gave.
+    // raylib's printable codes are the ASCII of the unshifted US key, and
+    // a letter's code is its capital. A letter is sent small unless shift
+    // is held.
     if (key < KEY_SPACE || key > KEY_GRAVE) return -1;
-    c = shift ? shifted(key) : key;
+    if (key >= KEY_A && key <= KEY_Z) c = shift ? key : key - 'A' + 'a';
+    else c = shift ? shifted(key) : key;
   }
   c &= 0x7f;
   // Ctrl and a letter becomes a control code, the way every terminal has
   // delivered it. It has to be in the code because a key event is
   // buffered and a modifier is a level.
+  if (ctrl && c >= 'a' && c <= 'z') return c - 96;
   if (ctrl && c >= 'A' && c <= 'Z') return c - 64;
   return c;
 }

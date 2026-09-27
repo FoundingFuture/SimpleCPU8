@@ -131,10 +131,12 @@ std::string text(const Session& s) {
 // every idle moment: term_readline polls IO_KEY and does nothing else.
 void settle(Session& s, uint64_t budget = 4000000) { s.runBudget(budget); }
 
-// Type a line and press Enter, then let the interpreter act on it.
+// Type a line and press Enter, then let the interpreter act on it. The
+// characters go in as written, small letters included, as the keyboard
+// sends them.
 void type(Session& s, const std::string& line, uint64_t budget = 6000000) {
   for (char ch : line) {
-    s.pushKey(std::toupper(static_cast<unsigned char>(ch)), false);
+    s.pushKey(static_cast<unsigned char>(ch), false);
     s.runBudget(120000);
   }
   s.pushKey(13, false);
@@ -1335,6 +1337,45 @@ TEST_SUITE("the system page") {
     // The next command clears it.
     type(*s, "PRINT 1");
     CHECK_EQ(s->m->ram[0x12], 0);
+  }
+}
+
+TEST_SUITE("small letters") {
+  TEST_CASE("a string keeps its small letters") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "print \"Hallo, World!\"");
+    CHECK(has(text(*s), "Hallo, World!"));
+  }
+  TEST_CASE("a line typed in small letters is stored as the IDE stores it") {
+    auto s = boot();
+    settle(*s);
+    const std::vector<std::string> lines = {
+        "10 for i = 1 to 3 : print \"Hallo, World!\" ; i : next i",
+        "20 a$ = chr$(65) + mid$(\"xyz\", 2) : rem print this",
+        "30 ! print this",
+        "40 print \"a\" ; forx ; \"unterminated",
+    };
+    std::string program;
+    for (const std::string& line : lines) {
+      type(*s, line);
+      program += line + "\n";
+    }
+    const auto& ram = s->m->ram;
+    const size_t at = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
+    const size_t len = static_cast<size_t>((ram[basic::SYS_PROG_LEN] << 8) | ram[basic::SYS_PROG_LEN + 1]);
+    const std::vector<uint8_t> stored(ram.begin() + static_cast<std::ptrdiff_t>(at),
+                                      ram.begin() + static_cast<std::ptrdiff_t>(at + len));
+    CHECK_EQ(basic::decodeProgram(stored), basic::decodeProgram(basic::encodeProgram(program)));
+    CHECK(stored == basic::encodeProgram(program));
+  }
+  TEST_CASE("a program typed in small letters runs") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "10 for i = 1 to 2 : print \"hi\" ; i : next i");
+    type(*s, "run", 20000000);
+    CHECK(has(text(*s), "hi1"));
+    CHECK(has(text(*s), "hi2"));
   }
 }
 

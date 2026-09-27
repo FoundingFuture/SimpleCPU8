@@ -10,10 +10,14 @@
 using namespace sc8;
 
 TEST_SUITE("vm keyboard map") {
-  TEST_CASE("printable keys send their uppercase ASCII, shift or not") {
-    CHECK_EQ(keyCodeFor(KEY_A, false, false), 'A');
+  TEST_CASE("a letter is small, and a capital with shift") {
+    CHECK_EQ(keyCodeFor(KEY_A, false, false), 'a');
     CHECK_EQ(keyCodeFor(KEY_A, true, false), 'A');
-    CHECK_EQ(keyCodeFor(KEY_Z, false, false), 'Z');
+    CHECK_EQ(keyCodeFor(KEY_Z, false, false), 'z');
+    CHECK_EQ(keyCodeFor(KEY_Z, true, false), 'Z');
+  }
+
+  TEST_CASE("other printable keys send their ASCII") {
     CHECK_EQ(keyCodeFor(KEY_SPACE, false, false), ' ');
     CHECK_EQ(keyCodeFor(KEY_ONE, false, false), '1');
     CHECK_EQ(keyCodeFor(KEY_PERIOD, false, false), '.');

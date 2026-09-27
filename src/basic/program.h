@@ -29,7 +29,8 @@ constexpr uint16_t SYS_PROG_LEN = 0x0A;
 constexpr uint16_t SYS_RUNNING = 0x15;
 
 // The interpreter's reserved words in capitals, with the $ of those that
-// end in one. The IDE's highlighter reads the same list.
+// end in one. They come from basic/keywords.h, which the interpreter
+// compiles too. The IDE's highlighter reads the same list.
 const std::set<std::string, std::less<>>& basicKeywords();
 
 // A line's body, the text after its number, with every reserved word in
