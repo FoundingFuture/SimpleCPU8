@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <map>
 
 #include "basic/keywords.h"
@@ -98,6 +99,16 @@ std::string canonicalText(std::string_view text, int skip) {
     row++;
   }
   return out;
+}
+
+void storeProgram(std::span<uint8_t> ram, std::span<const uint8_t> bytes) {
+  const size_t prog = static_cast<size_t>((ram[SYS_PROG] << 8) | ram[SYS_PROG + 1]);
+  if (prog + bytes.size() > ram.size()) return;
+  std::copy(bytes.begin(), bytes.end(), ram.begin() + static_cast<std::ptrdiff_t>(prog));
+  ram[SYS_PROG_LEN] = static_cast<uint8_t>(bytes.size() >> 8);
+  ram[SYS_PROG_LEN + 1] = static_cast<uint8_t>(bytes.size() & 255);
+  ram[SYS_READ] = 0;
+  ram[SYS_READ + 1] = 0;
 }
 
 std::vector<uint8_t> encodeProgram(const std::string& text) {

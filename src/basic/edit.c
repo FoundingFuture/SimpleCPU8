@@ -53,9 +53,11 @@ void ed_store(int line, char *text)
     unsigned int rec;
     unsigned int i;
 
-    dt_restore();
+    /* READ's place is an offset into the program, so a line inserted,
+     * replaced or deleted sends READ back to the first value.
+     */
     p = ed_find(line);
-    if (lineno_at(p) == line) remove_at(p);
+    if (lineno_at(p) == line) { remove_at(p); dt_restore(); }
 
     n = 0;
     while (text[n]) n = n + 1;
@@ -75,6 +77,7 @@ void ed_store(int line, char *text)
     prog[p + 3 + n] = 0;
     keywords_up(&prog[p + 3]);
     prog_len = prog_len + rec;
+    dt_restore();
 }
 
 /* LIST shows the lines numbered from first to last, both included. The

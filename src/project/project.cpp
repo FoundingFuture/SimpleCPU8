@@ -16,6 +16,7 @@
 #include "core/microcode.h"
 #if SC8_HAVE_BASIC
 #include "basic/basic_rom.h"
+#include "basic/program.h"
 #endif
 
 namespace fs = std::filesystem;
@@ -540,7 +541,7 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
       // them by slot, which the compiler cannot see. The interpreter's
       // build line names its own files, which would leave the user's
       // out, so it is turned into a plain comment of the same length.
-      ccOpts.zpReserve = 32;
+      ccOpts.zpReserve = basic::SYSTEM_PAGE_SIZE;
       for (const auto& [name, text] : basicSources()) {
         if (name.ends_with(".h")) {
           ccOpts.extra[name] = text;

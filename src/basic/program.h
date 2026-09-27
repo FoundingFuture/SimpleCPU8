@@ -27,6 +27,10 @@ constexpr size_t PROGRAM_MAX = 6144;
 constexpr uint16_t SYS_PROG = 0x08;
 constexpr uint16_t SYS_PROG_LEN = 0x0A;
 constexpr uint16_t SYS_RUNNING = 0x15;
+// Where READ takes its next value, 0 for the first one.
+constexpr uint16_t SYS_READ = 0x20;
+// The page's size, SYS_END in basic.h and the interpreter's -zp-reserve.
+constexpr int SYSTEM_PAGE_SIZE = 0x30;
 
 // The interpreter's reserved words in capitals, with the $ of those that
 // end in one. They come from basic/keywords.h, which the interpreter
@@ -51,6 +55,12 @@ std::string canonicalText(std::string_view text, int skip = -1);
 // fit is cut at the last line that does. Each stored line is
 // canonicalLine of its body, so the reserved words are stored in capitals.
 std::vector<uint8_t> encodeProgram(const std::string& text);
+
+// The program into the interpreter's memory, where SYS_PROG says it sits,
+// with its length in SYS_PROG_LEN. READ starts again at the first value,
+// because its place in the old program means nothing in the new one.
+// Nothing is written when the program would run past the end of ram.
+void storeProgram(std::span<uint8_t> ram, std::span<const uint8_t> bytes);
 
 // Stored bytes back to text, one line per row, as LIST prints them.
 std::string decodeProgram(std::span<const uint8_t> bytes);

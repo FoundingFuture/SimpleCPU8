@@ -163,7 +163,7 @@ was running.
 
 ## The vector
 
-BASIC keeps a system page in the first 32 bytes of the zero page, which
+BASIC keeps a system page in the first 48 bytes of the zero page, which
 the compiler leaves alone. docs/basic-system-page.md lists all of it.
 Three items there belong to the chain.
 
@@ -306,7 +306,7 @@ existing design.
 - The vector sits at $0000, in the system page. The compiler places every
   global by weight and moves them when the program changes. So no C
   variable has a fixed address. The page is reserved from the compiler
-  with -zp-reserve 32, and the vector is its first word.
+  with -zp-reserve 48, and the vector is its first word.
 - The statement takes the whole line. A colon inside a name would
   otherwise split a command in two.
 - The name is passed by address, through a hi and lo pair, as the ACP

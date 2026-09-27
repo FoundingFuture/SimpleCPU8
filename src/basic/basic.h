@@ -197,8 +197,8 @@ void rt_found(char *text);
 extern int err_arg;   /* a number the message names: the missing line */
 int var_slot(void);
 
-/* The system page: the first 32 bytes of the zero page, which the compiler
- * leaves alone (-zp-reserve 32). Every address is fixed and documented in
+/* The system page: the first 48 bytes of the zero page, which the compiler
+ * leaves alone (-zp-reserve 48). Every address is fixed and documented in
  * docs/basic-system-page.md, so a program reaches BASIC's state with PEEK,
  * POKE, DEEK and DOKE, and a driver in assembly finds the vector. Words are
  * big-endian, the way DOKE stores them. The old home computers kept their
@@ -223,7 +223,9 @@ int var_slot(void);
 #define SYS_PC          0x16  /* word: offset of the line being run */
 #define SYS_CALL        0x18  /* word: the instruction slot the last JSR or JMP went to */
 #define SYS_USR         0x1A  /* 3 words: USR's parameters on the way in, its answer on the way out */
-#define SYS_END         0x20  /* the first byte the compiler may use */
+#define SYS_READ        0x20  /* word: offset in the program of READ's next value, 0 for the first */
+/* $22 to $2F are reserved. */
+#define SYS_END         0x30  /* the first byte the compiler may use */
 
 /* A word into the page, high byte first, the way DOKE stores one. */
 #define doke(a, v)  (poke((a), (unsigned int)(v) >> 8), poke((a) + 1, (unsigned int)(v) & 255))
@@ -238,6 +240,7 @@ int var_slot(void);
 #define heap_top  (*(unsigned int *)SYS_HEAP_TOP)
 #define err       (*(unsigned char *)SYS_ERR)
 #define err_line  (*(int *)SYS_ERR_LINE)
+#define read_at   (*(unsigned int *)SYS_READ)
 #define running   (*(unsigned char *)SYS_RUNNING)
 #define pc        (*(unsigned int *)SYS_PC)
 
@@ -264,10 +267,5 @@ unsigned int dt_read_str(void);
 /* READ starts again at the first value, or at the first of line n. */
 void dt_restore(void);
 void dt_restore_line(int line);
-/* Around each command at the prompt. A READ part way through a program
- * that changed between two commands starts again at the first value.
- */
-void dt_check(void);
-void dt_mark(void);
 
 #endif

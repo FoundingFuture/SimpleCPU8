@@ -621,12 +621,7 @@ bool Ide::basicAtReady() const {
 }
 
 void Ide::writeProgram(const std::vector<uint8_t>& bytes) {
-  auto& ram = computer_.machine().ram;
-  const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
-  if (prog + bytes.size() > ram.size()) return;
-  std::copy(bytes.begin(), bytes.end(), ram.begin() + static_cast<std::ptrdiff_t>(prog));
-  ram[basic::SYS_PROG_LEN] = static_cast<uint8_t>(bytes.size() >> 8);
-  ram[basic::SYS_PROG_LEN + 1] = static_cast<uint8_t>(bytes.size() & 255);
+  basic::storeProgram(computer_.machine().ram, bytes);
 }
 
 bool Ide::pushProgram() {

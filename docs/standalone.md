@@ -275,7 +275,7 @@ Oric vector address itself is not confirmed from a primary source.
 
 Here the vector is the word at $0000, big-endian, holding the handler's
 instruction slot. It is the first entry of the BASIC system page, the
-first 32 bytes of the zero page, described in docs/basic-system-page.md. docs/storage-design.md has the handler contract, the
+first 48 bytes of the zero page, described in docs/basic-system-page.md. docs/storage-design.md has the handler contract, the
 dispatch and a driver written in assembly. BASIC gained DOKE, DEEK and
 PEEK beside POKE so a driver can install itself from the prompt.
 

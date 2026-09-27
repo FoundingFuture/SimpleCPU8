@@ -1406,11 +1406,11 @@ AND THE ROUTINE ANSWERED 7
 >
 ```
 
-docs/basic-system-page.md lists the first 32 bytes of the zero page,
+docs/basic-system-page.md lists the first 48 bytes of the zero page,
 where BASIC keeps its pointers. The word at `$0C` is where the integer
 variables start, 11 words per letter, `A` first. A routine called from
 BASIC may use the hardware stack in balance. It may not touch the zero
-page past those 32 bytes, because the interpreter's own variables are
+page past those 48 bytes, because the interpreter's own variables are
 there. So this routine borrows `$04`, which BASIC overwrites on return
 anyway, as the one zero page byte an `ADD` can read.
 

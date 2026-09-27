@@ -1,6 +1,6 @@
 # The BASIC system page
 
-BASIC keeps its own state in the first 32 bytes of the zero page. Every
+BASIC keeps its own state in the first 48 bytes of the zero page. Every
 address is fixed. A program reads it with PEEK and DEEK and changes it with
 POKE and DOKE. A driver in assembly finds it without a symbol table. The
 old home computers kept their pointers this way. The Oric's page 2 held the
@@ -8,7 +8,7 @@ cursor, the last key, the timers and the vectors a disc system hooked. This
 page follows that idea.
 
 The compiler leaves the page alone. BASIC is compiled with `-zp-reserve
-32`, which puts the compiler's own zero page traffic from $20 up. The
+48`, which puts the compiler's own zero page traffic from $30 up. The
 macros in src/basic/basic.h are the variables, so nothing here is a copy
 that can drift.
 
@@ -36,6 +36,8 @@ reads them.
 | $16 | SYS_PC | word | the offset in the program of the line being run |
 | $18 | SYS_CALL | word | the instruction slot the last CALL or JMP went to |
 | $1A | SYS_USR | 6 | USR's three parameter words on the way in, its answer on the way out |
+| $20 | SYS_READ | word | the offset in the program of READ's next value, 0 for the first value |
+| $22 | reserved | 14 | kept free for BASIC, $22 to $2F |
 
 The integer variables sit in 11 word slots per letter: the bare name first,
 then the digit forms 0 to 9. So `B` is slot 11 and `B7` is slot 19, and
@@ -47,7 +49,8 @@ Read the cursor to draw at the prompt's position. Read the last key without
 consuming one. Find its own text to write a self modifying program, which
 the machine allows. Reach a variable by number rather than by name, which
 is how a driver hands a result back to BASIC. Read the error a `!` handler
-left.
+left. `DOKE 32, 0` is RESTORE from a driver: READ starts again at the first
+value.
 
 ```basic
 10 PRINT PEEK(5), PEEK(6)

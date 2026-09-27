@@ -199,15 +199,28 @@ int countOf(const std::string& t, const std::string& needle) {
   return n;
 }
 
-// The program, written into memory the way the IDE's writeProgram does.
-// It is faster than typing a long program and it is the path the IDE takes.
+// The program, written into memory by the function the IDE's writeProgram
+// calls. It is faster than typing a long program and it is the IDE's path.
 void setProgram(Session& s, const std::string& program) {
-  auto& ram = s.m->ram;
-  const std::vector<uint8_t> bytes = basic::encodeProgram(program);
-  const size_t at = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
-  std::copy(bytes.begin(), bytes.end(), ram.begin() + static_cast<long>(at));
-  ram[basic::SYS_PROG_LEN] = static_cast<uint8_t>(bytes.size() >> 8);
-  ram[basic::SYS_PROG_LEN + 1] = static_cast<uint8_t>(bytes.size() & 255);
+  basic::storeProgram(s.m->ram, basic::encodeProgram(program));
+}
+
+// The word at an address of the system page, high byte first.
+int sysWord(const Session& s, uint16_t at) {
+  return (s.m->ram[at] << 8) | s.m->ram[at + 1];
+}
+
+// The offset in the program of line n's record, or -1.
+int lineOffset(const Session& s, int n) {
+  const auto& ram = s.m->ram;
+  const size_t prog = static_cast<size_t>(sysWord(s, basic::SYS_PROG));
+  size_t p = 0;
+  while (true) {
+    const int line = (ram[prog + p] << 8) | ram[prog + p + 1];
+    if (line == 0) return -1;
+    if (line == n) return static_cast<int>(p);
+    p += ram[prog + p + 2];
+  }
 }
 
 // Where the program ends in memory, which is where its data area starts.
@@ -1765,16 +1778,72 @@ TEST_SUITE("DATA, READ and RESTORE") {
     CHECK_EQ(intVar(*s, 'B'), 7);
   }
 
-  TEST_CASE("an IDE swap of two values 16 bytes apart still reads from the first value again") {
+  TEST_CASE("an IDE swap of two values the old program hash missed reads from the first value again") {
     auto s = boot();
     settle(*s);
-    type(*s, "100 DATA 1,2,3,4");
-    type(*s, "110 DATA 5,6,7,8");
+    // 0 and 8 swapped 256 bytes apart gave the old hash the same value.
+    const std::string filler = "200 REM " + std::string(238, 'X') + "\n";
+    setProgram(*s, "100 DATA 0\n" + filler + "300 DATA 8\n");
     type(*s, "READ A");
-    CHECK_EQ(intVar(*s, 'A'), 1);
-    setProgram(*s, "100 DATA 5,2,3,4\n110 DATA 1,6,7,8\n");
+    CHECK_EQ(intVar(*s, 'A'), 0);
+    setProgram(*s, "100 DATA 8\n" + filler + "300 DATA 0\n");
     type(*s, "READ B");
-    CHECK_EQ(intVar(*s, 'B'), 5);
+    CHECK_EQ(intVar(*s, 'B'), 8);
+  }
+
+  TEST_CASE("READ keeps its place in the word at 32") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA 1,2");
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
+    type(*s, "READ A");
+    // Past "DATA 1," in line 100's text, which starts 3 bytes into its record.
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), lineOffset(*s, 100) + 3 + 7);
+    type(*s, "RESTORE");
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
+    type(*s, "READ A");
+    type(*s, "RUN");
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
+    type(*s, "READ A");
+    type(*s, "110 DATA 3");
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
+    type(*s, "READ A");
+    type(*s, "RENUM");
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
+    type(*s, "READ A");
+    type(*s, "NEW");
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
+  }
+
+  TEST_CASE("RESTORE n puts line n's offset in the word at 32, and READ starts there") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA 1,2");
+    type(*s, "110 DATA $9C40,3,4");
+    type(*s, "READ A");
+    type(*s, "RESTORE 110");
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), lineOffset(*s, 110));
+    type(*s, "READ B");
+    CHECK_EQ(intVar(*s, 'B'), 3);
+  }
+
+  TEST_CASE("DOKE 32,0 is RESTORE") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA 1,2");
+    type(*s, "READ A,B");
+    type(*s, "DOKE 32,0: READ C");
+    CHECK_EQ(intVar(*s, 'C'), 1);
+  }
+
+  TEST_CASE("the IDE's write puts READ back at the first value") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "100 DATA 1,2");
+    type(*s, "READ A");
+    CHECK(sysWord(*s, basic::SYS_READ) != 0);
+    setProgram(*s, "100 DATA 1,2\n");
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
   }
 
   TEST_CASE("a first value with one, two or five hex digits is a value, not an address") {
@@ -1845,5 +1914,29 @@ TEST_SUITE("DATA, READ and RESTORE") {
     const size_t len = static_cast<size_t>((ram[basic::SYS_PROG_LEN] << 8) | ram[basic::SYS_PROG_LEN + 1]);
     CHECK_EQ(basic::decodeProgram(std::span<const uint8_t>(ram.data() + at, len)),
              "10 RESTORE 20: A=DATA (20)\n20 DATA 5, 7\n");
+  }
+}
+
+TEST_SUITE("the system page") {
+  // The page size is written three times: basic.h's SYS_END, the
+  // -zp-reserve the interpreter is compiled with, and program.h for the
+  // IDE. These hold the three to one value.
+  TEST_CASE("basic.h, the compiled interpreter and program.h agree on its size") {
+    std::string header;
+    for (const auto& [name, text] : basicSources()) {
+      if (name == "basic.h") header = text;
+    }
+    REQUIRE_FALSE(header.empty());
+    const size_t end = header.find("#define SYS_END");
+    REQUIRE(end != std::string::npos);
+    CHECK_EQ(std::stoi(header.substr(header.find("0x", end)), nullptr, 16), basic::SYSTEM_PAGE_SIZE);
+    const size_t read = header.find("#define SYS_READ");
+    REQUIRE(read != std::string::npos);
+    CHECK_EQ(std::stoi(header.substr(header.find("0x", read)), nullptr, 16), basic::SYS_READ);
+    const std::string asmText(basicAsm());
+    const size_t sys = asmText.find("__sys:");
+    REQUIRE(sys != std::string::npos);
+    const std::string line = asmText.substr(sys, asmText.find('\n', sys) - sys);
+    CHECK(has(line, "ds " + std::to_string(basic::SYSTEM_PAGE_SIZE)));
   }
 }

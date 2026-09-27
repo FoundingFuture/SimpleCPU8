@@ -150,8 +150,12 @@ goes into a string variable.
 `RESTORE` moves READ back to the first value of the program. `RESTORE n`
 moves it to the first value of line n, which must hold DATA.
 
-RUN, NEW, LOAD and any change to the program move READ back to the first
-value.
+READ keeps its place on the system page, in the word SYS_READ at $20. It
+holds the offset in the program of the next value, or 0 for the first
+value. RESTORE writes 0 and `RESTORE n` writes the offset of line n. RUN,
+NEW, LOAD, a typed line, RENUM and the IDE writing the program all write
+0. So any change to the program moves READ back to the first value, and a
+driver restores READ with `DOKE 32, 0`.
 
 ## POKE with a list
 
@@ -219,6 +223,10 @@ first:
 
 ## Decisions taken here
 
+- READ's place lives on the system page, which grew to 48 bytes for it.
+  Eddie's decision. The IDE writes 0 there when it writes the program, so
+  a change is always seen. A hash of the program was tried first and missed
+  some swaps of two values.
 - DATA(n) returns an address, asked for by Eddie on 2026-09-27. The GPU and
   C routines read RAM, and a table read in place needs no copy loop.
 - The program stays text. Placement at RUN writes the bytes. LIST, SAVE

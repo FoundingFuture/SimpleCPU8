@@ -30,17 +30,12 @@ static unsigned char line_fixed;
 static unsigned int dt_at;
 static unsigned char dt_fixed;
 
-/* Where READ is: rd_on is 0 until the first value is found, then rd_line
- * is the offset of the DATA line and rd_pos where its next value starts.
- * rd_hash is the program's hash at the end of the last command.
+/* READ's place lives on the system page at SYS_READ, read_at in basic.h,
+ * so the IDE and a driver can move it: 0 is the first value, a line's
+ * offset is that line's first value, and an offset inside a line's text is
+ * the value there. rd_line is the line rd_seek left the lexer in.
  */
-static unsigned char rd_on;
 static unsigned int rd_line;
-static unsigned int rd_pos;
-static unsigned int rd_hash;
-
-/* Whether rd_on was set right after dt_check ran, for dt_mark to read. */
-static unsigned char rd_was;
 
 /* The line the caller was on, for the message after an error that is not
  * the DATA line's own.
@@ -194,7 +189,7 @@ static void walk(unsigned int stop, unsigned char place)
 
 void dt_pack(void)
 {
-    rd_on = 0;
+    read_at = 0;
     sv_line = 0;
     walk(PROGMAX, 1);
     lx_raw = 0;
@@ -216,20 +211,26 @@ int dt_addr(int line)
 static unsigned char rd_seek(void)
 {
     unsigned int p;
+    unsigned int at;
+    at = read_at;
     p = 0;
-    if (rd_on) {
-        err_line = LINE_AT(rd_line);
-        lx_raw = 1;
-        lx_seek((char *)&prog[rd_line + 3], rd_pos);
-        if (lx_tok != T_END) return 1;
-        p = rd_line + prog[rd_line + 2];
+    if (at) {
+        /* The line that holds the place. */
+        while (LINE_AT(p) && p + prog[p + 2] <= at) p = p + prog[p + 2];
+        if (LINE_AT(p) && at > p + 3) {
+            rd_line = p;
+            err_line = LINE_AT(p);
+            lx_raw = 1;
+            lx_seek((char *)&prog[p + 3], at - p - 3);
+            if (lx_tok != T_END) return 1;
+            p = p + prog[p + 2];
+        }
     }
     while (LINE_AT(p)) {
         if (is_data(p)) {
             if (!open_line(p)) return 0;
-            rd_on = 1;
             rd_line = p;
-            rd_pos = lx_tokpos;
+            read_at = p + 3 + lx_tokpos;
             if (lx_tok != T_END) return 1;
         }
         p = p + prog[p + 2];
@@ -239,8 +240,8 @@ static unsigned char rd_seek(void)
     return 0;
 }
 
-/* The next value into dv_*, with the cursor moved past it. A READ of the
- * wrong kind still takes the value: rd_pos moves before dt_read_int and
+/* The next value into dv_*, with the place moved past it. A READ of the
+ * wrong kind still takes the value: the place moves before dt_read_int and
  * dt_read_str check dv_kind, so the next READ goes on to the value after it.
  */
 static unsigned char rd_next(void)
@@ -248,7 +249,7 @@ static unsigned char rd_next(void)
     if (!rd_seek()) return 0;
     if (!value()) return 0;
     if (!sep()) return 0;
-    rd_pos = lx_tokpos;
+    read_at = rd_line + 3 + lx_tokpos;
     return 1;
 }
 
@@ -286,7 +287,7 @@ unsigned int dt_read_str(void)
 
 void dt_restore(void)
 {
-    rd_on = 0;
+    read_at = 0;
 }
 
 void dt_restore_line(int line)
@@ -295,49 +296,7 @@ void dt_restore_line(int line)
     p = ed_find(line);
     if (line == 0 || LINE_AT(p) != line) { err_arg = line; rt_error(E_NOLINE); return; }
     lx_save();
-    if (!is_data(p)) { err_arg = line; rt_error(E_NOTDATA); }
-    else if (open_line(p)) {
-        rd_on = 1;
-        rd_line = p;
-        rd_pos = lx_tokpos;
-    }
+    if (is_data(p)) read_at = p;
+    else { err_arg = line; rt_error(E_NOTDATA); }
     lx_restore();
-}
-
-/* DESIGN: the IDE writes the program into memory between two commands, and
- * nothing tells the interpreter. A hash taken after each command finds the
- * change: any single changed byte always changes the hash.
- *
- * Two changes that cancel each other can still go unseen. A value v and
- * v + D swapped between two bytes d apart collide when 2 divides D and d
- * together at least 11 times. In measured swaps of digits and letters that
- * was about 4 in 1000. The exact fix is a system page byte the IDE bumps
- * when it writes the program. That changes the documented system page, so
- * it is the owner's decision.
- */
-static unsigned int prog_hash(void)
-{
-    unsigned int h;
-    unsigned int i;
-    unsigned int len;
-    len = prog_len;
-    h = len;
-    for (i = 0; i < len; i++) h = (h << 5) + h + prog[i];
-    return h;
-}
-
-/* Every change the interpreter makes to the program itself calls dt_restore,
- * which clears rd_on. So if rd_on is still set once a command finishes, the
- * program did not change during it and rd_hash, checked here, is still
- * right: dt_mark has nothing new to hash unless READ has just switched on.
- */
-void dt_check(void)
-{
-    if (rd_on && prog_hash() != rd_hash) rd_on = 0;
-    rd_was = rd_on;
-}
-
-void dt_mark(void)
-{
-    if (rd_on && !rd_was) rd_hash = prog_hash();
 }
