@@ -6,8 +6,8 @@ C++. Seven of the files are the browser project's, extracted from
 packages/ui/src/basic/ with extract.mjs. The script writes each TypeScript
 string constant to a file with its exact value. bang.c, store.c and data.c
 are new in this tree.
-This BASIC differs from the browser's in its drawing words, in RENUM and
-in DATA. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
+This BASIC differs from the browser's in its drawing words, in RENUM, in
+DATA and in HEX$. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
 expr.c. `PLOT` draws in the INK colour, where it drew white. `CIRCLE rx,
 ry, fill` draws a ring in INK with an optional fill, where `CIRCLE r`
 filled a disc. main.c sets INK to white at boot. `RENUM start, step` is
@@ -15,6 +15,7 @@ new: ed_renum in edit.c, called from rt_line in run.c.
 DATA, READ, RESTORE and DATA(n) are new in data.c. POKE takes a list of
 values in run.c. lex.c records where each token starts, `lx_tokpos`, and
 has a raw mode for strings, `lx_raw`, that data.c reads DATA lines with.
+`HEX$(n, w)` is new in expr.c, beside STR$, with its width error in run.c.
 A refresh from upstream undoes all of this, so redo it after one.
 
 ## Files

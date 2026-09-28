@@ -181,6 +181,21 @@ A number written past 32767 wraps the same way, so `PRINT 40000` shows
 -25536. The boxes still come out right: `POKE 40000,7` and `PEEK(40000)`
 both reach box 40000.
 
+`HEX$` writes a number in hex, the way box numbers are written with a
+dollar sign, and never shows it negative:
+
+```basic
+PRINT 40000
+PRINT HEX$(40000)
+```
+
+```text
+-25536
+9C40
+```
+
+`HEX$(n,4)` pads with zeros to four digits, so `HEX$(10,4)` is `000A`.
+
 Text in quotes is called a string. A semicolon joins two things with no
 gap. A comma puts one space between them.
 
@@ -603,7 +618,8 @@ SAME
 
 `LEN` counts the characters. `MID$(C$,3,2)` takes 2 characters starting
 at the third. Leave the count out and it takes the rest. `STR$` turns a
-number into text and `VAL` turns text back into a number. `CHR$` gives
+number into text and `VAL` turns text back into a number. `HEX$` turns a
+number into hex text. `CHR$` gives
 the character with a code and `ASC` gives the code of a character.
 Strings compare with the same signs as numbers, in alphabet order.
 
@@ -1015,6 +1031,7 @@ Functions, used inside an expression:
 | `ASC(s$)` | the code of its first character |
 | `VAL(s$)` | the number the string spells |
 | `STR$(n)` | the number as a string |
+| `HEX$(n,w)` | the number as hex in capitals, zero padded to w digits, w from 1 to 4 and optional |
 | `CHR$(n)` | the character with code n |
 | `MID$(s$,i,n)` | n characters from position i, count optional |
 | `USR(w,n,p1,p2,p3)` | the answer of the routine at slot n, given up to three numbers: nothing when w is 0, a byte when 1, a word when 2 |

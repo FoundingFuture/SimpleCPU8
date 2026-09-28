@@ -394,6 +394,41 @@ static unsigned int str_primary(void)
             return s;
         }
     }
+    /* HEX$(n) and HEX$(n, w): n as unsigned 16 bit hex in capitals, in the
+     * fewest digits or padded with zeros to w, 1 to 4. A value wider than w
+     * is never cut. An address past 32767 prints negative, and this shows
+     * the $ number it is.
+     */
+    if (lx_is("HEX$")) {
+        lx_next();
+        if (lx_is("(")) lx_next();
+        {
+            unsigned int u;
+            int w;
+            unsigned char buf[4];
+            unsigned char n;
+            unsigned char d;
+            unsigned char i;
+            u = ex_int();
+            w = 1;
+            if (lx_is(",")) { lx_next(); w = ex_int(); }
+            if (lx_is(")")) lx_next();
+            if (err) return 0;
+            if (w < 1 || w > 4) { rt_error(E_HEXWIDTH); return 0; }
+            n = 0;
+            do {
+                d = u & 15;
+                buf[n] = d < 10 ? 48 + d : 55 + d;
+                u = u >> 4;
+                n = n + 1;
+            } while (u);
+            while (n < w) { buf[n] = 48; n = n + 1; }
+            s = str_new(n);
+            if (s == 0) return 0;
+            for (i = 0; i < n; i++) heap[s + 1 + i] = buf[n - 1 - i];
+            return s;
+        }
+    }
     if (lx_is("MID$")) {
         lx_next();
         if (lx_is("(")) lx_next();

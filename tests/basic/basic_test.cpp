@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -203,6 +204,17 @@ int countOf(const std::string& t, const std::string& needle) {
 // calls. It is faster than typing a long program and it is the IDE's path.
 void setProgram(Session& s, const std::string& program) {
   basic::storeProgram(s.m->ram, basic::encodeProgram(program));
+}
+
+// Type a command and return the screen row right under its echo, which is
+// what it printed on its first line.
+std::string printed(Session& s, const std::string& command) {
+  type(s, command);
+  const auto scr = screen(s);
+  for (size_t row = 0; row + 1 < scr.size(); row++) {
+    if (scr[row] == ">" + command) return scr[row + 1];
+  }
+  return "(no such row)";
 }
 
 // The word at an address of the system page, high byte first.
@@ -631,6 +643,49 @@ TEST_SUITE("strings") {
     CHECK(has(text(*s), "46"));
   }
 
+  TEST_CASE("HEX$ writes a number as unsigned hex in capitals, in the fewest digits") {
+    auto s = boot();
+    settle(*s);
+    CHECK_EQ(printed(*s, "PRINT HEX$(255)"), "FF");
+    CHECK_EQ(printed(*s, "PRINT HEX$(-8192)"), "E000");
+    CHECK_EQ(printed(*s, "PRINT HEX$(40000)"), "9C40");
+    CHECK_EQ(printed(*s, "PRINT HEX$(0)"), "0");
+    CHECK_EQ(printed(*s, "PRINT HEX$(65535)"), "FFFF");
+  }
+
+  TEST_CASE("HEX$ with a width pads with zeros and never cuts") {
+    auto s = boot();
+    settle(*s);
+    CHECK_EQ(printed(*s, "PRINT HEX$(10, 4)"), "000A");
+    CHECK_EQ(printed(*s, "PRINT HEX$(0, 4)"), "0000");
+    CHECK_EQ(printed(*s, "PRINT HEX$(256, 2)"), "100");
+  }
+
+  TEST_CASE("HEX$ with a width outside 1 to 4 says so") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "PRINT HEX$(1, 0)");
+    CHECK(has(flat(*s), "HEX WIDTH IS OUT OF RANGE [1,4]"));
+    CHECK_EQ(s->m->ram[0x12], 31);
+    type(*s, "CLS");
+    type(*s, "PRINT HEX$(1, 5)");
+    CHECK(has(flat(*s), "HEX WIDTH IS OUT OF RANGE [1,4]"));
+    CHECK_EQ(s->m->ram[0x12], 31);
+  }
+
+  TEST_CASE("HEX$ joins a string expression") {
+    auto s = boot();
+    settle(*s);
+    char want[8];
+    std::snprintf(want, sizeof want, "AT %04X", static_cast<unsigned>(sysWord(*s, basic::SYS_PROG)));
+    CHECK_EQ(printed(*s, "PRINT \"AT \" + HEX$(DEEK(8), 4)"), want);
+  }
+
+  TEST_CASE("HEX$ is a reserved word, stored in capitals") {
+    CHECK(basic::basicKeywords().count("HEX$") == 1);
+    CHECK_EQ(basic::canonicalLine("print hex$(255)"), "PRINT HEX$(255)");
+  }
+
   TEST_CASE("compares two") {
     auto s = boot();
     settle(*s);
@@ -1040,6 +1095,17 @@ struct TempProject {
 }  // namespace
 
 TEST_SUITE("CALL and JMP") {
+  TEST_CASE("HEX$ of the A a routine left at 4") {
+    TempProject p;
+    p.write("fifteen.asm", ".org $F000\nFIFTEEN: LD A <- 15\n        RET\n");
+    p.write("demo.bas", "10 CALL FIFTEEN\n");
+    auto s = std::make_unique<Session>(p.build());
+    s->load();
+    settle(*s);
+    type(*s, "CALL $F000");
+    CHECK_EQ(printed(*s, "PRINT HEX$(PEEK(4), 2)"), "0F");
+  }
+
   TEST_CASE("a name at the prompt is a syntax error, because only a build knows labels") {
     auto s = boot();
     settle(*s);
@@ -1300,18 +1366,9 @@ TEST_SUITE("numbers") {
   TEST_CASE("a decimal number past 32767 wraps, and still names the same box") {
     auto s = boot();
     settle(*s);
-    // The row right under the echoed command is what PRINT printed.
-    auto printed = [&](const std::string& command) {
-      type(*s, command);
-      const auto scr = screen(*s);
-      for (size_t row = 0; row + 1 < scr.size(); row++) {
-        if (scr[row] == ">" + command) return scr[row + 1];
-      }
-      return std::string("(no such row)");
-    };
-    CHECK_EQ(printed("PRINT 40000"), "-25536");
-    CHECK_EQ(printed("PRINT 65536"), "0");
-    CHECK_EQ(printed("PRINT 70000"), "4464");
+    CHECK_EQ(printed(*s, "PRINT 40000"), "-25536");
+    CHECK_EQ(printed(*s, "PRINT 65536"), "0");
+    CHECK_EQ(printed(*s, "PRINT 70000"), "4464");
     type(*s, "POKE 40000,7");
     CHECK_EQ(s->m->ram[0x9c40], 7);
     type(*s, "DOKE 40000,61440: PRINT DEEK($9C40)=$F000");

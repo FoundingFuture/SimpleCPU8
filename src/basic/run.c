@@ -164,6 +164,7 @@ static void say_error(void)
     else if (err == E_NODATA) term_puts("READ FOUND NO MORE DATA");
     else if (err == E_NOTDATA) { term_puts("LINE "); term_putn(err_arg); term_puts(" HOLDS NO DATA"); }
     else if (err == E_DATABYTE) term_puts("A DATA VALUE IS ONE BYTE: -128 TO 255");
+    else if (err == E_HEXWIDTH) term_puts("HEX WIDTH IS OUT OF RANGE [1,4]");
     else if (err == E_ROUTINE) {
         term_puts(err_found);
         term_puts(" IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: USE ITS NUMBER HERE");

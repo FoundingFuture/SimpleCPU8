@@ -172,6 +172,7 @@ extern unsigned char loop_back;
 #define E_NODATA  28  /* READ past the last DATA value */
 #define E_NOTDATA 29  /* RESTORE n or DATA(n) of a line that holds no DATA */
 #define E_DATABYTE 30 /* a DATA value that does not fit in a byte */
+#define E_HEXWIDTH 31 /* HEX$'s width is not 1 to 4 */
 
 /* CALL, JMP and USR take a routine's slot. A name there works only in a
  * project the builder resolved, so a name that is no variable gets its

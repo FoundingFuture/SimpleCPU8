@@ -173,5 +173,6 @@ they always had. Code 3 is no longer raised: codes 15 to 18 split it.
 | 28 | E_NODATA | `READ FOUND NO MORE DATA` |
 | 29 | E_NOTDATA | `LINE n HOLDS NO DATA` |
 | 30 | E_DATABYTE | `A DATA VALUE IS ONE BYTE: -128 TO 255` |
+| 31 | E_HEXWIDTH | `HEX WIDTH IS OUT OF RANGE [1,4]` |
 
 The codes are in src/basic/basic.h and the messages in run.c.
