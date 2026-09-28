@@ -554,6 +554,7 @@ CcResult compile(const std::vector<CcInput>& inputs, const cc::CcOptions& opts) 
     const cc::Program p = cc::compileProgram(files, opts);
     r.assembly = p.text;
     r.romHeader = p.romHeader;
+    r.rom = p.rom;
   } catch (const cc::CcError& e) {
     r.errors.push_back(e.file + ":" + std::to_string(e.line) + ": " + e.message());
   }

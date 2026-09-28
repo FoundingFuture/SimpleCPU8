@@ -47,10 +47,13 @@ struct Assets {
   std::map<std::string, ImageAsset> images;
   // Audio converted to unsigned 8 bit mono at AUDIO_RATE.
   std::map<std::string, std::vector<uint8_t>> samples;
+  // A .font as the blob CMD_LOAD_FONT reads: the cell, then 2048 glyph bytes.
+  std::map<std::string, std::vector<uint8_t>> fonts;
 
   std::function<std::optional<std::vector<uint8_t>>(std::string_view name)> loadFile;
   std::function<std::optional<ImageAsset>(std::string_view name)> loadImage;
   std::function<std::optional<std::vector<uint8_t>>(std::string_view name)> loadSample;
+  std::function<std::optional<std::vector<uint8_t>>(std::string_view name)> loadFont;
   // Where a conversion's remark goes, when the tool wants one: "ship.png",
   // then what happened to it. Absent, the remark is dropped. A build reads
   // an asset more than once, so the same remark can arrive more than once
@@ -70,6 +73,10 @@ struct Assembled {
   std::map<std::string, Label> labels;
   // Every .data directive that placed a blob, for the ROM's asset table.
   std::vector<RomAsset> assets;
+  // Which file each of those placed, as what: `kind` and `name` are the
+  // directive's, offset and size the blob's. simplecpu-make reads it so a
+  // file is not placed twice.
+  std::vector<RomAsset> placedFiles;
   std::vector<AsmError> errors;
 
   // The ROM this assembly produces: program, RAM image and data in one.
@@ -80,7 +87,7 @@ struct Assembled {
 // CMD_SPRITE_DEF blob of a strip: the frame count, the frame's width and
 // height, then each frame row by row. `.sprite('x.png', n)` gives the
 // count; without it the PNG's own count is used, as C's __sprite does.
-constexpr std::string_view DATA_DIRECTIVES[] = {"file", "image", "palette", "sample", "sprite"};
+constexpr std::string_view DATA_DIRECTIVES[] = {"file", "font", "image", "palette", "sample", "sprite"};
 
 Assembled assemble(std::string_view source, const Assets* assets = nullptr);
 

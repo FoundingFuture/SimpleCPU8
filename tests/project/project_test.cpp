@@ -11,6 +11,9 @@
 #include "asm/asm.h"
 #include "core/isa.h"
 #include "project/project.h"
+#include "assets/assets.h"
+#include "assets/font.h"
+#include "assets/sprite.h"
 #if SC8_HAVE_BASIC
 #include "basic/program.h"
 #endif
@@ -333,3 +336,151 @@ TEST_SUITE("calls across languages") {
     CHECK(b.errors[0].find("remove static") != std::string::npos);
   }
 }
+
+#if SC8_HAVE_BASIC
+namespace {
+
+// A two by two picture on the machine palette, as the sprite editor saves.
+std::vector<uint8_t> pngBytes() {
+  sprite::Strip s = sprite::blank(2, 2);
+  s.frames[0].set(0, 0, 3);
+  return sprite::encodePng(s, machinePalette());
+}
+
+// A short 8 bit mono WAV that miniaudio decodes.
+std::vector<uint8_t> wavBytes() {
+  const std::vector<uint8_t> pcm = {128, 200, 56, 128, 128, 200, 56, 128};
+  std::vector<uint8_t> w;
+  auto str = [&](const char* t) { w.insert(w.end(), t, t + 4); };
+  auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; i++) w.push_back(static_cast<uint8_t>(v >> (8 * i))); };
+  auto u16 = [&](uint16_t v) { w.push_back(static_cast<uint8_t>(v & 0xff)); w.push_back(static_cast<uint8_t>(v >> 8)); };
+  str("RIFF");
+  u32(static_cast<uint32_t>(36 + pcm.size()));
+  str("WAVE");
+  str("fmt ");
+  u32(16);
+  u16(1);
+  u16(1);
+  u32(8000);
+  u32(8000);
+  u16(1);
+  u16(8);
+  str("data");
+  u32(static_cast<uint32_t>(pcm.size()));
+  w.insert(w.end(), pcm.begin(), pcm.end());
+  return w;
+}
+
+void writeBytes(const fs::path& p, const std::vector<uint8_t>& bytes) {
+  fs::create_directories(p.parent_path());
+  std::ofstream(p, std::ios::binary).write(reinterpret_cast<const char*>(bytes.data()),
+                                           static_cast<std::streamsize>(bytes.size()));
+}
+
+const RomAsset* entry(const Cartridge& c, const std::string& name) {
+  for (const RomAsset& a : c.assets) if (a.name == name) return &a;
+  return nullptr;
+}
+
+// A BASIC project in memory, its assets named in `files`.
+project::Built basicInMemory(const std::map<std::string, std::vector<uint8_t>>& files) {
+  Assets assets;
+  assets.loadFile = [files](std::string_view name) -> std::optional<std::vector<uint8_t>> {
+    auto it = files.find(std::string(name));
+    if (it == files.end()) return std::nullopt;
+    return it->second;
+  };
+  std::vector<std::string> names;
+  for (const auto& [n, b] : files) names.push_back(n);
+  return project::buildSources({{"autorun.bas", "10 PRINT 1\n"}}, assets, {}, "t", "", std::nullopt, names);
+}
+
+}  // namespace
+
+TEST_SUITE("assets on the cartridge by name") {
+  TEST_CASE("a BASIC project places every file in assets/ and lists each by kind and stem") {
+    TempDir t;
+    write(t.path / "src" / "autorun.bas", "10 PRINT 1\n");
+    const std::string fontText = font::write(font::builtIn());
+    write(t.path / "assets" / "small.font", fontText);
+    writeBytes(t.path / "assets" / "ship.png", pngBytes());
+    writeBytes(t.path / "assets" / "boom.wav", wavBytes());
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    const Cartridge& c = *b.cartridge;
+    const RomAsset* f = entry(c, "small");
+    const RomAsset* i = entry(c, "ship");
+    const RomAsset* s = entry(c, "boom");
+    REQUIRE(f);
+    REQUIRE(i);
+    REQUIRE(s);
+    CHECK_EQ(f->kind, "font");
+    CHECK_EQ(i->kind, "image");
+    CHECK_EQ(s->kind, "sample");
+    const std::vector<uint8_t> blob = font::blob(font::builtIn());
+    REQUIRE_EQ(f->size, blob.size());
+    CHECK(std::vector<uint8_t>(c.data.begin() + f->offset, c.data.begin() + f->offset + f->size) == blob);
+    // The picture as .image places it: its pixels, one byte each.
+    CHECK_EQ(i->size, 4u);
+    CHECK_EQ(c.data[i->offset], 3);
+  }
+
+  TEST_CASE("a C project lists only what a directive placed, under its label") {
+    TempDir t;
+    write(t.path / "src" / "main.c", "__ROM const unsigned char pic[] = __image(\"ship.png\");\nint main(void) { return 0; }\n");
+    writeBytes(t.path / "assets" / "ship.png", pngBytes());
+    write(t.path / "assets" / "small.font", font::write(font::builtIn()));
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    REQUIRE_EQ(b.cartridge->assets.size(), 1u);
+    CHECK_EQ(b.cartridge->assets[0].kind, "image");
+    CHECK_EQ(b.cartridge->assets[0].name, "pic");
+  }
+
+  TEST_CASE("a file a directive placed is not placed twice, and gets a second entry under its stem") {
+    TempDir t;
+    write(t.path / "src" / "autorun.bas", "10 PRINT 1\n");
+    write(t.path / "src" / "fonts.asm", ".data\nsmallfont: .font('small.font')\n");
+    write(t.path / "assets" / "small.font", font::write(font::builtIn()));
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    const RomAsset* byLabel = entry(*b.cartridge, "smallfont");
+    const RomAsset* byStem = entry(*b.cartridge, "small");
+    REQUIRE(byLabel);
+    REQUIRE(byStem);
+    CHECK_EQ(byStem->offset, byLabel->offset);
+    CHECK_EQ(byStem->size, byLabel->size);
+    CHECK_EQ(b.cartridge->data.size(), static_cast<size_t>(byLabel->offset + byLabel->size));
+  }
+
+  TEST_CASE("two stems that differ only in case are refused, naming both files") {
+    project::Built b = basicInMemory({{"small.font", std::vector<uint8_t>(0)}, {"Small.bin", {1, 2}}});
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_FALSE(b.errors.empty());
+    CHECK(b.errors[0].find("Small.bin") != std::string::npos);
+    CHECK(b.errors[0].find("small.font") != std::string::npos);
+  }
+
+  TEST_CASE("a stem BASIC cannot write gets a note naming the file, and is still placed") {
+    const std::string fontText = font::write(font::builtIn());
+    const std::vector<uint8_t> fontBytes(fontText.begin(), fontText.end());
+    project::Built b = basicInMemory({{"small-2.font", fontBytes}, {"averylongname.bin", {7}}, {"ok.bin", {8}}});
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    std::string notes;
+    for (const std::string& n : b.notes) notes += n + "\n";
+    CHECK(notes.find("small-2.font") != std::string::npos);
+    CHECK(notes.find("averylongname.bin") != std::string::npos);
+    CHECK(notes.find("ok.bin") == std::string::npos);
+    CHECK(entry(*b.cartridge, "small-2"));
+    CHECK_EQ(entry(*b.cartridge, "ok")->kind, "file");
+  }
+
+  TEST_CASE("a .font that does not read stops the build at its line") {
+    project::Built b = basicInMemory({{"bad.font", {'n', 'o', '\n'}}});
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_FALSE(b.errors.empty());
+    CHECK(b.errors[0].find("bad.font:1:") != std::string::npos);
+  }
+}
+#endif
+

@@ -6,6 +6,9 @@
 #include <vector>
 
 #include "assets/assets.h"
+#include "assets/font.h"
+#include "core/microcode.h"
+#include "devices/gpu.h"
 #include "harness.h"
 
 using namespace sc8;
@@ -28,12 +31,22 @@ ImageAsset strip() {
   return img;
 }
 
+// A 5 by 7 font, blank but for a solid A, as CMD_LOAD_FONT reads it.
+std::vector<uint8_t> smallFont() {
+  font::Font f;
+  f.width = 5;
+  f.height = 7;
+  for (size_t r = 0; r < 8; r++) f.glyphs['A' * 8 + r] = 0xff;
+  return font::blob(f);
+}
+
 // Every test works from preloaded maps. Nothing here touches the disk.
 Assets preloaded() {
   Assets a;
   a.images["ship.png"] = strip();
   a.samples["beep.wav"] = {128, 200, 56, 128};
   a.files["data.bin"] = {0xde, 0xad, 0xbe, 0xef};
+  a.fonts["small.font"] = smallFont();
   return a;
 }
 
@@ -137,6 +150,47 @@ TEST_SUITE("an asset initializer puts a file on the cartridge") {
       int main(void) { return 0; }
     )", a);
     CHECK(bytesOf(p, "data") == std::vector<uint8_t>{0xde, 0xad, 0xbe, 0xef});
+  }
+
+  TEST_CASE("__font is the CMD_LOAD_FONT blob: the cell, then 256 glyphs of 8 bytes") {
+    const Assets a = preloaded();
+    const cc::Program p = prog(R"(
+      __ROM const unsigned char small[] = __font("small.font");
+      int main(void) { return 0; }
+    )", a);
+    CHECK(bytesOf(p, "small") == smallFont());
+  }
+
+  TEST_CASE("a __font loads on the GPU and draws with its cell") {
+    const Assets a = preloaded();
+    CcOptions opts;
+    opts.assets = &a;
+    const std::string text = compile(R"(
+      #include <gpu.h>
+      #include <rom.h>
+      __ROM const unsigned char small[] = __font("small.font");
+      int main(void) {
+        gpu_load_font(ROM_BANK(ROM_small), ROM_HI(ROM_small), ROM_LO(ROM_small));
+        gpu_text_style(7, 0, 0);
+        gpu_text_char('A');
+        return 0;
+      }
+    )", opts);
+    const Assembled asmd = assemble(text);
+    REQUIRE_MESSAGE(asmd.errors.empty(), (asmd.errors.empty() ? std::string() : asmd.errors[0].message));
+    Machine m(asmd.program, buildOptimal());
+    Gpu g([&m] { return m.cycles; });
+    g.attachCart(asmd.cart);
+    g.attachRam(m.ram.data());
+    std::copy(asmd.ram.begin(), asmd.ram.end(), m.ram.begin());
+    m.setIo(&g);
+    m.run(20000);
+    CHECK_EQ(m.status, Status::Halted);
+    CHECK_EQ(g.read(gpu::GPU_TEXT_COLS), 256 / 5);
+    CHECK_EQ(g.read(gpu::GPU_TEXT_ROWS), 256 / 7);
+    int lit = 0;
+    for (uint8_t v : g.composeFrame()) lit += v == 7 ? 1 : 0;
+    CHECK_EQ(lit, 5 * 7);
   }
 
   TEST_CASE("asks the loader when the map has no entry") {

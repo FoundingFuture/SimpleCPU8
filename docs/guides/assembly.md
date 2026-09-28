@@ -817,11 +817,12 @@ is the low byte, `get_highbyte(x)` the next and `get_bankbyte(x)` bits
 `get_sizelo(x)` and `get_sizehi(x)` give the byte count of a blob a
 directive placed, and refuse anything else.
 
-Five directives place a file from `assets/` in `.data`:
+Six directives place a file from `assets/` in `.data`:
 
 | Line | Places |
 |---|---|
 | `.file('level.bin')` | the bytes as they are |
+| `.font('small.font')` | a font as `CMD_LOAD_FONT` reads it: the cell, then 256 glyphs of 8 bytes |
 | `.image('pic.png')` | the picture's pixels, one palette index per pixel, row by row |
 | `.palette('pic.png')` | its 768 palette bytes |
 | `.sample('ping.wav')` | the sound as 8 bit mono at 8000 a second |
@@ -1260,14 +1261,15 @@ docs/design/acp-ports.md has every command with its operand shapes.
 
 The storage device on ports `$50` to `$5F` reads and writes the named
 slots in the cartridge that BASIC's `!SAVE` and `!LOAD` use. A slot
-holds text, up to 65535 bytes, under a name of up to 16 characters.
+holds text, up to 65535 bytes, under a name of up to 16 characters. It
+also finds the cartridge's assets by name.
 
 | Port | Name | Meaning |
 |---|---|---|
 | `$50`, `$51` | `STO_ADDR_HI`, `STO_ADDR_LO` | the text block in RAM |
 | `$52`, `$53` | `STO_NAME_HI`, `STO_NAME_LO` | a zero terminated name in RAM |
 | `$54`, `$55` | `STO_LEN_HI`, `STO_LEN_LO` | write: the room at the block. Read: bytes moved |
-| `$56` | `STO_CMD` | `STO_LOAD`, `STO_SAVE`, `STO_DELETE` or `STO_CATALOG` |
+| `$56` | `STO_CMD` | `STO_LOAD`, `STO_SAVE`, `STO_DELETE`, `STO_CATALOG` or `STO_FIND` |
 | `$57` | `STO_STATUS` | read: `STO_OK`, `STO_NOT_FOUND`, `STO_FULL`, `STO_BAD_NAME` |
 | `$58` | `STO_COUNT` | read: how many slots the cartridge holds |
 
@@ -1315,6 +1317,41 @@ The screen shows `SAVE STATUS 0, 1 SLOTS: NOTE`. The save writes the
 rebuild of the project writes a fresh cartridge without it. `%s` takes
 the address of the catalog text as two bytes, and the program stores
 the two halves of `list` into the argument block by hand.
+
+`STO_FIND` looks an asset up in the ROM's asset table. Put its name at
+the block, zero terminated, up to 16 characters, in any case. The
+answer replaces the name: seven bytes, high byte first.
+
+| Byte | Holds |
+|---|---|
+| 0 | the kind: `STO_KIND_FONT`, `STO_KIND_FILE`, `STO_KIND_IMAGE`, `STO_KIND_PALETTE`, `STO_KIND_SAMPLE` or `STO_KIND_SPRITE` |
+| 1 to 3 | the cartridge address, bank first |
+| 4 to 6 | the length in bytes |
+
+`STO_STATUS` is `STO_NOT_FOUND` when the table has no such name, and
+the block keeps the name. A label on a directive names an asset, and so
+does the file's name without its extension in a project with BASIC.
+`IN` sets no flags, so compare the status before a jump.
+
+```asm
+; Find the font called SMALL and load it.
+        OUT STO_ADDR_HI, get_highbyte(found)
+        OUT STO_ADDR_LO, get_lowbyte(found)
+        OUT STO_CMD, STO_FIND
+        IN A <- STO_STATUS
+        CMP A, STO_OK
+        JNZ missing
+        LD A <- [found+1]
+        OUTA GPU_CART_BANK
+        LD A <- [found+2]
+        OUTA GPU_CART_HI
+        LD A <- [found+3]
+        OUTA GPU_CART_LO
+        OUT GPU_CMD, CMD_LOAD_FONT
+missing: HLT
+.ram
+found:  db "SMALL", 0, 0              ; the name, then room for the answer
+```
 
 ## How C becomes assembly
 

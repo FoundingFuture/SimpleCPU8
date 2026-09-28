@@ -25,7 +25,10 @@
 //          are unloaded, and a fetch from one crashes.
 //   RAM    the bytes .ram defined, loaded at data RAM address 0
 //   DATA   the .data section, loaded at cartridge address 0
-//   ASET   the asset table: one line per resource, "kind\tname\toffset\tsize"
+//   ASET   the asset table: one line per resource, "kind\tname\toffset\tsize".
+//          A directive's entry is named by its label. In a project with
+//          BASIC every asset file also has one under its stem, which the
+//          storage device's STO_FIND searches.
 //   UCOD   the microcode set. "@optimal" and "@naive" name the two sets
 //          the computer holds. A user's own set travels as its full text.
 //          The optimal set never travels: it is hidden in the computer,
@@ -56,7 +59,7 @@ constexpr int CART_DATA_SIZE = 1 << 20;  // 1MB: 16 banks of 64KB, flat addressi
 
 // One resource the .data section carries, as the assembler placed it.
 struct RomAsset {
-  std::string kind;  // file, image, palette, sample, or data for db/dw runs
+  std::string kind;  // file, font, image, palette, sample or sprite
   std::string name;
   uint32_t offset;
   uint32_t size;

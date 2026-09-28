@@ -74,6 +74,11 @@ Layout layoutOf(const std::filesystem::path& dir);
 // conversion note, when one comes back, is appended to notes.
 Assets loaders(const Layout& layout, std::vector<std::string>* notes);
 
+// A project's asset files: everything in assets/, and in a flat project
+// every file beside the sources that is not a source, a ROM or the README.
+// The ROM carries these, and a project with BASIC places them.
+std::vector<std::filesystem::path> assetFiles(const Layout& layout);
+
 // The same over the files a ROM carries in its SRC chunk: an asset name
 // resolves to assets/<name>, then <name>.
 Assets loadersFrom(const Cartridge& rom, std::vector<std::string>* notes);
@@ -137,8 +142,13 @@ Built build(const Layout& layout, const Options& opts);
 // under `where`, a folder shown in messages. `base` is a cartridge whose
 // program stands in when the sources hold no .c and no .asm: an opened
 // ROM's program, with the sources' .bas slots and microcode.txt on top.
+// `assetNames` are the project's asset files by name, which `assets`
+// loads. A project with BASIC places every one of them on the cartridge
+// and lists it in ASET by kind and by the name without its extension, so
+// the running program finds it with STO_FIND.
 Built buildSources(const std::vector<Source>& sources, const Assets& assets, const Options& opts,
-                   const std::string& title, const std::string& where, const std::optional<Cartridge>& base = {});
+                   const std::string& title, const std::string& where, const std::optional<Cartridge>& base = {},
+                   const std::vector<std::string>& assetNames = {});
 
 // Build and write the ROM, and the assembly when asked. The path written
 // comes back, or nothing with the errors in the Built.

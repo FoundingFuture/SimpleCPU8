@@ -30,7 +30,7 @@ const std::set<std::string_view> TYPE_WORDS = {
 // char ship[] = __image("ship.png");` takes its bytes from the file.
 const std::map<std::string_view, AssetForm> ASSET_FORMS = {
     {"__image", AssetForm::Image},   {"__sprite", AssetForm::Sprite}, {"__palette", AssetForm::Palette},
-    {"__sample", AssetForm::Sample}, {"__file", AssetForm::File},
+    {"__sample", AssetForm::Sample}, {"__file", AssetForm::File},     {"__font", AssetForm::Font},
 };
 
 const std::set<std::string_view> TYPE_AHEAD_WORDS = {

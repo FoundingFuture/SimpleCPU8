@@ -18,6 +18,7 @@ Computer::Computer()
       gpu_([this] { return machine_ ? machine_->cycles : 0; }, &acp_, [this] { return drawSeed(); }) {
   apu_.setMasterGain(MASTER_GAIN);
   storage_.attach(&cart_.basic, [this] { slotsChanged(); });
+  storage_.attachAssets(&cart_.assets);
   frame_.assign(static_cast<size_t>(SCREEN_W * SCREEN_H * 4), 0);
   newMachine();
 }

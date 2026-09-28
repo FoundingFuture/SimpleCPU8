@@ -172,6 +172,13 @@ int main(int argc, char** argv) {
     report(name, note);
     return pcm;
   };
+  assets.loadFont = [&](std::string_view name) {
+    std::string note;
+    auto blob = loadFontFile(dir / fs::path(name), &note);
+    if (blob) carry(name);
+    report(name, note);
+    return blob;
+  };
 
   Assembled a = assemble(text, &assets);
   for (const AsmError& e : a.errors) {

@@ -233,11 +233,128 @@ Assets loaders(const Layout& layout, std::vector<std::string>* notes) {
     report(name, note);
     return pcm;
   };
+  assets.loadFont = [layout, report](std::string_view name) {
+    std::string note;
+    auto blob = loadFontFile(assetPath(layout, name), &note);
+    report(name, note);
+    return blob;
+  };
   assets.note = report;
   return assets;
 }
 
+std::vector<fs::path> assetFiles(const Layout& layout) {
+  std::vector<fs::path> out;
+  std::error_code ec;
+  if (layout.assets != layout.sources && fs::is_directory(layout.assets, ec)) {
+    for (const auto& entry : fs::directory_iterator(layout.assets, ec)) {
+      if (entry.is_regular_file()) out.push_back(entry.path());
+    }
+  }
+  for (const auto& entry : fs::directory_iterator(layout.sources, ec)) {
+    if (!entry.is_regular_file()) continue;
+    const std::string name = entry.path().filename().string();
+    const std::string ext = entry.path().extension().string();
+    const bool source = ext == ".c" || ext == ".h" || ext == ".asm" || ext == ".bas" || name == "microcode.txt";
+    if (source || ext == ".rom" || name == "README.md") continue;
+    out.push_back(entry.path());
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
 namespace {
+
+// DESIGN: BASIC finds an asset by name at run time, through STO_FIND over
+// the ASET chunk. So in a project with BASIC every asset goes on the
+// cartridge, listed by its kind and its stem. docs/design/font-design.md.
+//
+// A name BASIC can write is a letter, then letters and digits, at most 10
+// characters, the most its lexer keeps of a name.
+constexpr size_t BASIC_NAME_MAX = 10;
+
+bool basicCanWrite(std::string_view stem) {
+  if (stem.empty() || stem.size() > BASIC_NAME_MAX) return false;
+  if (!std::isalpha(static_cast<unsigned char>(stem[0]))) return false;
+  return std::all_of(stem.begin(), stem.end(), [](char ch) { return std::isalnum(static_cast<unsigned char>(ch)) != 0; });
+}
+
+std::string lowered(std::string s) {
+  for (char& ch : s) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  return s;
+}
+
+// The kind an asset file places as, and its bytes, the way the directive
+// for that kind places it: a .font as its blob, a picture as .image's
+// pixels, a sound as .sample's bytes, anything else as the file itself.
+struct Placement {
+  std::string kind;
+  std::vector<uint8_t> bytes;
+};
+
+std::optional<Placement> placementOf(const std::string& name, const Assets& assets, Built& b) {
+  const auto raw = assets.loadFile ? assets.loadFile(name) : std::nullopt;
+  if (!raw) {
+    b.errors.push_back(name + ": cannot read the asset");
+    return std::nullopt;
+  }
+  if (lowered(fs::path(name).extension().string()) == ".font") {
+    std::string why;
+    auto blob = loadFontBytes(*raw, &why);
+    if (!blob) {
+      // "line 3: ..." from the reader, as "small.font:3: ...".
+      b.errors.push_back(name + ":" + (why.starts_with("line ") ? why.substr(5) : " " + why));
+      return std::nullopt;
+    }
+    return Placement{"font", std::move(*blob)};
+  }
+  std::string note;
+  if (auto img = loadImageBytes(*raw, &note)) {
+    if (!note.empty()) b.notes.push_back(name + ": " + note);
+    return Placement{"image", std::move(img->pixels)};
+  }
+  if (auto pcm = loadSampleBytes(*raw, nullptr)) return Placement{"sample", std::move(*pcm)};
+  return Placement{"file", *raw};
+}
+
+// Place a project's assets for BASIC: the name rules first, then every file
+// by kind and stem. A file a directive already placed with the same bytes
+// keeps its place and gains a second entry under its stem, so the chunk
+// stays one line per name and nothing is on the cartridge twice.
+void placeForBasic(Cartridge& c, const std::vector<RomAsset>& placed, const Assets& assets,
+                   std::vector<std::string> names, Built& b) {
+  std::sort(names.begin(), names.end());
+  std::map<std::string, std::string> byStem;
+  for (const std::string& n : names) {
+    const std::string stem = fs::path(n).stem().string();
+    auto [it, fresh] = byStem.emplace(lowered(stem), n);
+    if (!fresh) {
+      b.errors.push_back(it->second + " and " + n + " have names that differ only in case, and BASIC finds an "
+                         "asset by its name in any case. Rename one of them.");
+    }
+    if (!basicCanWrite(stem)) {
+      b.notes.push_back(n + ": BASIC cannot write the name " + stem + ". A BASIC name is a letter, then "
+                        "letters and digits, at most 10 of them. C and assembly still reach the file.");
+    }
+  }
+  if (!b.errors.empty()) return;
+  for (const std::string& n : names) {
+    auto p = placementOf(n, assets, b);
+    if (!p) continue;
+    const std::string stem = fs::path(n).stem().string();
+    const auto same = std::find_if(placed.begin(), placed.end(), [&](const RomAsset& r) {
+      return r.kind == p->kind && r.name == n && r.size == p->bytes.size() && r.offset + r.size <= c.data.size() &&
+             std::equal(p->bytes.begin(), p->bytes.end(), c.data.begin() + r.offset);
+    });
+    if (same != placed.end()) {
+      c.assets.push_back({p->kind, stem, same->offset, same->size});
+      continue;
+    }
+    const auto offset = static_cast<uint32_t>(c.data.size());
+    c.data.insert(c.data.end(), p->bytes.begin(), p->bytes.end());
+    c.assets.push_back({p->kind, stem, offset, static_cast<uint32_t>(p->bytes.size())});
+  }
+}
 
 const std::vector<uint8_t>* carriedFile(const Cartridge& rom, std::string_view name) {
   for (const std::string prefix : {"assets/", ""}) {
@@ -276,6 +393,14 @@ Assets loadersFrom(const Cartridge& rom, std::vector<std::string>* notes) {
     auto pcm = loadSampleBytes(*b, &note);
     report(name, note);
     return pcm;
+  };
+  assets.loadFont = [rom, report](std::string_view name) -> std::optional<std::vector<uint8_t>> {
+    const std::vector<uint8_t>* b = carriedFile(rom, name);
+    if (!b) return std::nullopt;
+    std::string note;
+    auto blob = loadFontBytes(*b, &note);
+    report(name, note);
+    return blob;
   };
   return assets;
 }
@@ -464,7 +589,8 @@ std::string cyclesUnit(const std::string& microcodeText, std::vector<std::string
 }
 
 Built buildSources(const std::vector<Source>& sources, const Assets& assets, const Options& opts,
-                   const std::string& title, const std::string& where, const std::optional<Cartridge>& base) {
+                   const std::string& title, const std::string& where, const std::optional<Cartridge>& base,
+                   const std::vector<std::string>& assetNames) {
   Built b;
   auto ext = [](const std::string& n) { return fs::path(n).extension().string(); };
   std::vector<const Source*> cFiles, hFiles, asmFiles, basFiles;
@@ -528,6 +654,8 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
     lineCount += 1 + static_cast<int>(std::count(part.begin(), part.end(), '\n'));
   };
 
+  // The C program's __ROM objects, so its asset initializers join ASET.
+  std::vector<cc::RomEntry> romEntries;
   if (!cFiles.empty()) {
     cc::CcOptions ccOpts;
     ccOpts.defines = opts.defines;
@@ -583,6 +711,7 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
     for (const std::string& e : r.errors) b.errors.push_back(e);
     if (!r.errors.empty()) return b;
     append("generated.asm", r.assembly);
+    romEntries = std::move(r.rom);
   } else if (basicProject) {
 #if SC8_HAVE_BASIC
     append("basic.asm", std::string(basicAsm()));
@@ -621,6 +750,21 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
     for (const AsmError& e : b.assembled.errors) b.errors.push_back(whereLine(e.line) + ": " + e.message);
     if (!b.errors.empty()) return b;
     c = b.assembled.cartridge();
+    // An asset initializer in C is a directive too: it joins ASET under its
+    // label, as .image does, and the file it read counts as placed.
+    std::vector<RomAsset> placed = b.assembled.placedFiles;
+    for (const cc::RomEntry& e : romEntries) {
+      if (e.assetKind.empty()) continue;
+      auto label = b.assembled.labels.find(e.name);
+      if (label == b.assembled.labels.end()) continue;
+      const auto offset = static_cast<uint32_t>(label->second.value);
+      c.assets.push_back({e.assetKind, e.name, offset, static_cast<uint32_t>(e.size)});
+      placed.push_back({e.assetKind, e.assetFile, offset, static_cast<uint32_t>(e.size)});
+    }
+    if (basicProject || mixedProject) {
+      placeForBasic(c, placed, assets, assetNames, b);
+      if (!b.errors.empty()) return b;
+    }
     b.instructions = b.assembled.program.size();
     b.ramBytes = b.assembled.ramLength;
     b.dataBytes = b.assembled.cart.size();
@@ -670,7 +814,10 @@ Built build(const Layout& layout, const Options& opts) {
   if (auto t = readText(layout.sources / "microcode.txt")) sources.push_back({"microcode.txt", *t});
   std::vector<std::string> notes;
   Assets assets = loaders(layout, &notes);
-  Built b = buildSources(sources, assets, opts, titleFor(layout), layout.sources.string());
+  const std::vector<fs::path> assetPaths = assetFiles(layout);
+  std::vector<std::string> assetNames;
+  for (const fs::path& p : assetPaths) assetNames.push_back(p.filename().string());
+  Built b = buildSources(sources, assets, opts, titleFor(layout), layout.sources.string(), std::nullopt, assetNames);
   b.notes.insert(b.notes.begin(), notes.begin(), notes.end());
   if (b.cartridge && opts.embedSources) {
     // The ROM carries the project: the README, every file in assets/, and
@@ -678,20 +825,8 @@ Built build(const Layout& layout, const Options& opts) {
     // asset too.
     std::vector<std::pair<std::string, std::vector<uint8_t>>> files;
     if (auto readme = readBytes(layout.root / "README.md")) files.emplace_back("README.md", *readme);
-    std::error_code ec;
-    if (layout.assets != layout.sources && fs::is_directory(layout.assets, ec)) {
-      for (const auto& entry : fs::directory_iterator(layout.assets, ec)) {
-        if (!entry.is_regular_file()) continue;
-        if (auto bytes = readBytes(entry.path())) files.emplace_back("assets/" + entry.path().filename().string(), *bytes);
-      }
-    }
-    for (const auto& entry : fs::directory_iterator(layout.sources, ec)) {
-      if (!entry.is_regular_file()) continue;
-      const std::string name = entry.path().filename().string();
-      const std::string ext = entry.path().extension().string();
-      const bool source = ext == ".c" || ext == ".h" || ext == ".asm" || ext == ".bas" || name == "microcode.txt";
-      if (source || ext == ".rom" || name == "README.md") continue;
-      if (auto bytes = readBytes(entry.path())) files.emplace_back("assets/" + name, *bytes);
+    for (const fs::path& p : assetPaths) {
+      if (auto bytes = readBytes(p)) files.emplace_back("assets/" + p.filename().string(), *bytes);
     }
     embed(*b.cartridge, sources, files);
   }

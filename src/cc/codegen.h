@@ -42,6 +42,10 @@ struct RomEntry {
   // The bytes themselves. An asset form reads a file to get them, so the
   // layout keeps them rather than reading the file again for the emit.
   std::vector<uint8_t> bytes;
+  // For an asset initializer: its kind, as the ROM's asset table names it,
+  // and the file it read. Empty for plain data.
+  std::string assetKind;
+  std::string assetFile;
 };
 
 struct Compiled {

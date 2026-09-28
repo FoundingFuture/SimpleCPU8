@@ -845,7 +845,7 @@ upward and leaves its answer in `__ret`. It drops the parameters with
 
 The cartridge is memory the processor cannot read. The graphics chip and
 the audio chip read it directly. That is where a picture, a sprite or a
-sound lives. `__ROM` puts an array there, and five initializer forms
+sound lives. `__ROM` puts an array there, and six initializer forms
 fill one from a file in `assets/`:
 
 | Form | File | Used by |
@@ -855,6 +855,7 @@ fill one from a file in `assets/`:
 | `__sample("ping.wav")` | a WAV, converted to 8 bit mono at 8000 Hz | `sample` |
 | `__palette("bg.png")` | the picture's 256 colours | `palette` |
 | `__file("level.bin")` | any bytes as they are | `rom_copy` |
+| `__font("small.font")` | a font, as `CMD_LOAD_FONT` reads it | `gpu_load_font` |
 
 Each is allowed only on `__ROM const unsigned char name[]` with empty
 brackets, because the file decides the length. For every `__ROM` object

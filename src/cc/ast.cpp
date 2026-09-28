@@ -47,9 +47,12 @@ std::string assetFormName(AssetForm f) {
     case AssetForm::Palette: return "__palette";
     case AssetForm::Sample: return "__sample";
     case AssetForm::File: return "__file";
+    case AssetForm::Font: return "__font";
   }
   return "?";
 }
+
+std::string assetKind(AssetForm f) { return assetFormName(f).substr(2); }
 
 std::string typeName(const CType& t) {
   std::string s = baseName(t.base) + std::string(static_cast<size_t>(t.ptr), '*');

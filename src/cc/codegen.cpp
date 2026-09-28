@@ -3366,8 +3366,8 @@ namespace {
 
 // The bytes an asset initializer puts on the cartridge. Each form emits the
 // blob the device command reads: CMD_BLIT for __image, CMD_SPRITE_DEF for
-// __sprite, CMD_LOAD_PALETTE for __palette, CMD_DEF_SAMPLE for __sample.
-// __file is the bytes as they are.
+// __sprite, CMD_LOAD_PALETTE for __palette, CMD_DEF_SAMPLE for __sample and
+// CMD_LOAD_FONT for __font. __file is the bytes as they are.
 // A picture drawn in any colours comes out in the machine's palette. An
 // image whose colours all exist there arrives already indexed to it. Any
 // other keeps its own palette, which .image in assembly loads on request.
@@ -3410,7 +3410,10 @@ constexpr const char* SPRITE_BLACK_NOTE =
 
 std::vector<uint8_t> assetBytes(const VarDecl& v, const AssetInit& a, const Assets* assets) {
   const std::string& name = a.name;
-  const char* what = a.form == AssetForm::File ? "file" : a.form == AssetForm::Sample ? "sample" : "image";
+  const char* what = a.form == AssetForm::File     ? "file"
+                     : a.form == AssetForm::Sample ? "sample"
+                     : a.form == AssetForm::Font   ? "font"
+                                                   : "image";
   if (!assets) noAsset(v, a, what);
   // The map first, then the loader, the way the assembler's asset() resolves
   // a directive's name.
@@ -3428,6 +3431,7 @@ std::vector<uint8_t> assetBytes(const VarDecl& v, const AssetInit& a, const Asse
   switch (a.form) {
     case AssetForm::File: return find(assets->files, assets->loadFile);
     case AssetForm::Sample: return find(assets->samples, assets->loadSample);
+    case AssetForm::Font: return find(assets->fonts, assets->loadFont);
     case AssetForm::Palette: {
       const ImageAsset img = find(assets->images, assets->loadImage);
       if (img.palette.size() != 768) fail(v.pos, name + ": the image carries no 256 entry palette for __palette");
@@ -3504,8 +3508,14 @@ std::vector<RomEntry> layoutRom(const std::vector<VarDecl>& vars, const Assets* 
     const std::vector<uint8_t> bytes = romBytesOf(v, assets);
     const std::string key = bytesKey(bytes);
     auto first = seen.find(key);
-    RomEntry entry{v.name, first != seen.end() ? at[first->second] : addr, static_cast<int>(bytes.size()),
-                   v.pos.file, v.pos.line, std::nullopt, bytes};
+    RomEntry entry{v.name,   first != seen.end() ? at[first->second] : addr,
+                   static_cast<int>(bytes.size()),
+                   v.pos.file,
+                   v.pos.line,
+                   std::nullopt,
+                   bytes,
+                   v.init->asset ? assetKind(v.init->asset->form) : std::string(),
+                   v.init->asset ? v.init->asset->name : std::string()};
     if (first != seen.end()) {
       entry.sameAs = first->second;
     } else {

@@ -8,6 +8,7 @@
 #include "core/mcparse.h"
 #include "core/microcode.h"
 #include "devices/constants.h"
+#include "devices/gpu.h"
 
 using namespace sc8;
 
@@ -731,6 +732,82 @@ TEST_SUITE(".equ names a number") {
 
   TEST_CASE("an undefined name still says so") {
     CHECK_EQ(firstError("        LD A <- NOPE"), "undefined label: NOPE");
+  }
+}
+
+// A font blob as CMD_LOAD_FONT reads it: the cell, then 256 glyphs of 8
+// bytes, here blank but for `code`, a solid block.
+std::vector<uint8_t> fontBlob(int w, int h, int code) {
+  std::vector<uint8_t> b(2 + gpu::GLYPHS * gpu::GLYPH_BYTES, 0);
+  b[0] = static_cast<uint8_t>(w);
+  b[1] = static_cast<uint8_t>(h);
+  for (size_t r = 0; r < gpu::GLYPH_BYTES; r++) b[2 + static_cast<size_t>(code) * gpu::GLYPH_BYTES + r] = 0xff;
+  return b;
+}
+
+TEST_SUITE("a .font directive") {
+  TEST_CASE("places the blob in the cartridge and lists it in ASET as a font under its label") {
+    Assets assets;
+    assets.fonts["small.font"] = fontBlob(5, 7, 'A');
+    Assembled a = assemble("NOP\n.data\nhead: db 1, 2\nsmall: .font('small.font')", &assets);
+    REQUIRE(a.errors.empty());
+    CHECK(a.labels.at("small") == Label{Label::Kind::Data, 2});
+    CHECK(std::vector<uint8_t>(a.cart.begin() + 2, a.cart.end()) == fontBlob(5, 7, 'A'));
+    REQUIRE_EQ(a.assets.size(), 1u);
+    CHECK_EQ(a.assets[0].kind, "font");
+    CHECK_EQ(a.assets[0].name, "small");
+    CHECK_EQ(a.assets[0].offset, 2u);
+    CHECK_EQ(a.assets[0].size, 2050u);
+  }
+
+  TEST_CASE("asks the loader when the map has no entry, and names a font it cannot find") {
+    Assets assets;
+    std::vector<std::string> asked;
+    assets.loadFont = [&](std::string_view name) -> std::optional<std::vector<uint8_t>> {
+      asked.emplace_back(name);
+      if (name == "small.font") return fontBlob(6, 8, 'A');
+      return std::nullopt;
+    };
+    Assembled a = assemble("NOP\n.data\nf: .font(\"small.font\")", &assets);
+    REQUIRE(a.errors.empty());
+    CHECK(asked == std::vector<std::string>{"small.font"});
+    Assembled b = assemble("NOP\n.data\nf: .font('big.font')", &assets);
+    REQUIRE_FALSE(b.errors.empty());
+    CHECK(b.errors[0].message.find("unknown font: big.font") != std::string::npos);
+  }
+
+  TEST_CASE("loads on the GPU and draws with its cell") {
+    Assets assets;
+    assets.fonts["small.font"] = fontBlob(5, 7, 'A');
+    Assembled a = assemble(
+        "        OUT GPU_CART_BANK, get_bankbyte(small)\n"
+        "        OUT GPU_CART_HI, get_highbyte(small)\n"
+        "        OUT GPU_CART_LO, get_lowbyte(small)\n"
+        "        OUT GPU_CMD, CMD_LOAD_FONT\n"
+        "        OUT GPU_TEXT_COLOR, 7\n"
+        "        OUT GPU_CMD, CMD_TEXT_STYLE\n"
+        "        OUT GPU_TEXT_CHAR, 65\n"
+        "        OUT GPU_CMD, CMD_TEXT_CHAR\n"
+        "        HLT\n"
+        ".data\n"
+        "pad:    db 9, 9, 9\n"
+        "small:  .font('small.font')\n",
+        &assets);
+    REQUIRE(a.errors.empty());
+    Machine m(a.program, buildOptimal());
+    Gpu g([&m] { return m.cycles; });
+    g.attachCart(a.cart);
+    m.setIo(&g);
+    m.run(100);
+    CHECK_EQ(m.status, Status::Halted);
+    CHECK_EQ(g.read(gpu::GPU_TEXT_COLS), 256 / 5);
+    CHECK_EQ(g.read(gpu::GPU_TEXT_ROWS), 256 / 7);
+    const Gpu::Frame f = g.composeFrame();
+    int lit = 0;
+    for (uint8_t v : f) lit += v == 7 ? 1 : 0;
+    CHECK_EQ(lit, 5 * 7);
+    CHECK_EQ(f[static_cast<size_t>(6 * gpu::SCREEN_W + 4)], 7);
+    CHECK_EQ(f[static_cast<size_t>(7 * gpu::SCREEN_W)], 0);
   }
 }
 

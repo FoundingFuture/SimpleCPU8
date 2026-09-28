@@ -97,6 +97,7 @@ void Storage::run(uint8_t cmd) {
     case STO_SAVE: status_ = save(); break;
     case STO_DELETE: status_ = remove(); break;
     case STO_CATALOG: status_ = catalog(); break;
+    case STO_FIND: status_ = findAsset(); break;
     default: status_ = STO_BAD_CMD; break;
   }
 }
@@ -165,6 +166,40 @@ uint8_t Storage::catalog() {
   putByte(at + static_cast<uint32_t>(text.size()), 0);
   moved_ = static_cast<uint16_t>(text.size());
   return STO_OK;
+}
+
+// The name comes from the block rather than from STO_NAME, and the answer
+// goes back there, so one pointer serves both ways.
+uint8_t Storage::findAsset() {
+  const uint32_t at = static_cast<uint32_t>(addrHi_) << 8 | addrLo_;
+  std::string name;
+  for (uint32_t i = 0;; i++) {
+    const uint8_t c = byteAt(at + i);
+    if (c == 0) break;
+    if (i == static_cast<uint32_t>(NAME_LIMIT)) return STO_BAD_NAME;
+    name.push_back(static_cast<char>(c));
+  }
+  if (!validName(name)) return STO_BAD_NAME;
+  if (!assets_) return STO_NOT_FOUND;
+  const auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
+  const auto same = [&](const std::string& a) {
+    if (a.size() != name.size()) return false;
+    for (size_t i = 0; i < a.size(); i++) {
+      if (lower(a[i]) != lower(name[i])) return false;
+    }
+    return true;
+  };
+  for (const RomAsset& a : *assets_) {
+    if (!same(a.name)) continue;
+    const uint8_t answer[7] = {static_cast<uint8_t>(kindCode(a.kind)),
+                               static_cast<uint8_t>(a.offset >> 16), static_cast<uint8_t>(a.offset >> 8),
+                               static_cast<uint8_t>(a.offset),       static_cast<uint8_t>(a.size >> 16),
+                               static_cast<uint8_t>(a.size >> 8),    static_cast<uint8_t>(a.size)};
+    for (uint32_t i = 0; i < 7; i++) putByte(at + i, answer[i]);
+    moved_ = 7;
+    return STO_OK;
+  }
+  return STO_NOT_FOUND;
 }
 
 }  // namespace sc8

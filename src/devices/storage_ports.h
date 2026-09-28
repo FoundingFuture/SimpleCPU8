@@ -1,10 +1,12 @@
 // The storage device's ports, commands and status codes. A peripheral on IO
 // ports $50 to $5F that moves BASIC program text between the cartridge's
-// BAS chunk and data RAM. Slots are named, and a name is a NUL terminated
-// string in RAM the program points the device at. See docs/storage-design.md.
+// BAS chunk and data RAM, and finds the cartridge's assets by name. Slots are
+// named, and a name is a NUL terminated string in RAM the program points the
+// device at. See docs/storage-design.md and docs/design/font-design.md.
 #pragma once
 
 #include <cstdint>
+#include <string_view>
 
 #include "devices/gpu_ports.h"
 
@@ -40,7 +42,38 @@ constexpr NamedValue CMDS[] = {
     {"STO_SAVE", 0x02},     // the block up to its NUL, into the slot.
     {"STO_DELETE", 0x03},   // drop the slot.
     {"STO_CATALOG", 0x04},  // a line per name to the block, then a NUL.
+    // The asset named at the block, up to 16 bytes, in any case. Its answer
+    // replaces the name: a kind, three bytes of cartridge address and three
+    // of length, high byte first.
+    {"STO_FIND", 0x05},
 };
+
+// STO_FIND's kinds, one for each kind the cartridge's ASET chunk holds. The
+// name after STO_KIND_ is the ASET kind in capitals.
+constexpr NamedValue KINDS[] = {
+    {"STO_KIND_FONT", 1},
+    {"STO_KIND_FILE", 2},
+    {"STO_KIND_IMAGE", 3},
+    {"STO_KIND_PALETTE", 4},
+    {"STO_KIND_SAMPLE", 5},
+    {"STO_KIND_SPRITE", 6},
+};
+
+// The STO_KIND_ number of an ASET kind, or 0 for a kind the table lacks.
+constexpr int kindCode(std::string_view kind) {
+  constexpr std::string_view PREFIX = "STO_KIND_";
+  for (const NamedValue& k : KINDS) {
+    const std::string_view rest = k.name.substr(PREFIX.size());
+    if (rest.size() != kind.size()) continue;
+    bool same = true;
+    for (size_t i = 0; i < rest.size(); i++) {
+      const char c = kind[i] >= 'a' && kind[i] <= 'z' ? static_cast<char>(kind[i] - 'a' + 'A') : kind[i];
+      if (c != rest[i]) same = false;
+    }
+    if (same) return k.value;
+  }
+  return 0;
+}
 
 constexpr NamedValue STATUS[] = {
     {"STO_OK", 0},

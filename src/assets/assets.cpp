@@ -9,6 +9,7 @@
 #include <limits>
 #include <unordered_map>
 
+#include "assets/font.h"
 #include "miniaudio.h"
 
 #include "assets/decoders.h"
@@ -532,6 +533,22 @@ std::optional<std::vector<uint8_t>> loadSampleBytes(const std::vector<uint8_t>& 
   std::vector<SubItem> items = subItemsForSample(pcm);
   if (note && items[0].note) *note = *items[0].note;
   return std::move(items[0].bytes);
+}
+
+std::optional<std::vector<uint8_t>> loadFontFile(const std::filesystem::path& path, std::string* note) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return std::nullopt;
+  const std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(in), {});
+  return loadFontBytes(bytes, note);
+}
+
+std::optional<std::vector<uint8_t>> loadFontBytes(const std::vector<uint8_t>& bytes, std::string* note) {
+  const font::ReadResult r = font::read(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+  if (!r.font) {
+    if (note) *note = r.error;
+    return std::nullopt;
+  }
+  return font::blob(*r.font);
 }
 
 }  // namespace sc8

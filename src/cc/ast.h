@@ -76,7 +76,7 @@ enum class Storage { Auto, Static, Extern };
 // An asset initializer: `__image("ship.png")` and its four siblings. The
 // bytes come from a file beside the source when the cartridge is laid out,
 // so the tree carries the name and the form, never the bytes.
-enum class AssetForm { Image, Sprite, Palette, Sample, File };
+enum class AssetForm { Image, Sprite, Palette, Sample, File, Font };
 
 struct AssetInit {
   AssetForm form = AssetForm::File;
@@ -89,6 +89,9 @@ struct AssetInit {
 };
 
 std::string assetFormName(AssetForm f);
+// The kind the ROM's asset table gives it, the name of the assembler's
+// directive for the same thing: "image" for __image.
+std::string assetKind(AssetForm f);
 
 // An initializer is one expression, a brace list, an asset form, or absent.
 // A string for a char array is the one expression case with a Str node. An

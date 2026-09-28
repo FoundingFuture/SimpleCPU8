@@ -244,6 +244,10 @@ std::string storageHeader() {
   out.push_back(" * block has, NUL included, and write nothing when it is short. Read");
   out.push_back(" * sto_status() after a command: STO_OK, STO_NOT_FOUND, STO_FULL or");
   out.push_back(" * STO_BAD_NAME. sto_len() is how many bytes the last command moved.");
+  out.push_back(" *");
+  out.push_back(" * sto_find takes an asset's name in the block, in any case, and puts");
+  out.push_back(" * the answer there in its place: a STO_KIND_ byte, then three bytes");
+  out.push_back(" * of cartridge address and three of length, high byte first.");
   out.push_back(" */");
   out.push_back(std::string("#define sto_load(block, name, room) \\\n    (out(STO_ADDR_HI, ((unsigned int)(block)) >> 8), \\\n") +
                 "     out(STO_ADDR_LO, ((unsigned int)(block)) & 255), \\\n" +
@@ -268,6 +272,13 @@ std::string storageHeader() {
                 "     out(STO_LEN_HI, ((unsigned int)(room)) >> 8), \\\n" +
                 "     out(STO_LEN_LO, ((unsigned int)(room)) & 255), \\\n" +
                 "     out(STO_CMD, STO_CATALOG))");
+  out.push_back("");
+  out.push_back(std::string("#define sto_find(block) \
+    (out(STO_ADDR_HI, ((unsigned int)(block)) >> 8), \
+") +
+                "     out(STO_ADDR_LO, ((unsigned int)(block)) & 255), \
+" +
+                "     out(STO_CMD, STO_FIND))");
   out.push_back("");
   out.push_back("/* The three reads. No command, just a port. */");
   out.push_back(macro("sto_status", {}, "in(STO_STATUS)"));

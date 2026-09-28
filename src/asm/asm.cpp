@@ -471,9 +471,10 @@ class Assembler {
   // cartridge by nothing, so the length must come back from here.
   std::optional<Placed> dataDirective(int line, const std::string& kind, const std::string& name,
                                       const std::string& framesExpr = "") {
-    if (kind == "file" || kind == "sample") {
+    if (kind == "file" || kind == "sample" || kind == "font") {
       const std::vector<uint8_t>* bytes = nullptr;
       if (kind == "file") bytes = asset(files_, assets_ ? assets_->loadFile : nullptr, name);
+      else if (kind == "font") bytes = asset(fonts_, assets_ ? assets_->loadFont : nullptr, name);
       else bytes = asset(samples_, assets_ ? assets_->loadSample : nullptr, name);
       if (!bytes) {
         err(line, "unknown " + kind + ": " + name + " (add it to the project assets)");
@@ -545,6 +546,7 @@ class Assembler {
       files_ = assets_->files;
       images_ = assets_->images;
       samples_ = assets_->samples;
+      fonts_ = assets_->fonts;
     }
     enum class Section { Code, Ram, Data } section = Section::Code;
     int ramWidth = 1;
@@ -651,6 +653,8 @@ class Assembler {
               blobSizes_[*dataLabel] = placed->size;
               out_.assets.push_back({dir->kind, *dataLabel, static_cast<uint32_t>(placed->at),
                                      static_cast<uint32_t>(placed->size)});
+              out_.placedFiles.push_back({dir->kind, dir->name, static_cast<uint32_t>(placed->at),
+                                          static_cast<uint32_t>(placed->size)});
             }
           }
           continue;
@@ -1265,7 +1269,7 @@ class Assembler {
   // Byte length of the blob each asset-directive label names, for the size
   // macros.
   std::map<std::string, size_t> blobSizes_;
-  std::map<std::string, std::vector<uint8_t>> files_, samples_;
+  std::map<std::string, std::vector<uint8_t>> files_, samples_, fonts_;
   std::map<std::string, ImageAsset> images_;
 };
 

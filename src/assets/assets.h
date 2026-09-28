@@ -181,4 +181,10 @@ std::optional<ImageAsset> loadImageBytes(const std::vector<uint8_t>& bytes, std:
 std::optional<std::vector<uint8_t>> loadSampleFile(const std::filesystem::path& path, std::string* note);
 std::optional<std::vector<uint8_t>> loadSampleBytes(const std::vector<uint8_t>& bytes, std::string* note);
 
+// Read a .font and give the blob CMD_LOAD_FONT reads. Nothing on a file
+// that is missing or does not read, and then note, when given, receives
+// the reason with its line, as "line 3: ...".
+std::optional<std::vector<uint8_t>> loadFontFile(const std::filesystem::path& path, std::string* note);
+std::optional<std::vector<uint8_t>> loadFontBytes(const std::vector<uint8_t>& bytes, std::string* note);
+
 }  // namespace sc8

@@ -9,6 +9,7 @@
 
 #include "core/machine.h"
 #include "devices/constants.h"
+#include "core/cartridge.h"
 #include "devices/storage.h"
 
 using namespace sc8;
@@ -346,6 +347,7 @@ TEST_SUITE("storage enum matches the published tables") {
       {"STO_SAVE", STO_SAVE},
       {"STO_DELETE", STO_DELETE},
       {"STO_CATALOG", STO_CATALOG},
+      {"STO_FIND", STO_FIND},
   };
   constexpr Named STATUS_ENUM[] = {
       {"STO_OK", STO_OK},
@@ -399,5 +401,88 @@ TEST_SUITE("storage enum matches the published tables") {
     for (const NamedValue& p : PORTS) CHECK(portNamed(p.name) == p.value);
     for (const NamedValue& c : CMDS) CHECK(commandNamed(c.name) == c.value);
     for (const NamedValue& s : STATUS) CHECK(systemConstant(s.name) == s.value);
+    for (const NamedValue& k : KINDS) CHECK(systemConstant(k.name) == k.value);
+  }
+
+  TEST_CASE("names a kind for every kind the ASET chunk holds, STO_KIND_FONT first") {
+    CHECK_EQ(KINDS[0].name, "STO_KIND_FONT");
+    CHECK_EQ(KINDS[0].value, 1);
+    for (const char* k : {"file", "font", "image", "palette", "sample", "sprite"}) {
+      CAPTURE(k);
+      CHECK_GT(kindCode(k), 0);
+    }
+    CHECK_EQ(kindCode("font"), 1);
+    CHECK_EQ(kindCode("nonsense"), 0);
+  }
+}
+
+TEST_SUITE("STO_FIND") {
+  // An ASET list as a built ROM carries it.
+  std::vector<RomAsset> table() {
+    return {{"image", "ship", 0x000010, 64}, {"font", "small", 0x012345, 2050}, {"sample", "boom", 0x200, 0x10203}};
+  }
+
+  // The name at the block, then STO_FIND. The answer comes back there.
+  uint8_t find(Rig& r, std::string_view name) {
+    r.putText(BLOCK, name);
+    r.block(BLOCK, 0);
+    r.out(STO_CMD, STO_FIND);
+    return r.status();
+  }
+
+  std::vector<int> answer(Rig& r) {
+    std::vector<int> out;
+    for (size_t i = 0; i < 7; i++) out.push_back(r.ram[BLOCK + i]);
+    return out;
+  }
+
+  TEST_CASE("finds a name in any case, and answers kind, address and length, high byte first") {
+    Rig r;
+    std::vector<RomAsset> assets = table();
+    r.dev->attachAssets(&assets);
+    CHECK_EQ(find(r, "SMALL"), STO_OK);
+    CHECK(answer(r) == std::vector<int>{1, 0x01, 0x23, 0x45, 0x00, 0x08, 0x02});
+    CHECK_EQ(r.moved(), 7);
+    CHECK_EQ(find(r, "small"), STO_OK);
+    CHECK(answer(r) == std::vector<int>{1, 0x01, 0x23, 0x45, 0x00, 0x08, 0x02});
+    CHECK_EQ(find(r, "Boom"), STO_OK);
+    CHECK(answer(r) == std::vector<int>{kindCode("sample"), 0x00, 0x02, 0x00, 0x01, 0x02, 0x03});
+  }
+
+  TEST_CASE("a name the directory lacks is STO_NOT_FOUND, and leaves the name in place") {
+    Rig r;
+    std::vector<RomAsset> assets = table();
+    r.dev->attachAssets(&assets);
+    CHECK_EQ(find(r, "BIG"), STO_NOT_FOUND);
+    CHECK_EQ(r.textAt(BLOCK), "BIG");
+    CHECK_EQ(r.moved(), 0);
+  }
+
+  TEST_CASE("a ROM without ASET answers STO_NOT_FOUND for everything") {
+    Rig r;
+    CHECK_EQ(find(r, "SMALL"), STO_NOT_FOUND);
+    std::vector<RomAsset> none;
+    r.dev->attachAssets(&none);
+    CHECK_EQ(find(r, "SMALL"), STO_NOT_FOUND);
+  }
+
+  TEST_CASE("a name of 16 bytes is found, and one of 17 is a bad name") {
+    Rig r;
+    std::vector<RomAsset> assets = {{"file", "ABCDEFGHIJKLMNOP", 5, 6}};
+    r.dev->attachAssets(&assets);
+    CHECK_EQ(find(r, "abcdefghijklmnop"), STO_OK);
+    CHECK_EQ(find(r, "abcdefghijklmnopq"), STO_BAD_NAME);
+    CHECK_EQ(find(r, ""), STO_BAD_NAME);
+  }
+
+  TEST_CASE("the answer matches the ASET line of a built cartridge") {
+    Rig r;
+    Cartridge c;
+    c.data.assign(3000, 0);
+    c.assets.push_back({"font", "small", 100, 2050});
+    const Cartridge back = *decodeCartridge(encodeCartridge(c)).cartridge;
+    r.dev->attachAssets(&back.assets);
+    CHECK_EQ(find(r, "SMALL"), STO_OK);
+    CHECK(answer(r) == std::vector<int>{1, 0, 0, 100, 0, 0x08, 0x02});
   }
 }

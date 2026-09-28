@@ -456,11 +456,29 @@ hill:   db 32, 16
 | `__palette("x.png")` | `.palette('x.png')` | a picture's 256 colours |
 | `__sample("x.wav")` | `.sample('x.wav')` | a sound, made 8 bit mono at 8000 a second |
 | `__file("x.bin")` | `.file('x.bin')` | any bytes as they are |
+| `__font("x.font")` | `.font('x.font')` | a font drawn as text, 256 glyphs and the cell they were drawn for |
 
 PNG, JPEG, BMP and GIF pictures are read, and WAV, FLAC and MP3 sounds. A picture in other colours is moved onto the machine's palette,
 and the build says so. Transparent pixels become colour 0, which the
 graphics chip skips. `examples/bounce` is a C project with two sprites in
 `assets/`.
+
+Each directive also lists what it placed in the ROM's asset table, under
+its label. A running program finds it there by name, with the storage
+device's `STO_FIND`.
+
+A project with BASIC places every file in `assets/` without being asked,
+because BASIC names an asset rather than a label. Each is listed under
+its name without the extension, as its kind. A `.font` goes as a font, a
+picture as `.image` places it, a sound as `.sample` places it, and
+anything else as a file. A file a directive already placed is not
+placed twice. It gains a second name in the table.
+
+BASIC finds a name in any case, so the build refuses two files whose
+names differ only in case, and names both. A name BASIC cannot write
+gets a note, and the file is still placed. A BASIC name is a letter,
+then letters and digits, at most 10 of them. So `small-2.font` and
+`boss_theme.wav` get a note, and C and assembly still reach them.
 
 ## The ROM file
 

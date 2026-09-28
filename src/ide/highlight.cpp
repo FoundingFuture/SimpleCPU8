@@ -88,7 +88,7 @@ const std::set<std::string, std::less<>>& cKeywords() {
       "double",   "else",    "enum",    "extern", "float",    "for",      "goto",    "if",
       "inline",   "int",     "long",    "register", "return", "short",    "signed",  "sizeof",
       "static",   "struct",  "switch",  "typedef", "union",   "unsigned", "void",    "volatile",
-      "while",    "__ROM",   "__image", "__sprite", "__palette", "__sample", "__file", "NULL"};
+      "while",    "__ROM",   "__image", "__sprite", "__palette", "__sample", "__file", "__font", "NULL"};
   return words;
 }
 

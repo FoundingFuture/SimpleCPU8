@@ -48,6 +48,7 @@ struct Registry {
     add(acp::FMTS, System);
     add(acp::FLAG_BITS, System);
     add(storage::STATUS, System);
+    add(storage::KINDS, System);
   }
 };
 

@@ -91,6 +91,8 @@ struct CcInput {
 struct CcResult {
   std::string assembly;
   std::string romHeader;
+  // The program's __ROM objects, for a build that lists its assets.
+  std::vector<cc::RomEntry> rom;
   std::vector<std::string> errors;
 };
 

@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/cartridge.h"
 #include "devices/device.h"
 #include "devices/storage_ports.h"
 
@@ -37,6 +38,7 @@ enum Cmd : uint8_t {
   STO_SAVE = 0x02,
   STO_DELETE = 0x03,
   STO_CATALOG = 0x04,
+  STO_FIND = 0x05,
 };
 
 enum Status : uint8_t {
@@ -65,6 +67,9 @@ class Storage : public ChainedDevice {
   // changed it. Both may be null. A command then reports STO_NOT_FOUND or
   // STO_FULL, as if the cartridge held no slots and had no room.
   void attach(BasicSlots* slots, std::function<void()> onChange);
+  // The cartridge's ASET entries, which STO_FIND searches by name. Null, or
+  // an empty list, and every name is STO_NOT_FOUND.
+  void attachAssets(const std::vector<RomAsset>* assets) { assets_ = assets; }
 
   // The machine's data RAM, RAM_SIZE bytes, like the ACP takes it.
   void attachRam(uint8_t* ram) { ram_ = ram; }
@@ -75,6 +80,7 @@ class Storage : public ChainedDevice {
  private:
   uint8_t* ram_ = nullptr;
   BasicSlots* slots_ = nullptr;
+  const std::vector<RomAsset>* assets_ = nullptr;
   std::function<void()> onChange_;
 
   uint8_t addrHi_ = 0;
@@ -95,6 +101,7 @@ class Storage : public ChainedDevice {
   uint8_t save();
   uint8_t remove();
   uint8_t catalog();
+  uint8_t findAsset();
 };
 
 }  // namespace sc8

@@ -533,8 +533,18 @@ project::Built Ide::buildInMemory() {
   // same list a carried project reads.
   const bool inMemory = carriedProject_ || !romBase_;
   Assets assets = inMemory ? project::loadersFrom(carrier, &notes) : project::loaders(layout(), &notes);
+  // The asset files by name, which a project with BASIC places on the
+  // cartridge for STO_FIND.
+  std::vector<std::string> assetNames;
+  if (inMemory) {
+    for (const auto& [name, bytes] : romFiles_) {
+      if (name.starts_with("assets/")) assetNames.push_back(name.substr(7));
+    }
+  } else {
+    for (const std::filesystem::path& p : project::assetFiles(layout())) assetNames.push_back(p.filename().string());
+  }
   project::Built built = project::buildSources(sources(), assets, project::Options{}, projectTitle_, "",
-                                               carriedProject_ ? std::optional<Cartridge>{} : romBase_);
+                                               carriedProject_ ? std::optional<Cartridge>{} : romBase_, assetNames);
   built.notes.insert(built.notes.begin(), notes.begin(), notes.end());
   // A ROM without a project keeps its program, and its slots and
   // microcode are not a project that builds on its own. Carried in the

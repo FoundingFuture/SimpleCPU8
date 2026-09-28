@@ -110,6 +110,12 @@ int main(int argc, char** argv) {
     report(name, note);
     return pcm;
   };
+  assets.loadFont = [&](std::string_view name) {
+    std::string note;
+    auto blob = loadFontFile(dir / fs::path(name), &note);
+    report(name, note);
+    return blob;
+  };
   opts.assets = &assets;
   CcResult r = compile(inputs, opts);
   for (const std::string& e : r.errors) std::fprintf(stderr, "%s\n", e.c_str());
