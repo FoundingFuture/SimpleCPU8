@@ -119,7 +119,7 @@ A name the entries lack is STO_NOT_FOUND, and the block is left alone.
 | Value | Name | Meaning |
 |---|---|---|
 | 0 | STO_OK | the command did what it says |
-| 1 | STO_NOT_FOUND | LOAD or DELETE named a slot the cartridge lacks |
+| 1 | STO_NOT_FOUND | LOAD, DELETE or FIND named a slot or an asset the cartridge lacks |
 | 2 | STO_FULL | a cap was hit: 64 slots, 65535 bytes, or the room at the block |
 | 3 | STO_BAD_NAME | the name is empty, over 16 bytes, unterminated, or holds a byte outside 33 to 126 |
 | 4 | STO_BAD_CMD | STO_CMD took a value the device lacks |

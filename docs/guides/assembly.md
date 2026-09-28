@@ -291,9 +291,10 @@ arithmetic instructions take only a zero page address or a constant. So
 the variables a program uses most go in the zero page, and everything
 else is reached through a pointer.
 
-The text screen lives at `$FAC0` when the GPU is in text mode, 42 by
-32 bytes. That is the block BASIC's `POKE 64192,65` wrote to. In
-graphics mode, which is the power on mode, those bytes are free RAM. No
+A text screen lives where the program maps it when the GPU is in text
+mode: 42 by 32 bytes at `$FAC0` by the C convention, and 4 KB at `$F000`
+for BASIC, the block BASIC's `POKE 61440,65` wrote to. In graphics mode,
+which is the power on mode, those bytes are free RAM. No
 data address is illegal. An address past `$FFFF` wraps to zero, so a
 pointer walked off the end reads address 0.
 
@@ -930,8 +931,8 @@ prints its score this way.
 `CMD_SET_TEXTMODE` switches the screen to read characters from RAM at
 the address in `GPU_ADDR_HI` and `GPU_ADDR_LO`. The grid is read row
 after row, one byte a character, as many columns to a row as the grid
-has. BASIC runs in that mode with the buffer at `$FAC0`, so a store to
-`$FAC0` shows a character at the top left. `CMD_SET_GRAPHICSMODE`
+has. BASIC runs in that mode with the buffer at `$F000`, so a store to
+`$F000` shows a character at the top left. `CMD_SET_GRAPHICSMODE`
 switches back.
 
 A glyph is 8 rows of 8 pixels, one byte a row with bit 0 the left

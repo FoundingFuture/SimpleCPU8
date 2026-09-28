@@ -1,6 +1,6 @@
 // BASIC, written in C, running on the CPU. The fourth layer.
 //
-// The screen is text mode mapped at $FAC0, so what the interpreter printed is
+// The screen is text mode mapped at $F000, so what the interpreter printed is
 // readable straight out of RAM. That is also how a person sees it.
 //
 // Ported from the browser project's basic.test.ts. That file drove a
@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "assets/font.h"
 #include "basic/basic_rom.h"
 #include "basic/program.h"
 #include "core/cartridge.h"
@@ -38,9 +39,9 @@ using namespace sc8;
 
 namespace {
 
-constexpr int SCREEN = 0xfac0;
-constexpr int COLS = 42;
-constexpr int ROWS = 32;
+// The screen is 4 KB at basic::SCREEN, and the grid is whatever the system
+// page says: SYS_COLS and SYS_ROWS, which the interpreter reads from the GPU.
+constexpr int SCREEN = basic::SCREEN;
 
 const Microcode& optimal() {
   static const Microcode mc = buildOptimal();
@@ -93,6 +94,7 @@ struct Session {
     storage.powerOn();
     storage.attachRam(m->ram.data());
     storage.attach(&slots, [this] { changes++; });
+    storage.attachAssets(&cart.assets);
     m->ram.fill(0);
     std::copy(cart.ram.begin(), cart.ram.end(), m->ram.begin());
   }
@@ -110,10 +112,12 @@ std::unique_ptr<Session> boot() {
 // Everything on screen, trailing blanks trimmed off each row.
 std::vector<std::string> screen(const Session& s) {
   std::vector<std::string> out;
-  for (int y = 0; y < ROWS; y++) {
+  const int cols = s.m->ram[basic::SYS_COLS];
+  const int rows = s.m->ram[basic::SYS_ROWS];
+  for (int y = 0; y < rows; y++) {
     std::string line;
-    for (int x = 0; x < COLS; x++) {
-      line += static_cast<char>(s.m->ram[static_cast<size_t>(SCREEN + y * COLS + x)]);
+    for (int x = 0; x < cols; x++) {
+      line += static_cast<char>(s.m->ram[static_cast<size_t>(SCREEN + y * cols + x)]);
     }
     while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) line.pop_back();
     out.push_back(line);
@@ -150,7 +154,7 @@ bool has(const std::string& t, const std::string& needle) { return t.find(needle
 // message the terminal wrapped at the edge still reads whole.
 std::string flat(const Session& s) {
   std::string t;
-  for (int i = 0; i < ROWS * COLS; i++) {
+  for (int i = 0; i < s.m->ram[basic::SYS_ROWS] * s.m->ram[basic::SYS_COLS]; i++) {
     const char c = static_cast<char>(s.m->ram[static_cast<size_t>(SCREEN + i)]);
     const char ch = std::isprint(static_cast<unsigned char>(c)) ? c : ' ';
     if (ch == ' ' && !t.empty() && t.back() == ' ') continue;
@@ -2027,13 +2031,176 @@ TEST_SUITE("the system page") {
     const size_t end = header.find("#define SYS_END");
     REQUIRE(end != std::string::npos);
     CHECK_EQ(std::stoi(header.substr(header.find("0x", end)), nullptr, 16), basic::SYSTEM_PAGE_SIZE);
-    const size_t read = header.find("#define SYS_READ");
-    REQUIRE(read != std::string::npos);
-    CHECK_EQ(std::stoi(header.substr(header.find("0x", read)), nullptr, 16), basic::SYS_READ);
+    const auto defined = [&](const char* name) {
+      const size_t at = header.find(std::string("#define ") + name + " ");
+      REQUIRE_MESSAGE(at != std::string::npos, name);
+      return std::stoi(header.substr(header.find("0x", at)), nullptr, 16);
+    };
+    CHECK_EQ(defined("SYS_READ"), basic::SYS_READ);
+    CHECK_EQ(defined("SYS_COLS"), basic::SYS_COLS);
+    CHECK_EQ(defined("SYS_ROWS"), basic::SYS_ROWS);
+    CHECK_EQ(defined("SYS_COL"), basic::SYS_COL);
+    CHECK_EQ(defined("SYS_ROW"), basic::SYS_ROW);
+    CHECK_EQ(defined("SCREEN"), basic::SCREEN);
     const std::string asmText(basicAsm());
     const size_t sys = asmText.find("__sys:");
     REQUIRE(sys != std::string::npos);
     const std::string line = asmText.substr(sys, asmText.find('\n', sys) - sys);
     CHECK(has(line, "ds " + std::to_string(basic::SYSTEM_PAGE_SIZE)));
+    // The interpreter's heap stack starts at its screen, which the build
+    // passes as --heap-stack-top.
+    CHECK(has(asmText, "LD D1 <- " + std::to_string(basic::SCREEN) + "\n        LD D3 <- D1"));
   }
 }
+
+// Fonts and the text grid: LOADFONT and SETTEXT. The screen is 4 KB at
+// $F000 and the grid lives on the system page. docs/design/font-design.md.
+namespace {
+
+// Pixels at `fg` in the w by h cell at col, row of a composed frame.
+int litInCell(const Gpu::Frame& f, int col, int row, int w, int h, int fg) {
+  int n = 0;
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      if (f[static_cast<size_t>((row * h + y) * gpu::SCREEN_W + col * w + x)] == fg) n++;
+    }
+  }
+  return n;
+}
+
+// A BASIC project with an 8 by 8 font whose A is a solid block, and a
+// picture beside it, booted.
+std::unique_ptr<Session> bootWithFont() {
+  TempProject p;
+  p.write("demo.bas", "10 PRINT 1\n");
+  font::Font f;
+  f.width = 8;
+  f.height = 8;
+  for (size_t r = 0; r < 8; r++) f.glyphs['A' * 8 + r] = 0xff;
+  std::filesystem::create_directories(p.path / "assets");
+  std::ofstream(p.path / "assets" / "small.font") << font::write(f);
+  std::ofstream(p.path / "assets" / "ship.png", std::ios::binary) << "not a picture, a file";
+  auto s = std::make_unique<Session>(p.build());
+  s->load();
+  settle(*s);
+  return s;
+}
+
+}  // namespace
+
+TEST_SUITE("fonts and the text grid") {
+  TEST_CASE("BASIC boots at 42 by 32 with its screen at $F000") {
+    auto s = boot();
+    settle(*s);
+    CHECK_EQ(s->m->ram[basic::SYS_COLS], 42);
+    CHECK_EQ(s->m->ram[basic::SYS_ROWS], 32);
+    CHECK_EQ(s->gpu.textBase, 0xF000);
+    const std::string top(reinterpret_cast<const char*>(&s->m->ram[0xF000]), 17);
+    CHECK_EQ(top, "SimpleCPU-8 BASIC");
+  }
+
+  TEST_CASE("SETTEXT 8, 8 gives 32 by 32, and the cursor wraps at column 32") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "SETTEXT 8, 8");
+    CHECK_EQ(s->m->ram[basic::SYS_COLS], 32);
+    CHECK_EQ(s->m->ram[basic::SYS_ROWS], 32);
+    CHECK_EQ(s->gpu.read(gpu::GPU_TEXT_COLS), 32);
+    // The guide's example: boxes 34 and 35 are the grid.
+    CHECK_EQ(printed(*s, "PRINT PEEK(34),PEEK(35)"), "32 32");
+    type(*s, "PRINT \"" + std::string(33, 'X') + "\"");
+    const auto scr = screen(*s);
+    bool wrapped = false;
+    for (size_t row = 0; row + 1 < scr.size(); row++) {
+      if (scr[row] == std::string(32, 'X') && scr[row + 1] == "X") wrapped = true;
+    }
+    CHECK(wrapped);
+  }
+
+  TEST_CASE("SETTEXT 4, 4 gives 64 by 64 and scrolls at row 64") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "SETTEXT 4, 4");
+    CHECK_EQ(s->m->ram[basic::SYS_COLS], 64);
+    CHECK_EQ(s->m->ram[basic::SYS_ROWS], 64);
+    type(*s, "FOR I=1 TO 70: PRINT I: NEXT I", 40000000);
+    const auto scr = screen(*s);
+    REQUIRE_EQ(scr.size(), 64u);
+    CHECK(std::find(scr.begin(), scr.end(), "70") != scr.end());
+    CHECK(std::find(scr.begin(), scr.end(), "5") == scr.end());
+    CHECK_LT(s->m->ram[basic::SYS_ROW], 64);
+  }
+
+  TEST_CASE("SETTEXT outside 4 to 8 is error 32 and leaves the grid as it was") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "SETTEXT 8, 8");
+    type(*s, "SETTEXT 3, 8");
+    CHECK(has(flat(*s), "TEXT SIZE IS OUT OF RANGE [4,8]"));
+    CHECK_EQ(s->m->ram[0x12], 32);
+    CHECK_EQ(s->m->ram[basic::SYS_COLS], 32);
+    CHECK_EQ(s->gpu.read(gpu::GPU_TEXT_COLS), 32);
+    type(*s, "SETTEXT 8, 9");
+    CHECK_EQ(s->m->ram[0x12], 32);
+    CHECK_EQ(s->m->ram[basic::SYS_ROWS], 32);
+    CHECK_EQ(s->m->status, Status::Running);
+  }
+
+  TEST_CASE("SYS_COL and SYS_ROW stay inside the grid after a scroll") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "SETTEXT 8, 8");
+    type(*s, "FOR I=1 TO 40: PRINT \"" + std::string(31, 'Y') + "\": NEXT I", 40000000);
+    CHECK_LT(s->m->ram[basic::SYS_COL], 32);
+    CHECK_LT(s->m->ram[basic::SYS_ROW], 32);
+  }
+
+  TEST_CASE("LOADFONT SMALL draws with the font's glyphs and cell, and LIST keeps the name") {
+    auto s = bootWithFont();
+    type(*s, "10 loadfont small");
+    // Row 3, column 4 of a 32 column grid, clear of the READY that RUN's
+    // end prints at the top.
+    type(*s, "20 POKE 61440+100,65");
+    type(*s, "LIST");
+    CHECK(has(text(*s), "10 LOADFONT small"));
+    type(*s, "RUN");
+    CHECK_EQ(s->m->ram[basic::SYS_COLS], 32);
+    CHECK_EQ(s->m->ram[basic::SYS_ROWS], 32);
+    CHECK_EQ(s->gpu.glyphRowOf('A', 0), 0xff);
+    CHECK_EQ(litInCell(s->gpu.composeFrame(), 4, 3, 8, 8, s->gpu.textColor), 64);
+  }
+
+  TEST_CASE("LOADFONT alone brings back 6 by 8, 42 by 32 and the built-in glyphs") {
+    auto s = bootWithFont();
+    type(*s, "LOADFONT SMALL");
+    CHECK_EQ(s->m->ram[basic::SYS_COLS], 32);
+    type(*s, "LOADFONT");
+    CHECK_EQ(s->m->ram[basic::SYS_COLS], 42);
+    CHECK_EQ(s->m->ram[basic::SYS_ROWS], 32);
+    CHECK_EQ(s->gpu.glyphRowOf('A', 0), glyphRow('A', 0));
+  }
+
+  TEST_CASE("LOADFONT of a name that is no font on the cartridge is error 33") {
+    auto s = bootWithFont();
+    type(*s, "LOADFONT NOPE");
+    CHECK(has(flat(*s), "NO FONT CALLED NOPE ON THE CARTRIDGE"));
+    CHECK_EQ(s->m->ram[0x12], 33);
+    type(*s, "CLS");
+    type(*s, "LOADFONT ship");
+    CHECK(has(flat(*s), "NO FONT CALLED SHIP ON THE CARTRIDGE"));
+    CHECK_EQ(s->m->ram[basic::SYS_COLS], 42);
+    // BASIC's own ROM carries no ASET at all.
+    auto plain = boot();
+    settle(*plain);
+    type(*plain, "LOADFONT SMALL");
+    CHECK(has(flat(*plain), "NO FONT CALLED SMALL ON THE CARTRIDGE"));
+  }
+
+  TEST_CASE("LOADFONT and SETTEXT are stored in capitals, the name as typed") {
+    CHECK_EQ(basic::canonicalLine("loadfont small"), "LOADFONT small");
+    CHECK_EQ(basic::canonicalLine("settext 8, 8"), "SETTEXT 8, 8");
+    CHECK(basic::basicKeywords().count("LOADFONT") == 1);
+    CHECK(basic::basicKeywords().count("SETTEXT") == 1);
+  }
+}
+

@@ -27,8 +27,16 @@ constexpr size_t PROGRAM_MAX = 6144;
 constexpr uint16_t SYS_PROG = 0x08;
 constexpr uint16_t SYS_PROG_LEN = 0x0A;
 constexpr uint16_t SYS_RUNNING = 0x15;
+constexpr uint16_t SYS_COL = 0x05;
+constexpr uint16_t SYS_ROW = 0x06;
 // Where READ takes its next value, 0 for the first one.
 constexpr uint16_t SYS_READ = 0x20;
+// The text grid's columns and rows, read from the GPU after every cell change.
+constexpr uint16_t SYS_COLS = 0x22;
+constexpr uint16_t SYS_ROWS = 0x23;
+// BASIC's text screen, 4 KB up to the top of RAM, room for a 64 by 64 grid.
+// The interpreter's heap stack starts here, with --heap-stack-top.
+constexpr int SCREEN = 0xF000;
 // The page's size, SYS_END in basic.h and the interpreter's -zp-reserve.
 constexpr int SYSTEM_PAGE_SIZE = 0x30;
 

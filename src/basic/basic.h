@@ -7,15 +7,17 @@
 #include <sys.h>
 #include <storage.h>
 
-/* The screen is mapped at the top of RAM, and the C stack starts just below
- * it and grows down, so the two never meet.
+/* The screen is 4 KB at the top of RAM, room for the 64 by 64 grid of a
+ * 4 by 4 cell. The C stack starts just below it and grows down, so the two
+ * never meet: the build passes --heap-stack-top 0xF000.
  *
- * The grid is 42 by 32, which is 1344 bytes, so the buffer starts that far
- * below the top rather than at the round number a 32 column screen used.
+ * The grid is the GPU's: 42 by 32 at power on, and whatever LOADFONT or
+ * SETTEXT made it since. COLS and ROWS read it off the system page, where
+ * term_grid puts it. docs/design/font-design.md.
  */
-#define SCREEN   0xFAC0
-#define COLS     42
-#define ROWS     32
+#define SCREEN   0xF000
+#define COLS     (*(unsigned char *)SYS_COLS)
+#define ROWS     (*(unsigned char *)SYS_ROWS)
 
 /* How much room the program text and the string heap get. Both are plain
  * global arrays: this machine has 64K of data RAM and no allocator.
@@ -56,6 +58,10 @@ unsigned char key_get(void);
 void key_push(unsigned char k);
 unsigned char key_break(void);
 void term_init(void);
+/* Read the GPU's grid into SYS_COLS and SYS_ROWS, clear the screen and put
+ * the cursor home. After every change of font or cell.
+ */
+void term_grid(void);
 void term_paper(unsigned char c);
 void term_cls(void);
 void term_putc(unsigned char c);
@@ -173,6 +179,8 @@ extern unsigned char loop_back;
 #define E_NOTDATA 29  /* RESTORE n or DATA(n) of a line that holds no DATA */
 #define E_DATABYTE 30 /* a DATA value that does not fit in a byte */
 #define E_HEXWIDTH 31 /* HEX$'s width is not 1 to 4 */
+#define E_TEXTSIZE 32 /* SETTEXT's width or height is not 4 to 8 */
+#define E_NOFONT  33  /* LOADFONT named no font on the cartridge */
 
 /* CALL, JMP and USR take a routine's slot. A name there works only in a
  * project the builder resolved, so a name that is no variable gets its
@@ -210,8 +218,8 @@ int var_slot(void);
 #define SYS_BANG_VEC    0x00  /* word: the bang handler's instruction slot */
 #define SYS_BANG_TEXT   0x02  /* word: the statement's text while a handler runs */
 #define SYS_RESULT      0x04  /* byte: the A a bang handler or a JSR routine came back with */
-#define SYS_COL         0x05  /* byte: cursor column, 0 to 41 */
-#define SYS_ROW         0x06  /* byte: cursor row, 0 to 31 */
+#define SYS_COL         0x05  /* byte: cursor column, 0 to SYS_COLS minus 1 */
+#define SYS_ROW         0x06  /* byte: cursor row, 0 to SYS_ROWS minus 1 */
 #define SYS_KEY         0x07  /* byte: the last key pressed, 0 when none yet */
 #define SYS_PROG        0x08  /* word: where the stored program starts */
 #define SYS_PROG_LEN    0x0A  /* word: its length in bytes */
@@ -225,7 +233,9 @@ int var_slot(void);
 #define SYS_CALL        0x18  /* word: the instruction slot the last JSR or JMP went to */
 #define SYS_USR         0x1A  /* 3 words: USR's parameters on the way in, its answer on the way out */
 #define SYS_READ        0x20  /* word: offset in the program of READ's next value, 0 for the first */
-/* $22 to $2F are reserved. */
+#define SYS_COLS        0x22  /* byte: the text grid's columns, from the GPU */
+#define SYS_ROWS        0x23  /* byte: the text grid's rows, from the GPU */
+/* $24 to $2F are reserved. */
 #define SYS_END         0x30  /* the first byte the compiler may use */
 
 /* A word into the page, high byte first, the way DOKE stores one. */

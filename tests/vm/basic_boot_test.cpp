@@ -17,13 +17,17 @@ using namespace sc8;
 
 namespace {
 
-// The text screen, 42 x 32 cells at $FAC0, as one string with newlines.
+#if SC8_HAVE_BASIC
+// BASIC's text screen as one string with newlines: the grid the system page
+// gives, at basic::SCREEN.
 std::string screenText(const Machine& m) {
   std::string out;
-  for (int row = 0; row < 32; row++) {
+  const int cols = m.ram[basic::SYS_COLS];
+  const int rows = m.ram[basic::SYS_ROWS];
+  for (int row = 0; row < rows; row++) {
     std::string line;
-    for (int col = 0; col < 42; col++) {
-      const uint8_t c = m.ram[static_cast<size_t>(0xFAC0 + row * 42 + col)];
+    for (int col = 0; col < cols; col++) {
+      const uint8_t c = m.ram[static_cast<size_t>(basic::SCREEN + row * cols + col)];
       line += (c >= 32 && c < 127) ? static_cast<char>(c) : ' ';
     }
     while (!line.empty() && line.back() == ' ') line.pop_back();
@@ -31,6 +35,7 @@ std::string screenText(const Machine& m) {
   }
   return out;
 }
+#endif
 
 void runFrames(Computer& c, int frames) {
   for (int i = 0; i < frames; i++) {

@@ -165,6 +165,8 @@ static void say_error(void)
     else if (err == E_NOTDATA) { term_puts("LINE "); term_putn(err_arg); term_puts(" HOLDS NO DATA"); }
     else if (err == E_DATABYTE) term_puts("A DATA VALUE IS ONE BYTE: -128 TO 255");
     else if (err == E_HEXWIDTH) term_puts("HEX WIDTH IS OUT OF RANGE [1,4]");
+    else if (err == E_TEXTSIZE) term_puts("TEXT SIZE IS OUT OF RANGE [4,8]");
+    else if (err == E_NOFONT) { term_puts("NO FONT CALLED "); term_puts(err_found); term_puts(" ON THE CARTRIDGE"); }
     else if (err == E_ROUTINE) {
         term_puts(err_found);
         term_puts(" IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: USE ITS NUMBER HERE");
@@ -529,6 +531,47 @@ static unsigned char statement(void)
         }
     }
     if (lx_is("PAPER")) { lx_next(); term_paper(ex_int()); return 1; }
+    /* LOADFONT name: the font of that name on the cartridge, which the
+     * storage device finds in any case. LOADFONT alone: the built-in font.
+     * The grid follows the font's cell, and the screen starts over.
+     */
+    if (lx_is("LOADFONT")) {
+        lx_next();
+        if (lx_tok == T_END || lx_is(":")) { gpu_reset_font(); term_grid(); return 1; }
+        if (lx_tok != T_NAME) { rt_expect("A FONT NAME AFTER LOADFONT"); return 1; }
+        {
+            /* STO_FIND's answer: a kind, three bytes of cartridge address,
+             * three of length. A local, so the zero page keeps what the
+             * interpreter's loops use.
+             */
+            unsigned char found[7];
+            sto_find(found, lx_word);
+            if (sto_status() != STO_OK || found[0] != STO_KIND_FONT) { rt_error(E_NOFONT); return 1; }
+            gpu_load_font(found[1], found[2], found[3]);
+        }
+        lx_next();
+        term_grid();
+        return 1;
+    }
+    /* SETTEXT w, h: the cell in pixels, 4 to 8 each, checked before the GPU
+     * hears of it. A size the GPU refuses would stop the machine.
+     */
+    if (lx_is("SETTEXT")) {
+        lx_next();
+        {
+            int w;
+            int h;
+            w = ex_int();
+            if (!lx_is(",")) { rt_expect(", AND THE HEIGHT"); return 1; }
+            lx_next();
+            h = ex_int();
+            if (err) return 1;
+            if (w < 4 || w > 8 || h < 4 || h > 8) { rt_error(E_TEXTSIZE); return 1; }
+            gpu_text_cell(w, h);
+            term_grid();
+            return 1;
+        }
+    }
     if (lx_is("WAIT")) {
         lx_next();
         {

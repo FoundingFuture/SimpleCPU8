@@ -218,7 +218,7 @@ STO_NAME_LO. A name the directory lacks sets STO_STATUS to `STO_NOT_FOUND`.
 
 The answer is seven bytes written at STO_ADDR_HI and STO_ADDR_LO,
 high byte first. One byte of kind, three of cartridge address, three of
-length. The kinds are named constants in src/devices/storage_ports.h and in
+length. STO_LEN then reads 7, the bytes moved. The kinds are named constants in src/devices/storage_ports.h and in
 the registry, `STO_KIND_FONT` among them.
 
 The host hands the storage device the directory the way it hands it the BAS
@@ -232,8 +232,9 @@ the cartridge. Each gets a line in ASET, by kind and by the file's stem:
 above. Lines a directive placed keep their assembly labels.
 
 A name matches ignoring case. The build refuses two stems that differ only
-in case. It reports a stem BASIC cannot write as a note: one holding a
-dash, a `_` or a dot, or longer than 10 characters.
+in case. It reports a stem BASIC cannot write as a note. BASIC's own rule
+decides: a letter, then letters and digits, at most 10 of them. So a dash,
+a `_`, a dot, a leading digit or a space each earns the note.
 
 ### Directives
 

@@ -80,3 +80,37 @@ TEST_SUITE("the C stack clears the text screen") {
     CHECK(sp <= RAM_SIZE - cc::TEXT_COLS * cc::TEXT_ROWS);
   }
 }
+
+// --heap-stack-top moves the heap stack's first byte down, for a program
+// that keeps a larger screen above it. BASIC's text buffer is 4 KB at
+// $F000, so BASIC and a project with BASIC pass $F000. Every other program
+// keeps $FAC0.
+TEST_SUITE("the heap stack top") {
+  TEST_CASE("is $FAC0 unless asked, the top of RAM less the power-on grid") {
+    CHECK_EQ(cc::C_STACK_TOP, 0xFAC0);
+    const std::string a = compile("int main(void) { return 0; }");
+    CHECK(has(a, "LD D1 <- 64192\n        LD D3 <- D1"));
+  }
+
+  TEST_CASE("is the address given, where D3 starts") {
+    CcOptions opts;
+    opts.heapStackTop = 0xF000;
+    const std::string a = compile("int f(int x) { return x + 1; } int main(void) { return f(1); }", opts);
+    CHECK(has(a, "LD D1 <- 61440\n        LD D3 <- D1"));
+    CHECK_FALSE(has(a, "64192"));
+  }
+
+  TEST_CASE("keeps a sized heap stack under the top given") {
+    CcOptions opts;
+    opts.heapStackTop = 0xF000;
+    opts.heapStackSize = 0xF000;
+    std::string why;
+    try {
+      compile("int main(void) { return 0; }", opts);
+    } catch (const CcError& e) {
+      why = e.message();
+    }
+    CHECK(has(why, "a heap stack of 61440 bytes reaches down to $0000"));
+  }
+}
+

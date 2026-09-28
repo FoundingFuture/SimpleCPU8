@@ -670,6 +670,7 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
       // build line names its own files, which would leave the user's
       // out, so it is turned into a plain comment of the same length.
       ccOpts.zpReserve = basic::SYSTEM_PAGE_SIZE;
+      ccOpts.heapStackTop = basic::SCREEN;
       for (const auto& [name, text] : basicSources()) {
         if (name.ends_with(".h")) {
           ccOpts.extra[name] = text;

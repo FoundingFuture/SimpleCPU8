@@ -112,8 +112,8 @@ const Card CARDS[] = {
      "so only one of them can step per cycle. That is conflict rule 7."},
     {"RAM", "RAM · data memory, 64K", "memory",
      "65536 bytes of data RAM. The first 256 bytes are the zero page, reachable with a one byte address. The D "
-     "registers reach all of it. Text mode can map a 1344-byte character screen here. $FAC0, the top of RAM, "
-     "is the convention."},
+     "registers reach all of it. Text mode can map a character screen here: a C program's goes at $FAC0, "
+     "1344 bytes up to the top of RAM, and BASIC's at $F000, 4 KB for a grid of up to 64 by 64."},
     {"EA", "EA · effective address adder", "combinational · forgets every cycle",
      "EA stands for effective address: the address that actually takes effect on RAM this cycle, after all "
      "the addressing math is done. The EA adder computes it fresh, every cycle, from three ingredients: a "

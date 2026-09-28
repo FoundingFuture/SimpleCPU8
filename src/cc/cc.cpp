@@ -526,7 +526,7 @@ Program compileProgram(const std::vector<SourceFile>& files, const CcOptions& op
     }
   }
   const Compiled out = compileUnitTree(merged, plan.softMul || opts.defines.count("SOFT_MUL") > 0, opts.profile,
-                                       opts.zpReserve, opts.assets, heapStack);
+                                       opts.zpReserve, opts.assets, heapStack, opts.heapStackTop);
   Program p;
   static_cast<Compiled&>(p) = out;
   for (const SourceFile& f : chosen) p.files.push_back(f.name);

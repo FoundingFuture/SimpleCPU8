@@ -9,6 +9,7 @@
 #include "raylib.h"
 #include "rlImGui.h"
 
+#include "cc/layout.h"
 #include "ide/highlight.h"
 #include "ide/ide.h"
 #include "ide/panes.h"
@@ -222,7 +223,13 @@ void Ide::memoryBody() {
   ImGui::SameLine();
   if (ImGui::SmallButton("D3")) memJump_ = memAddr_ = m.d3 & 0xfff0;
   ImGui::SameLine();
-  if (ImGui::SmallButton("text screen")) memJump_ = memAddr_ = 0xFAC0;
+  // The screen the GPU reads, wherever the program mapped it: $F000 for
+  // BASIC, $FAC0 by the C convention. Before a program maps one, $FAC0.
+  if (ImGui::SmallButton("text screen")) {
+    const Gpu& g = computer_.gpu();
+    memJump_ = memAddr_ = g.textMapped ? g.textBase : cc::C_STACK_TOP;
+  }
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("the character screen text mode reads, where the program mapped it");
   ImGui::SameLine();
   ImGui::Checkbox("follow the bus", &memFollow_);
   std::optional<int> hot;

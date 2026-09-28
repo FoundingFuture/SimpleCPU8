@@ -475,6 +475,21 @@ TEST_SUITE("assets on the cartridge by name") {
     CHECK_EQ(entry(*b.cartridge, "ok")->kind, "file");
   }
 
+  TEST_CASE("a BASIC and C project places its font and starts its heap stack below BASIC's screen") {
+    TempDir t;
+    write(t.path / "src" / "autorun.bas", "10 LOADFONT SMALL\n20 CALL DOUBLE\n");
+    write(t.path / "src" / "double.c", "void DOUBLE(void) { }\n");
+    write(t.path / "assets" / "small.font", font::write(font::builtIn()));
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    const RomAsset* f = entry(*b.cartridge, "small");
+    REQUIRE(f);
+    CHECK_EQ(f->kind, "font");
+    CHECK(b.assembly.find("LD D1 <- " + std::to_string(basic::SCREEN) + "\n        LD D3 <- D1") != std::string::npos);
+    // LIST shows the name: it is not a label, so the build leaves it alone.
+    CHECK(b.cartridge->basic[0].second.find("10 LOADFONT SMALL") != std::string::npos);
+  }
+
   TEST_CASE("a .font that does not read stops the build at its line") {
     project::Built b = basicInMemory({{"bad.font", {'n', 'o', '\n'}}});
     CHECK_FALSE(b.cartridge);

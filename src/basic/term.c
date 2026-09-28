@@ -59,7 +59,7 @@ void term_init(void)
      * character is a store and the GPU shows it on the next frame.
      */
     gpu_set_textmode(SCREEN >> 8, SCREEN & 255);
-    term_cls();
+    term_grid();
 
     /* The key buffer is hardware and survives a program load, which is
      * deliberate. So whatever was typed at the LAST program is still queued,
@@ -79,6 +79,13 @@ void term_paper(unsigned char c)
 {
     paper = c;
     gpu_clear(c);
+}
+
+void term_grid(void)
+{
+    COLS = in(GPU_TEXT_COLS);
+    ROWS = in(GPU_TEXT_ROWS);
+    term_cls();
 }
 
 void term_cls(void)

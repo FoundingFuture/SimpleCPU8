@@ -165,9 +165,10 @@ int intBytes(const std::string& length) {
 
 class Gen {
  public:
-  Gen(const Unit& unit, bool softMul, const Profile* profile, int zpReserve, const Assets* assets, int heapStackSize)
+  Gen(const Unit& unit, bool softMul, const Profile* profile, int zpReserve, const Assets* assets, int heapStackSize,
+      int heapStackTop)
       : unit_(hoistStatics(unit)), softMul_(softMul), profile_(profile), zpReserve_(zpReserve),
-        heapStackSize_(heapStackSize) {
+        heapStackSize_(heapStackSize), stackTop_(heapStackTop > 0 ? heapStackTop : C_STACK_TOP) {
     for (const RomEntry& e : layoutRom(unit.vars, assets)) romPlan_[e.name] = e;
   }
 
@@ -243,6 +244,8 @@ class Gen {
   int zpReserve_;
   // The heap stack's size, 0 for all the free RAM. See stackPlan().
   int heapStackSize_;
+  // The heap stack's top: C_STACK_TOP, or what --heap-stack-top asked for.
+  int stackTop_;
   // The call graph the heap stack check is planned from: who each function
   // calls directly, and how many bytes its frame moves D3 by.
   std::map<std::string, std::set<std::string>> callees_;
@@ -419,7 +422,7 @@ class Gen {
   // chain below it, and main's chain is tested now, when it compiles.
   // Returns the .equ lines, and rewrites the unused checks as a comment.
   std::vector<std::string> stackPlan(std::vector<std::string>& lines, bool& anyChecked) {
-    const int top = C_STACK_TOP;
+    const int top = stackTop_;
     const int end = ramEnd();
     const int floor = heapStackSize_ > 0 ? top - heapStackSize_ : end;
     const Pos at{unit_.file, 1};
@@ -599,7 +602,7 @@ class Gen {
     head.push_back("__start:");
     // D3 is the heap stack pointer. It has no constant load, so the top
     // goes through D1.
-    head.push_back("        LD D1 <- " + S(C_STACK_TOP));
+    head.push_back("        LD D1 <- " + S(stackTop_));
     head.push_back("        LD D3 <- D1");
     head.push_back("        JSR main");
     head.push_back("        HLT");
@@ -3619,12 +3622,12 @@ std::vector<int> templateArgWidths(const std::vector<uint8_t>& tmpl) {
 
 Compiled compileUnit(const std::string& src, const std::string& file) {
   const Unit unit = parse(src, file);
-  return Gen(unit, false, nullptr, 0, nullptr, 0).compile();
+  return Gen(unit, false, nullptr, 0, nullptr, 0, 0).compile();
 }
 
 Compiled compileUnitTree(const Unit& unit, bool softMul, const Profile* profile, int zpReserve,
-                         const Assets* assets, int heapStackSize) {
-  return Gen(unit, softMul, profile, zpReserve, assets, heapStackSize).compile();
+                         const Assets* assets, int heapStackSize, int heapStackTop) {
+  return Gen(unit, softMul, profile, zpReserve, assets, heapStackSize, heapStackTop).compile();
 }
 
 }  // namespace sc8::cc

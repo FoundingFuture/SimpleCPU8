@@ -14,6 +14,7 @@ one idea and one small program to type in.
 - [A stored program](#a-stored-program)
 - [Remembering things](#remembering-things)
 - [Memory as numbered boxes](#memory-as-numbered-boxes)
+- [Fonts](#fonts)
 - [Tables of numbers](#tables-of-numbers)
 - [Making decisions](#making-decisions)
 - [Doing things again](#doing-things-again)
@@ -367,15 +368,15 @@ puts a value in.
 Box 40000 now holds 77. A box holds one byte, which is a number from 0
 to 255.
 
-The screen is made of boxes too. Box 64192 is the top left cell of the
-text screen. The 42 boxes after it are the rest of the top row, and the
-next 42 are the second row. A cell shows the character whose code is in
-its box. The code for `A` is 65.
+The screen is made of boxes too. Box 61440, which is `$F000`, is the top
+left cell of the text screen. The 42 boxes after it are the rest of the
+top row, and the next 42 are the second row. A cell shows the character
+whose code is in its box. The code for `A` is 65.
 
 ```basic
-10 POKE 64192,65
-20 POKE 64192+41,66
-30 POKE 64192+42,67
+10 POKE 61440,65
+20 POKE 61440+41,66
+30 POKE 61440+42,67
 ```
 
 An `A` appears in the top left corner, a `B` in the top right, and a `C`
@@ -399,6 +400,46 @@ word HERE appears at column 10, row 5.
 to 65535 fits. `DOKE 40000,1000` puts 3 in box 40000 and 232 in box
 40001, because 3 times 256 plus 232 is 1000. `DEEK(40000)` reads it back
 as 1000. You will not need them for a long while.
+
+## Fonts
+
+A font is the shape of every character. BASIC starts with one of its own,
+each character 6 pixels wide and 8 high, which fits 42 columns and 32
+rows on the screen. Box 34 holds the columns and box 35 the rows.
+
+`SETTEXT` changes the size of the cell a character sits in, from 4 to 8
+pixels each way. The shapes stay the same, and a smaller cell shows less
+of each one.
+
+```basic
+SETTEXT 8,8
+PRINT PEEK(34),PEEK(35)
+```
+
+```text
+32 32
+```
+
+Eight by eight gives 32 columns and 32 rows. `SETTEXT 4,4` gives 64 by
+64 tiny cells, which suits a map drawn with characters. A size outside 4
+to 8 is the error `TEXT SIZE IS OUT OF RANGE [4,8]`. Every change clears
+the screen and puts the cursor at the top left.
+
+A project can carry fonts of its own, as files ending in `.font` in its
+`assets` folder. `LOADFONT SMALL` loads `small.font`, its shapes and its
+cell. The name is the file's name without `.font`, in any case. A name
+the ROM does not hold as a font gives this error:
+
+```text
+? NO FONT CALLED SMALL ON THE CARTRIDGE
+```
+
+`LOADFONT` on its own brings the built-in font back.
+
+A `.font` file is text. Each character is eight rows of eight, `X` for a
+pixel that is on and `.` for one that is off, so any text editor opens
+one. The IDE will get a font editor, and until then the file is drawn by
+hand.
 
 ## Tables of numbers
 
@@ -1008,6 +1049,8 @@ Statements, in a program or at the prompt:
 | `DRAW x,y` | draws a line from the pen to x,y |
 | `CIRCLE rx,ry,f` | a ring around the pen in the pen colour, ry and the fill colour f optional |
 | `PLOT x,y` | puts a dot at x,y |
+| `SETTEXT w,h` | makes each character cell w pixels wide and h high, 4 to 8 each, and clears the screen |
+| `LOADFONT n` | loads the font n from the ROM, or the built-in font when n is left out, and clears the screen |
 | `CALL n` or `JSR n` | runs machine code at slot n, the A register goes to box 4 |
 | `JMP n` | jumps to machine code at slot n and never comes back |
 | `!SAVE "N"` | saves the program into the cartridge as N |

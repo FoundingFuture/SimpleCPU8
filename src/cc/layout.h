@@ -22,6 +22,10 @@ constexpr int TEXT_CELLS = TEXT_COLS * TEXT_ROWS;
 // student who adds one call to gpu_set_textmode must not have their stack
 // start overwriting the screen. A kilobyte and a third of 64 is the price of
 // never having to explain that particular corruption.
+//
+// DESIGN: CcOptions::heapStackTop, --heap-stack-top, moves it for a program
+// whose screen is larger. BASIC's is 4 KB at $F000, for a 64 by 64 grid, and
+// BASIC passes $F000. docs/design/font-design.md.
 constexpr int C_STACK_TOP = RAM_SIZE - TEXT_CELLS;
 
 // The zero page's own residents, in the order they are emitted. Everything

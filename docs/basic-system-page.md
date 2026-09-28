@@ -22,8 +22,8 @@ reads them.
 | $00 | SYS_BANG_VEC | word | the instruction slot of the bang handler |
 | $02 | SYS_BANG_TEXT | word | the address of the statement's text while a handler runs |
 | $04 | SYS_RESULT | byte | the A register a bang handler or a CALL routine came back with |
-| $05 | SYS_COL | byte | cursor column, 0 to 41 |
-| $06 | SYS_ROW | byte | cursor row, 0 to 31 |
+| $05 | SYS_COL | byte | cursor column, 0 to SYS_COLS minus 1 |
+| $06 | SYS_ROW | byte | cursor row, 0 to SYS_ROWS minus 1 |
 | $07 | SYS_KEY | byte | the last key pressed, 0 before any |
 | $08 | SYS_PROG | word | where the stored program starts |
 | $0A | SYS_PROG_LEN | word | its length in bytes, 3 for an empty program |
@@ -37,7 +37,9 @@ reads them.
 | $18 | SYS_CALL | word | the instruction slot the last CALL or JMP went to |
 | $1A | SYS_USR | 6 | USR's three parameter words on the way in, its answer on the way out |
 | $20 | SYS_READ | word | the offset in the program of READ's next value, 0 for the first value |
-| $22 | reserved | 14 | kept free for BASIC, $22 to $2F |
+| $22 | SYS_COLS | byte | the text grid's columns, 42 at power on |
+| $23 | SYS_ROWS | byte | the text grid's rows, 32 at power on |
+| $24 | reserved | 12 | kept free for BASIC, $24 to $2F |
 
 The integer variables sit in 11 word slots per letter: the bare name first,
 then the digit forms 0 to 9. So `B` is slot 11 and `B7` is slot 19, and
@@ -92,7 +94,7 @@ A routine called this way has the contract a bang handler has. It may use
 the hardware stack in balance. It may not touch the zero page past the
 system page, which is BASIC's register file. The zero page from $30 to
 $FF is the interpreter's, and a routine reads and writes nothing there.
-$22 to $2F are reserved for future system page words, and they are not a
+$24 to $2F are reserved for future system page words, and they are not a
 routine's either.
 
 ## Asking a routine for an answer
@@ -174,5 +176,7 @@ they always had. Code 3 is no longer raised: codes 15 to 18 split it.
 | 29 | E_NOTDATA | `LINE n HOLDS NO DATA` |
 | 30 | E_DATABYTE | `A DATA VALUE IS ONE BYTE: -128 TO 255` |
 | 31 | E_HEXWIDTH | `HEX WIDTH IS OUT OF RANGE [1,4]` |
+| 32 | E_TEXTSIZE | `TEXT SIZE IS OUT OF RANGE [4,8]` |
+| 33 | E_NOFONT | `NO FONT CALLED name ON THE CARTRIDGE` |
 
 The codes are in src/basic/basic.h and the messages in run.c.

@@ -9,10 +9,12 @@
 //   -zp-reserve N    leave the first N bytes of the zero page to the program
 //   --heap-stack-size N  the C stack's size in RAM, as 4096 or 4K. The
 //                    default is all the RAM the program's data leaves
+//   --heap-stack-top A  where the C stack starts, as 0xF000 or $F000. The
+//                    default is $FAC0, below the power-on text grid
 //   --rom-header f   also write ROM.h, the cartridge map, to f
 //
-// __image, __sprite, __palette, __sample and __file name a file beside the
-// first source file.
+// __image, __sprite, __palette, __sample, __file and __font name a file
+// beside the first source file.
 
 #include <cstdio>
 #include <cstdlib>
@@ -69,6 +71,18 @@ int main(int argc, char** argv) {
       opts.heapStackSize = static_cast<int>(bytes);
       continue;
     }
+    if (a == "--heap-stack-top" && i + 1 < argc) {
+      std::string v = argv[++i];
+      if (!v.empty() && v[0] == '$') v = "0x" + v.substr(1);
+      char* end = nullptr;
+      const long top = std::strtol(v.c_str(), &end, 0);
+      if (end == v.c_str() || *end != 0 || top < 1 || top > 65536) {
+        std::fprintf(stderr, "--heap-stack-top takes an address, as 0xF000, $F000 or 61440\n");
+        return 2;
+      }
+      opts.heapStackTop = static_cast<int>(top);
+      continue;
+    }
     if (a == "-msoft-mul") {
       opts.defines["SOFT_MUL"] = "1";
       continue;
@@ -89,7 +103,7 @@ int main(int argc, char** argv) {
   }
   if (inputs.empty()) {
     std::fprintf(stderr, "usage: simplecpu-cc <file.c>... [-o out.asm] [-D NAME[=VALUE]] [-msoft-mul] [-zp-reserve N]\n"
-                         "                   [--heap-stack-size BYTES] [--rom-header ROM.h]\n");
+                         "                   [--heap-stack-size BYTES] [--heap-stack-top ADDR] [--rom-header ROM.h]\n");
     return 2;
   }
   const fs::path dir = fs::path(inputs.front().path).parent_path();

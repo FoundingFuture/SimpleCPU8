@@ -32,8 +32,10 @@ h3:
         CMP A, 79        ; O
         JNZ pass
 h4:
-; Matched. Row 20 of the 42 column text screen at $FAC0 is $FAC0 + 20 * 42.
-        LD D2 <- $FAC0 + 20 * 42
+; Matched. BASIC's screen is at $F000, and at the 42 column grid it boots
+; with, row 20 starts at $F000 + 20 * 42. After a LOADFONT or SETTEXT the
+; grid's columns are the byte SYS_COLS at $22.
+        LD D2 <- $F000 + 20 * 42
         LD A <- 72
         LD [D2]+ <- A
         LD A <- 69

@@ -56,6 +56,9 @@ struct CcOptions {
   // parameters and locals. 0 gives it every byte between the program's
   // data and the text screen.
   int heapStackSize = 0;
+  // Where the heap stack starts, growing down: the first address above it.
+  // 0 is C_STACK_TOP, $FAC0. BASIC passes $F000, below its 4 KB screen.
+  int heapStackTop = 0;
 };
 
 struct Program : Compiled {

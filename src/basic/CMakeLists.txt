@@ -24,7 +24,7 @@ set(SC8_BASIC_DATA_H "${CMAKE_CURRENT_BINARY_DIR}/basic_rom_data.h")
 add_custom_command(
   OUTPUT "${SC8_BASIC_ASM}" "${SC8_BASIC_ROM_H}"
   COMMAND $<TARGET_FILE:simplecpu-cc> ${SC8_BASIC_SOURCES} ${SC8_BASIC_HEADERS}
-          -o "${SC8_BASIC_ASM}" --rom-header "${SC8_BASIC_ROM_H}" -zp-reserve 48
+          -o "${SC8_BASIC_ASM}" --rom-header "${SC8_BASIC_ROM_H}" -zp-reserve 48 --heap-stack-top 0xF000
   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
   DEPENDS simplecpu-cc ${SC8_BASIC_SOURCES} ${SC8_BASIC_HEADERS}
   COMMENT "Compiling BASIC")
