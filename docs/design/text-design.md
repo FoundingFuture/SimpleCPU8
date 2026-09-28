@@ -24,13 +24,17 @@ honest. It writes bytes to ports or to memory. The GPU does the drawing.
 
 ## The font and the grid
 
-The screen is 256 by 256 pixels. The font is 6 by 8 pixels per glyph. So the
-screen holds 42 columns by 32 rows. That is 1344 character cells. Both features
-use this 42 by 32 grid.
+The screen is 256 by 256 pixels. The built-in font is 6 by 8 pixels per glyph.
+So at power on the screen holds 42 columns by 32 rows. That is 1344 character
+cells. Both features use the same grid.
+
+The grid follows the text cell, 4 to 8 pixels each way. Columns are 256
+divided by the cell's width, rows 256 divided by its height, rounded down.
+`textCols()` and `textRows()` in src/devices/gpu.h divide the screen by the
+cell, so the grid cannot disagree with it.
 
 A glyph is five columns of face and one blank column, so a line of text needs
-no spacing added. `TEXT_COLS` and `TEXT_ROWS` divide the screen by `FONT_W` and
-`FONT_H`, so the grid cannot disagree with the font.
+no spacing added.
 
 A font is 256 glyphs, so every byte value has a glyph. Each glyph is 8 bytes,
 one byte per row, with the low bit on the left. The GPU ships with a built-in
@@ -46,7 +50,8 @@ The template string lives in ROM, in the cartridge. An example is
 template, pushes the parameter bytes to a port, then issues one command. The GPU
 reads the template, formats it, and draws it at the cursor.
 
-The overlay is a plane of 1344 cells. Each cell holds one character code. Empty
+The overlay is a plane that holds 64 by 64 cells, the grid of a 4 by 4 cell.
+It uses as many as the grid has. Each cell holds one character code. Empty
 cells are transparent, so the graphics show through. A command clears the plane.
 
 ## The format grammar
@@ -142,8 +147,8 @@ transparent one leaves the pixels under the cell alone.
 
 ## Feature 2, text mode
 
-Text mode shows characters read from memory. The screen is the 42 by 32 grid,
-drawn over the graphics VRAM. It is one of the video modes below.
+Text mode shows characters read from memory. The screen is the current grid,
+42 by 32 at power on, drawn over the graphics VRAM. It is one of the video modes below.
 
 A pixel that is not a glyph pixel shows the VRAM pixel under it. So a program
 can draw with the graphics commands and print in the same mode. BASIC is the
@@ -162,8 +167,9 @@ is the double-ported memory Eddie described. The CPU port and the GPU port never
 appear to collide.
 
 `CMD_TEXT_MAP` sets a 16 bit base address from the `GPU_CART_LO` and
-`GPU_CART_HI` latches. The screen is always the full 42 by 32, so it reads 1344
-bytes from that base every frame. A write to the mapped region shows up with no
+`GPU_CART_HI` latches. The screen is always the full grid, so it reads columns times
+rows bytes from that base every frame, at a stride of the column count. At
+power on that is 1344 bytes. A write to the mapped region shows up with no
 command. The colors come from `GPU_TEXT_COLOR` and `GPU_TEXT_BG`, and the
 background is drawn only when `GPU_TEXT_FLAGS` says opaque.
 
@@ -181,33 +187,50 @@ graphics mode is never affected, so the default program keeps working untouched.
 
 ## Custom fonts
 
-`CMD_LOAD_FONT` loads a full 256-glyph font from the cartridge latches. Each
-glyph is 8 bytes, so a font is 2048 bytes. Every code from 0 to 255 can carry a
-glyph. A game can point high codes at tiles and draw a map in text mode.
+A font is an asset, a `.font` file of text drawn as art. It holds the cell,
+4 to 8 each way, then all 256 glyphs, eight rows of `X` and `.` each.
+docs/design/font-design.md holds the format. simplecpu-make, the assembler's
+`.font` directive and C's `__font` turn the file into a blob on the
+cartridge.
+
+The blob is the cell's width, its height, then 2048 glyph bytes, code 0
+first. Each glyph is 8 bytes. `CMD_LOAD_FONT` reads the blob at a cartridge
+address, stores the glyphs and sets the cell. The grid follows the cell. A
+cell outside 4 to 8 crashes the machine with `bad-text-cell`. A cell change
+clears the overlay and homes its cursor.
+
+Every code from 0 to 255 can carry a glyph. A game can point high codes at
+tiles and draw a map in text mode.
 
 A custom font does not erase the built-in one. The built-in font is the source
-of truth. A Restart reloads it, so the default font always comes back.
+of truth. `CMD_RESET_FONT` brings it back with the 6 by 8 cell. A Restart
+reloads it too, so the default font always comes back.
 
 ## Ports and commands
 
 New ports in the GPU range, 0x00 to 0x1F. The names are built-in assembler
-constants, like the other GPU ports.
+constants, like the other GPU ports. The numbers are in
+docs/design/gpu-ports.md, which tests/devices/gpu_test.cpp keeps true.
 
-- GPU_TEXT_COL, 0x17: cursor column, 0 to 31.
-- GPU_TEXT_ROW, 0x18: cursor row, 0 to 31.
-- GPU_TEXT_COLOR, 0x19: text foreground palette index.
-- GPU_TEXT_BG, 0x1A: text background palette index.
-- GPU_TEXT_FLAGS, 0x1B: bit 0 is an opaque overlay background.
-- GPU_TEXT_ARG, 0x1C: push one parameter byte into the printf queue.
-- GPU_TEXT_CHAR, 0x1D: draw one byte at the cursor and advance, no formatting.
+- GPU_TEXT_COL: cursor column, 0 to the grid's columns less 1.
+- GPU_TEXT_ROW: cursor row, 0 to the grid's rows less 1.
+- GPU_TEXT_COLOR: text foreground palette index.
+- GPU_TEXT_BG: text background palette index.
+- GPU_TEXT_FLAGS: bit 0 is an opaque overlay background.
+- GPU_TEXT_ARG: push one parameter byte into the printf queue.
+- GPU_TEXT_CHAR: draw one byte at the cursor and advance, no formatting.
+- GPU_TEXT_ROWS: read the grid's rows.
+- GPU_TEXT_COLS: read the grid's columns.
 
 New commands for `GPU_CMD`.
 
-- CMD_PRINTF, 0x30: format the template at the cartridge latches, draw it.
-- CMD_TEXT_CLEAR, 0x31: clear the overlay plane and home the cursor.
-- CMD_TEXT_MAP, 0x32: point text mode at a data RAM base.
-- CMD_VIDEO_MODE, 0x33: switch video mode from GPU_ARG.
-- CMD_LOAD_FONT, 0x34: load a 256-glyph font from the cartridge.
+- CMD_PRINTF: format the template at the cartridge latches, draw it.
+- CMD_TEXT_CLEAR: clear the overlay plane and home the cursor.
+- CMD_TEXT_MAP: point text mode at a data RAM base.
+- CMD_VIDEO_MODE: switch video mode from GPU_ARG.
+- CMD_LOAD_FONT: load a 256-glyph font and its cell from the cartridge.
+- CMD_TEXT_CELL: set the cell, 4 to 8 each way, and keep the glyphs.
+- CMD_RESET_FONT: bring back the built-in font and the 6 by 8 cell.
 
 New assembler constants for `GPU_ARG` at a mode switch. MODE_GRAPHICS is 0 and
 MODE_TEXT is 1.
