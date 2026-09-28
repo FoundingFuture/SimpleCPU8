@@ -90,7 +90,10 @@ the program and its variables.
 
 A routine called this way has the contract a bang handler has. It may use
 the hardware stack in balance. It may not touch the zero page past the
-system page, which is BASIC's register file.
+system page, which is BASIC's register file. The zero page from $30 to
+$FF is the interpreter's, and a routine reads and writes nothing there.
+$22 to $2F are reserved for future system page words, and they are not a
+routine's either.
 
 ## Asking a routine for an answer
 

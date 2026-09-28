@@ -1,5 +1,5 @@
 
-// build: cc -zp-reserve 48 -o basic main.c term.c lex.c expr.c strings.c edit.c run.c bang.c store.c data.c
+// build: cc -o basic main.c term.c lex.c expr.c strings.c edit.c run.c bang.c store.c data.c
 
 #include "basic.h"
 

@@ -11,6 +11,9 @@
 #include "asm/asm.h"
 #include "core/isa.h"
 #include "project/project.h"
+#if SC8_HAVE_BASIC
+#include "basic/program.h"
+#endif
 
 namespace fs = std::filesystem;
 using namespace sc8;
@@ -203,8 +206,13 @@ void unused_but_kept(void) { calls = 0; }
     CHECK(b.assembly.find("\nunused_but_kept:") != std::string::npos);
     CHECK(b.assembly.find("\nbasic_set:") != std::string::npos);
     CHECK(b.assembly.find("term_puts:") != std::string::npos);
-    // The system page is kept: the compiler's own zero page starts at $20.
-    CHECK(b.assembly.find("__sys:") != std::string::npos);
+    // The system page is kept once, at the size basic.h and the
+    // interpreter's own build give it, so the compiler starts after it.
+    const size_t sys = b.assembly.find("__sys:");
+    REQUIRE(sys != std::string::npos);
+    const std::string sysLine = b.assembly.substr(sys, b.assembly.find('\n', sys) - sys);
+    CHECK_MESSAGE(sysLine.find("ds " + std::to_string(basic::SYSTEM_PAGE_SIZE)) != std::string::npos, sysLine);
+    CHECK(b.assembly.find("__sys:", sys + 1) == std::string::npos);
     REQUIRE_EQ(b.cartridge->basic.size(), 1u);
     const std::string bas = b.cartridge->basic[0].second;
     // The slot DOUBLE landed on, read back off the assembly, is what the
