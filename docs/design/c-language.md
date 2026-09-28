@@ -309,7 +309,7 @@ multiply has no business pretending to have a double.
 ```text
 $0000-$00FF   zero page: the compiler's reservations, then variables
 $0100-        globals, the coprocessor scratch, the printf arguments
-              ... the C stack grows down from $FAC0 ...
+              ... the C stack grows down from its top, $FAC0 by default ...
 $FAC0-$FFFF   room for a text screen
 ```
 
@@ -356,10 +356,14 @@ a hundred thousand times.
 by definition. The build pane's Zero page tab shows every byte, what has it,
 the reason it won, and how many are left.
 
-The C stack starts at `$FAC0` in every program, whether or not it maps a
+The C stack starts at `$FAC0` by default, whether or not the program maps a
 text screen. That is the top of RAM less the whole 42 by 32 character grid.
 The 1344 bytes buy never having to explain why adding one call to
 `gpu_set_textmode` corrupted the display.
+
+`simplecpu-cc --heap-stack-top ADDR` moves the top for a program whose screen
+is larger. BASIC's build and BASIC and C projects pass `$F000`, below BASIC's
+4 KB screen.
 
 ## The entry point
 
