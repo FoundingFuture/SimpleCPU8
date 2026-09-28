@@ -158,6 +158,42 @@ void ellipse(Frame& f, int x0, int y0, int x1, int y1, uint8_t c, bool filled) {
   }
 }
 
+void halfCircle(Frame& f, int x0, int y0, int x1, int y1, Facing facing, uint8_t c, bool filled) {
+  if (x0 > x1) std::swap(x0, x1);
+  if (y0 > y1) std::swap(y0, y1);
+  const int w = x1 - x0 + 1, h = y1 - y0 + 1;
+  // The whole ellipse's centre sits on the flat edge, and its radius
+  // across the flat side is the box's full depth.
+  double cx = w / 2.0, cy = h / 2.0, rx = w / 2.0, ry = h / 2.0;
+  switch (facing) {
+    case Facing::Up:
+      cy = ry = h;
+      break;
+    case Facing::Down:
+      cy = 0;
+      ry = h;
+      break;
+    case Facing::Right:
+      cx = 0;
+      rx = w;
+      break;
+    case Facing::Left:
+      cx = rx = w;
+      break;
+  }
+  auto in = [&](int x, int y) {
+    if (x < 0 || y < 0 || x >= w || y >= h) return false;
+    const double ex = (x + 0.5 - cx) / rx, ey = (y + 0.5 - cy) / ry;
+    return ex * ex + ey * ey <= 1.0;
+  };
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      if (!in(x, y)) continue;
+      if (filled || !in(x - 1, y) || !in(x + 1, y) || !in(x, y - 1) || !in(x, y + 1)) f.set(x0 + x, y0 + y, c);
+    }
+  }
+}
+
 void fill(Frame& f, int x, int y, uint8_t c) {
   for (int i : area(f, x, y)) f.px[static_cast<size_t>(i)] = c;
 }
@@ -224,6 +260,32 @@ void flipV(Frame& f) {
   for (int y = 0; y < f.height / 2; y++) {
     for (int x = 0; x < f.width; x++) {
       std::swap(f.px[static_cast<size_t>(y * f.width + x)], f.px[static_cast<size_t>((f.height - 1 - y) * f.width + x)]);
+    }
+  }
+}
+
+Frame joinBlock(const Frame& tl, const Frame& tr, const Frame& bl, const Frame& br) {
+  const int w = tl.width, h = tl.height;
+  Frame big(w * 2, h * 2);
+  const Frame* parts[4] = {&tl, &tr, &bl, &br};
+  for (int i = 0; i < 4; i++) {
+    const int ox = (i % 2) * w, oy = (i / 2) * h;
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) big.set(ox + x, oy + y, parts[i]->at(x, y));
+    }
+  }
+  return big;
+}
+
+void splitBlock(const Frame& big, Frame& tl, Frame& tr, Frame& bl, Frame& br) {
+  Frame* parts[4] = {&tl, &tr, &bl, &br};
+  for (int i = 0; i < 4; i++) {
+    Frame& f = *parts[i];
+    const int ox = (i % 2) * f.width, oy = (i / 2) * f.height;
+    for (int y = 0; y < f.height; y++) {
+      for (int x = 0; x < f.width; x++) {
+        if (big.inside(ox + x, oy + y)) f.set(x, y, big.at(ox + x, oy + y));
+      }
     }
   }
 }

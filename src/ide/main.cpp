@@ -5,7 +5,9 @@
 //   simplecpu-ide game.rom        open a ROM and browse it
 //   simplecpu-ide game/assets/ship.png
 //                                 open the project and the picture in the
-//                                 sprite editor
+//                                 sprite editor, or a .font in font mode
+//   simplecpu-ide --font-view block
+//                                 font mode's view: single, strip or block
 //   simplecpu-ide --level run     start in a level: edit, run or microcode
 //   simplecpu-ide --run           start running, --speed f60 picks the rate
 //                                 (trace, 0.5, 2, 10, 60, 1000, 100000,
@@ -69,6 +71,8 @@ int main(int argc, char** argv) {
         else std::fprintf(stderr, "unknown level %s: basic, project, run or cpu\n", name.c_str());
       } else if (a == "--speed" && i + 1 < argc) {
         if (!ide.setSpeed(argv[++i])) std::fprintf(stderr, "unknown speed %s\n", argv[i]);
+      } else if (a == "--font-view" && i + 1 < argc) {
+        if (!ide.setFontView(argv[++i])) std::fprintf(stderr, "unknown font view %s: single, strip or block\n", argv[i]);
       } else if (a == "--run") {
         run = true;
       } else {

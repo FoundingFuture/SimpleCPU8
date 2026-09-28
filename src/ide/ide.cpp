@@ -350,9 +350,9 @@ void Ide::open(const std::string& path) {
     }
     return;
   }
-  if (isPicture(path)) {
-    // A picture opens its project, found from the assets folder it sits
-    // in, and then the picture in the sprite editor.
+  if (isDrawable(path)) {
+    // A picture or a font opens its project, found from the assets folder
+    // it sits in, and then the asset in the sprite editor.
     const fs::path file = fs::absolute(path);
     fs::path dir = file.parent_path();
     if (dir.filename() == "assets") dir = dir.parent_path();
@@ -362,7 +362,7 @@ void Ide::open(const std::string& path) {
     if (sprite_.isOpen()) focusAfterLayout_ = "###Sprite";
     return;
   }
-  note("cannot open " + path + ": a .rom, a folder, a picture, or a .c, .h, .asm, .bas or microcode.txt");
+  note("cannot open " + path + ": a .rom, a folder, a picture, a .font, or a .c, .h, .asm, .bas or microcode.txt");
 }
 
 void Ide::run() {
@@ -812,6 +812,7 @@ void Ide::frame() {
   removeDialog();
   settingsDialog();
   newSpriteDialog();
+  newFontDialog();
   spriteSwitchDialog();
 }
 
@@ -1117,7 +1118,10 @@ void Ide::quitDialog() {
     if (filesChanged_) {
       ImGui::BulletText("files added to or removed from the project");
     }
-    if (sprite_.dirty()) ImGui::BulletText("the sprite %s", sprite_.name().c_str());
+    if (sprite_.dirty()) {
+      ImGui::BulletText("the %s %s", sprite_.mode() == SpriteEditor::Mode::Font ? "font" : "sprite",
+                        sprite_.name().c_str());
+    }
     ImGui::Spacing();
     if (ImGui::Button("Save and quit")) {
       if (projectDir_.empty() && !romPath_.empty()) {

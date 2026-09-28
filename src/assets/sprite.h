@@ -64,6 +64,13 @@ void rect(Frame& f, int x0, int y0, int x1, int y1, uint8_t c, bool filled);
 // when its centre is. The outline is the inside pixels with a neighbour
 // outside, so it is one pixel thick and closed.
 void ellipse(Frame& f, int x0, int y0, int x1, int y1, uint8_t c, bool filled);
+// The side of a half circle that is round. The flat side is the box's
+// opposite edge.
+enum class Facing { Up, Right, Down, Left };
+// The half of an ellipse whose flat side lies on one edge of the box
+// between two corners. Inside and outline follow the ellipse's rules, and
+// the flat side is part of the outline.
+void halfCircle(Frame& f, int x0, int y0, int x1, int y1, Facing facing, uint8_t c, bool filled);
 // The 4-connected area of one colour around (x, y), filled with c.
 void fill(Frame& f, int x, int y, uint8_t c);
 // The same area, shaded from colour a at (x0, y0) to colour b at (x1, y1).
@@ -79,6 +86,12 @@ void rollColumn(Frame& f, int x, int dy);
 void roll(Frame& f, int dx, int dy);
 void flipH(Frame& f);
 void flipV(Frame& f);
+
+// Four frames of one size as one picture twice as wide and twice as high:
+// top left, top right, bottom left, bottom right. splitBlock cuts such a
+// picture back into the four frames, each of which keeps its own size.
+Frame joinBlock(const Frame& tl, const Frame& tr, const Frame& bl, const Frame& br);
+void splitBlock(const Frame& big, Frame& tl, Frame& tr, Frame& bl, Frame& br);
 
 // A new frame size for every frame. The picture stays at the top left;
 // what no longer fits is cut and new pixels are transparent.

@@ -30,7 +30,7 @@ it printed.
 |---|---|
 | `simplecpu-make` | starts a project, builds a folder into a ROM, unpacks a ROM into a folder |
 | `simplecpu` | runs a ROM in a window or on the whole screen, or boots BASIC |
-| `simplecpu-ide` | the IDE, which the IDE guide covers |
+| `simplecpu-ide` | the IDE, which the [IDE guide](ide.md) covers |
 | `simplecpu-cc` | compiles C files into assembly |
 | `simplecpu-asm` | assembles one or more `.asm` files into a ROM |
 | `simplecpu-run` | runs a ROM or an `.asm` file with no window and prints the machine's state |

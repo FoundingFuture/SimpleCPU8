@@ -796,20 +796,27 @@ void Ide::filesPane(const char* name, bool* open) {
   if (assets.empty()) ImGui::TextDisabled("none yet");
   for (const AssetEntry& a : assets) {
     ImGui::PushID(a.name.c_str());
-    const bool picture = isPicture(a.name);
+    const bool picture = isDrawable(a.name);
+    const bool isFontAsset = SpriteEditor::isFont(a.name);
+    const char* editor = isFontAsset ? "font editor" : "sprite editor";
     const bool editing = sprite_.isOpen() && sprite_.name() == a.name;
     if (ImGui::Selectable(a.name.c_str(), editing, ImGuiSelectableFlags_AllowDoubleClick) && picture &&
         ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
       openSprite(a.name);
     }
-    if (ImGui::IsItemHovered()) {
+    if (ImGui::IsItemHovered() && isFontAsset) {
+      const std::string stem = fs::path(a.name).stem().string();
+      ImGui::SetTooltip("%s, %ju bytes. C names it as __font(\"%s\"), assembly as .font('%s'), BASIC as "
+                        "LOADFONT %s. A double click opens it in the font editor.",
+                        a.name.c_str(), a.bytes, a.name.c_str(), a.name.c_str(), stem.c_str());
+    } else if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip("%s, %ju bytes. C names it as __sprite(\"%s\"), __image, __sample or __file; "
                         "assembly as .sprite('%s'), .image, .sample or .file.%s",
                         a.name.c_str(), a.bytes, a.name.c_str(), a.name.c_str(),
                         picture ? " A double click opens it in the sprite editor." : "");
     }
     if (ImGui::BeginPopupContextItem()) {
-      if (picture && ImGui::MenuItem("Edit in the sprite editor")) openSprite(a.name);
+      if (picture && ImGui::MenuItem((std::string("Edit in the ") + editor).c_str())) openSprite(a.name);
       if (ImGui::MenuItem(("Remove " + a.name + "...").c_str())) askRemove(a.name, true);
       ImGui::EndPopup();
     }
@@ -823,6 +830,18 @@ void Ide::filesPane(const char* name, bool* open) {
   ImGui::SameLine();
   if (ImGui::SmallButton("New sprite...")) askNewSprite();
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("draw a new sprite strip, saved as a PNG under Assets");
+  {
+    // Beside New sprite when the pane is wide enough, under it otherwise.
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float w = ImGui::CalcTextSize("New font...").x + st.FramePadding.x * 2.0f;
+    if (ImGui::GetItemRectMax().x + st.ItemSpacing.x + w <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) {
+      ImGui::SameLine();
+    }
+  }
+  if (ImGui::SmallButton("New font...")) askNewFont_ = true;
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("a copy of the built-in font as a .font under Assets, opened in the font editor");
+  }
 
   if (romBase_ && !carriedProject_) {
     ImGui::Spacing();

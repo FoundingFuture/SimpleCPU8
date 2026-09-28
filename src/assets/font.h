@@ -16,6 +16,7 @@
 #include <string_view>
 #include <vector>
 
+#include "assets/sprite.h"
 #include "devices/gpu.h"
 
 namespace sc8::font {
@@ -52,5 +53,30 @@ Font builtIn();
 // What CMD_LOAD_FONT reads from the cartridge: the width, the height and
 // the 2048 glyph bytes, code 0 first.
 std::vector<uint8_t> blob(const Font& f);
+
+// The font as the editor draws it: 256 frames of 8 by 8, code 0 first. A
+// set pixel is INK and a clear one 0. The strip caps of sprite::load
+// belong to sprites, so a font opens here instead.
+inline constexpr uint8_t INK = 1;
+
+struct Opened {
+  sprite::Strip strip;
+  int width = FONT_W;  // the cell
+  int height = FONT_H;
+};
+
+// The bytes of a .font as frames. Nothing, with read's message in
+// `error`, when the text is refused.
+std::optional<Opened> open(const std::vector<uint8_t>& bytes, std::string* error);
+
+// The text of the frames and the cell, as write gives it. Any pixel not 0
+// is set.
+std::vector<uint8_t> save(const sprite::Strip& strip, int width, int height);
+
+// The text of a new font: builtIn(), so cell 6 by 8 and $7F eight wide.
+std::vector<uint8_t> newFile();
+
+// The asset name of a font: the name with EXTENSION added when it lacks it.
+std::string fileName(const std::string& name);
 
 }  // namespace sc8::font

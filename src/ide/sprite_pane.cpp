@@ -11,6 +11,7 @@
 #include "imgui.h"
 #include "raylib.h"
 
+#include "assets/font.h"
 #include "ide/ide.h"
 #include "ide/panes.h"
 
@@ -39,6 +40,15 @@ bool assetNameOk(const std::string& name) {
 bool Ide::isPicture(const std::string& name) {
   const std::string e = lowerExt(name);
   return e == ".png" || e == ".bmp" || e == ".gif" || e == ".jpg" || e == ".jpeg" || e == ".tga";
+}
+
+bool Ide::isDrawable(const std::string& name) { return isPicture(name) || SpriteEditor::isFont(name); }
+
+bool Ide::setFontView(const std::string& name) {
+  const std::optional<SpriteEditor::FontView> v = SpriteEditor::fontViewNamed(name);
+  if (!v) return false;
+  sprite_.setFontView(*v);
+  return true;
 }
 
 std::optional<std::vector<uint8_t>> Ide::readAsset(const std::string& name) const {
@@ -83,7 +93,7 @@ void Ide::openSprite(const std::string& name) {
   // A picture that is not a PNG opens as a new PNG beside it, since the
   // strip's frame count lives in a PNG text chunk.
   std::string saveAs;
-  if (lowerExt(name) != ".png") saveAs = fs::path(name).stem().string() + ".png";
+  if (isPicture(name) && lowerExt(name) != ".png") saveAs = fs::path(name).stem().string() + ".png";
   if (sprite_.open(name, saveAs)) {
     spriteVisible_ = true;
     focusSprite_ = 6;
@@ -113,9 +123,8 @@ void Ide::spritePane() {
   ImGui::End();
   if (focus) ImGui::SetNextWindowFocus();
   ImGui::SetNextWindowSize(ImVec2(900, 700), ImGuiCond_FirstUseEver);
-  const std::string title = sprite_.isOpen() ? "Sprite " + sprite_.name() + (sprite_.dirty() ? " *" : "") : "Sprite";
   // The ### keeps one window whatever the title says.
-  if (ImGui::Begin((title + "###Sprite").c_str(), &open)) sprite_.body();
+  if (ImGui::Begin((sprite_.title() + "###Sprite").c_str(), &open)) sprite_.body();
   ImGui::End();
   if (!open) spriteVisible_ = false;
 }
@@ -152,6 +161,41 @@ void Ide::newSpriteDialog() {
     ImGui::SameLine();
     if (ImGui::Button("Cancel")) {
       askNewSprite_ = false;
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+}
+
+void Ide::newFontDialog() {
+  if (!askNewFont_) return;
+  ImGui::OpenPopup("New font");
+  if (ImGui::BeginPopupModal("New font", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    panes::inputLine("File name", newFontName_);
+    ImGui::TextDisabled("a copy of the built-in font, cell 6 x 8, with the block at $7F eight columns wide");
+    const std::string name = font::fileName(newFontName_);
+    bool taken = false;
+    for (const AssetEntry& a : assetList()) taken = taken || a.name == name;
+    const bool ok = assetNameOk(name) && !taken;
+    if (!assetNameOk(name)) ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "use letters, digits, '.', '-' and '_'");
+    if (taken) ImGui::TextColored(ImVec4(1, 0.6f, 0.3f, 1), "%s is already an asset", name.c_str());
+    ImGui::BeginDisabled(!ok);
+    if (ImGui::Button("Create")) {
+      askNewFont_ = false;
+      ImGui::CloseCurrentPopup();
+      // The file is written first, so the font is an asset like any other
+      // and the editor opens it the way a double click would.
+      if (writeAsset(name, font::newFile())) {
+        note("created " + name);
+        openSprite(name);
+      } else {
+        note(name + ": cannot write it");
+      }
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+      askNewFont_ = false;
       ImGui::CloseCurrentPopup();
     }
     ImGui::EndPopup();
@@ -201,12 +245,15 @@ void Ide::askNewSprite() {
 void Ide::spritePreview() {
   if (!spriteVisible_ || !sprite_.isOpen() || !sprite_.previewShown()) return;
   sprite_.previewPixels(GetTime(), previewPixels_);
+  // A font is judged on the machine's own pixels, without the screen's look.
+  DisplaySettings look = display;
+  if (!sprite_.previewEffects()) look.enabled = false;
   panes::PaneTarget& t = panes::previewTarget();
   BeginTextureMode(t.texture());
   ClearBackground(BLACK);
   previewScreen_.setOutputDensity(1.0f);
   previewScreen_.upload(previewPixels_);
-  previewScreen_.draw(0, 0, t.side(), t.side(), display);
+  previewScreen_.draw(0, 0, t.side(), t.side(), look);
   EndTextureMode();
 }
 

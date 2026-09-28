@@ -1,5 +1,6 @@
 #include "assets/font.h"
 
+#include <algorithm>
 #include <cstdio>
 
 namespace sc8::font {
@@ -157,6 +158,54 @@ std::vector<uint8_t> blob(const Font& f) {
   out.push_back(static_cast<uint8_t>(f.height));
   out.insert(out.end(), f.glyphs.begin(), f.glyphs.end());
   return out;
+}
+
+std::optional<Opened> open(const std::vector<uint8_t>& bytes, std::string* error) {
+  const ReadResult r = read(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+  if (!r.font) {
+    if (error) *error = r.error;
+    return std::nullopt;
+  }
+  Opened out;
+  out.width = r.font->width;
+  out.height = r.font->height;
+  out.strip = sprite::blank(COLS, ROWS, gpu::GLYPHS);
+  for (int code = 0; code <= LAST_CODE; code++) {
+    sprite::Frame& f = out.strip.frames[static_cast<size_t>(code)];
+    for (int y = 0; y < ROWS; y++) {
+      const uint8_t bits = r.font->glyphs[static_cast<size_t>(code * ROWS + y)];
+      for (int x = 0; x < COLS; x++) f.set(x, y, ((bits >> x) & 1) ? INK : 0);
+    }
+  }
+  return out;
+}
+
+std::vector<uint8_t> save(const sprite::Strip& strip, int width, int height) {
+  Font f;
+  f.width = width;
+  f.height = height;
+  const int count = std::min(static_cast<int>(strip.frames.size()), gpu::GLYPHS);
+  for (int code = 0; code < count; code++) {
+    const sprite::Frame& fr = strip.frames[static_cast<size_t>(code)];
+    for (int y = 0; y < ROWS; y++) {
+      int bits = 0;
+      for (int x = 0; x < COLS; x++) {
+        if (fr.inside(x, y) && fr.at(x, y) != 0) bits |= 1 << x;
+      }
+      f.glyphs[static_cast<size_t>(code * ROWS + y)] = static_cast<uint8_t>(bits);
+    }
+  }
+  const std::string text = write(f);
+  return {text.begin(), text.end()};
+}
+
+std::vector<uint8_t> newFile() {
+  const std::string text = write(builtIn());
+  return {text.begin(), text.end()};
+}
+
+std::string fileName(const std::string& name) {
+  return name.ends_with(EXTENSION) ? name : name + std::string(EXTENSION);
 }
 
 }  // namespace sc8::font

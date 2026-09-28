@@ -438,8 +438,9 @@ the ROM does not hold as a font gives this error:
 
 A `.font` file is text. Each character is eight rows of eight, `X` for a
 pixel that is on and `.` for one that is off, so any text editor opens
-one. The IDE will get a font editor, and until then the file is drawn by
-hand.
+one. The IDE draws one too. New font in the Files pane starts a copy of
+the built-in font, and a double click on a `.font` under Assets opens it
+in the font editor. The IDE guide, docs/guides/ide.md, shows how.
 
 ## Tables of numbers
 

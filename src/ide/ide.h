@@ -81,8 +81,12 @@ class Ide {
   Ide();
 
   // Open a ROM, a project folder or a source file (which opens its
-  // project) from the command line.
+  // project) from the command line. A picture or a .font opens its project
+  // and then the asset in the sprite editor.
   void open(const std::string& path);
+  // The command line's --font-view: single, strip or block. False for any
+  // other name.
+  bool setFontView(const std::string& name);
 
   void setLevel(Level level);
   Level level() const { return level_; }
@@ -187,13 +191,18 @@ class Ide {
   bool writeAsset(const std::string& name, const std::vector<uint8_t>& bytes);
 
   // The sprite editor (sprite_pane.cpp). It opens on a double click of a
-  // picture under Assets, or from New sprite. Opening another sprite over
-  // unsaved changes asks first; pendingSprite_ holds what to open after.
+  // picture or a .font under Assets, or from New sprite or New font.
+  // Opening another asset over unsaved changes asks first; pendingSprite_
+  // holds what to open after.
   void spritePane();
   void openSprite(const std::string& name);
   void askNewSprite();
   static bool isPicture(const std::string& name);
+  // A picture or a .font: an asset the sprite editor opens.
+  static bool isDrawable(const std::string& name);
   void newSpriteDialog();
+  // New font writes the built-in font as a new .font asset and opens it.
+  void newFontDialog();
   void spriteSwitchDialog();
   // Render the sprite preview through the display, before the panes draw.
   void spritePreview();
@@ -207,6 +216,8 @@ class Ide {
   std::string newSpriteName_ = "sprite.png";
   int newSpriteW_ = 16, newSpriteH_ = 16, newSpriteFrames_ = 1;
   std::optional<std::string> pendingSprite_;  // an asset to open, or "" for a new sprite
+  bool askNewFont_ = false;
+  std::string newFontName_ = "font.font";
   bool askSpriteSwitch_ = false;
   std::vector<uint8_t> previewPixels_;
   // The display settings live in display.txt beside settings.txt.

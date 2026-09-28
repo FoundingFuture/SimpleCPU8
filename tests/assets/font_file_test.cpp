@@ -3,7 +3,9 @@
 
 #include <doctest.h>
 
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "assets/font.h"
 #include "devices/font.h"
@@ -34,6 +36,9 @@ std::string refusal(const std::string& text) {
   if (r.font) return "";
   return r.error;
 }
+
+// The bytes of a text, as the editor reads an asset.
+std::vector<uint8_t> bytesOf(const std::string& text) { return {text.begin(), text.end()}; }
 
 }  // namespace
 
@@ -180,5 +185,76 @@ TEST_SUITE("a font's blob") {
     CHECK_EQ(b[1], 7);
     CHECK_EQ(b[2], 0x11);
     CHECK_EQ(b[2 + 2047], 0x22);
+  }
+}
+
+TEST_SUITE("a font in the editor") {
+  TEST_CASE("opens as 256 one-bit frames of 8 by 8, code 0 first, with its cell") {
+    font::Font f = font::builtIn();
+    f.width = 5;
+    f.height = 7;
+    std::string error;
+    const std::optional<font::Opened> o = font::open(bytesOf(font::write(f)), &error);
+    REQUIRE_MESSAGE(o, error);
+    CHECK_EQ(o->width, 5);
+    CHECK_EQ(o->height, 7);
+    REQUIRE_EQ(o->strip.frames.size(), 256u);
+    CHECK_EQ(o->strip.width, 8);
+    CHECK_EQ(o->strip.height, 8);
+    // 'A' in the built-in font: .XXX. on its first row, bit 0 the left.
+    const sprite::Frame& a = o->strip.frames[0x41];
+    for (int x = 0; x < 8; x++) CHECK_EQ(a.at(x, 0), ((f.glyphs[0x41 * 8] >> x) & 1) ? font::INK : 0);
+  }
+
+  TEST_CASE("saves back to the same text it was opened from") {
+    font::Font f = font::builtIn();
+    f.width = 4;
+    f.height = 8;
+    f.glyphs[0xC3 * 8 + 5] = 0x81;
+    const std::string text = font::write(f);
+    const std::optional<font::Opened> o = font::open(bytesOf(text), nullptr);
+    REQUIRE(o);
+    CHECK(font::save(o->strip, o->width, o->height) == bytesOf(text));
+  }
+
+  TEST_CASE("saves a pixel drawn in any colour as a set pixel") {
+    const std::optional<font::Opened> o = font::open(bytesOf(font::write(font::Font{})), nullptr);
+    REQUIRE(o);
+    sprite::Strip s = o->strip;
+    s.frames[0x20].set(0, 0, 7);
+    s.frames[0x20].set(7, 7, font::INK);
+    const std::vector<uint8_t> saved = font::save(s, 6, 8);
+    const font::ReadResult r = font::read(std::string(saved.begin(), saved.end()));
+    REQUIRE(r.font);
+    CHECK_EQ(r.font->glyphs[0x20 * 8], 0x01);
+    CHECK_EQ(r.font->glyphs[0x20 * 8 + 7], 0x80);
+  }
+
+  TEST_CASE("refuses a text the reader refuses, with its message") {
+    std::string error;
+    CHECK_FALSE(font::open(bytesOf(withLine(blankText(6, 8), 2, "cell 9 9")), &error));
+    CHECK_EQ(error, "line 2: the cell is a width and a height, each 4 to 8, as cell 6 8");
+  }
+}
+
+TEST_SUITE("a new font") {
+  TEST_CASE("is a file the editor opens, the built-in font at cell 6 by 8") {
+    const std::vector<uint8_t> file = font::newFile();
+    std::string error;
+    const std::optional<font::Opened> o = font::open(file, &error);
+    REQUIRE_MESSAGE(o, error);
+    CHECK_EQ(o->width, 6);
+    CHECK_EQ(o->height, 8);
+    CHECK(font::save(o->strip, o->width, o->height) == file);
+    // The block at $7F fills all eight columns.
+    for (int y = 0; y < 8; y++) {
+      for (int x = 0; x < 8; x++) CHECK_EQ(o->strip.frames[0x7F].at(x, y), font::INK);
+    }
+  }
+
+  TEST_CASE("is named with .font added when the name lacks it") {
+    CHECK_EQ(font::fileName("small"), "small.font");
+    CHECK_EQ(font::fileName("small.font"), "small.font");
+    CHECK_EQ(font::fileName("big.fnt"), "big.fnt.font");
   }
 }

@@ -131,6 +131,97 @@ TEST_SUITE("sprite tools") {
   }
 }
 
+TEST_SUITE("the half circle") {
+  // The half of the ellipse whose flat side is one edge of the box. In an
+  // 8 by 4 box the round side faces up or down, in a 4 by 8 box right or
+  // left.
+  TEST_CASE("faces up, filled and outlined") {
+    Frame f(8, 4);
+    halfCircle(f, 0, 0, 7, 3, Facing::Up, 1, true);
+    CHECK_EQ(show(f), "..1111..\n.111111.\n11111111\n11111111\n");
+    Frame o(8, 4);
+    halfCircle(o, 0, 0, 7, 3, Facing::Up, 1, false);
+    CHECK_EQ(show(o), "..1111..\n.1....1.\n1......1\n11111111\n");
+  }
+
+  TEST_CASE("faces down, filled and outlined") {
+    Frame f(8, 4);
+    halfCircle(f, 0, 0, 7, 3, Facing::Down, 1, true);
+    CHECK_EQ(show(f), "11111111\n11111111\n.111111.\n..1111..\n");
+    Frame o(8, 4);
+    halfCircle(o, 0, 0, 7, 3, Facing::Down, 1, false);
+    CHECK_EQ(show(o), "11111111\n1......1\n.1....1.\n..1111..\n");
+  }
+
+  TEST_CASE("faces right, filled and outlined") {
+    Frame f(4, 8);
+    halfCircle(f, 0, 0, 3, 7, Facing::Right, 1, true);
+    CHECK_EQ(show(f), "11..\n111.\n1111\n1111\n1111\n1111\n111.\n11..\n");
+    Frame o(4, 8);
+    halfCircle(o, 0, 0, 3, 7, Facing::Right, 1, false);
+    CHECK_EQ(show(o), "11..\n1.1.\n1..1\n1..1\n1..1\n1..1\n1.1.\n11..\n");
+  }
+
+  TEST_CASE("faces left, filled and outlined") {
+    Frame f(4, 8);
+    halfCircle(f, 0, 0, 3, 7, Facing::Left, 1, true);
+    CHECK_EQ(show(f), "..11\n.111\n1111\n1111\n1111\n1111\n.111\n..11\n");
+    Frame o(4, 8);
+    halfCircle(o, 0, 0, 3, 7, Facing::Left, 1, false);
+    CHECK_EQ(show(o), "..11\n.1.1\n1..1\n1..1\n1..1\n1..1\n.1.1\n..11\n");
+  }
+
+  TEST_CASE("takes its corners in either order, and runs off the edge without harm") {
+    Frame a(8, 4), b(8, 4);
+    halfCircle(a, 0, 0, 7, 3, Facing::Up, 2, true);
+    halfCircle(b, 7, 3, 0, 0, Facing::Up, 2, true);
+    CHECK(a == b);
+    Frame c(4, 4);
+    halfCircle(c, 0, 0, 7, 3, Facing::Up, 1, true);
+    CHECK_EQ(show(c), "..11\n.111\n1111\n1111\n");
+  }
+}
+
+TEST_SUITE("the 2 by 2 block") {
+  TEST_CASE("joins four frames into one twice the size, left to right, top to bottom") {
+    Frame tl(2, 2), tr(2, 2), bl(2, 2), br(2, 2);
+    tl.set(0, 0, 1);
+    tr.set(1, 0, 2);
+    bl.set(0, 1, 3);
+    br.set(1, 1, 4);
+    const Frame big = joinBlock(tl, tr, bl, br);
+    CHECK_EQ(big.width, 4);
+    CHECK_EQ(big.height, 4);
+    CHECK_EQ(show(big), "1..2\n....\n....\n3..4\n");
+  }
+
+  TEST_CASE("splits back into the four frames it was joined from") {
+    Frame tl(2, 2), tr(2, 2), bl(2, 2), br(2, 2);
+    tl.set(1, 1, 5);
+    tr.set(0, 1, 6);
+    bl.set(1, 0, 7);
+    br.set(0, 0, 8);
+    const Frame big = joinBlock(tl, tr, bl, br);
+    Frame a(2, 2), b(2, 2), c(2, 2), d(2, 2);
+    splitBlock(big, a, b, c, d);
+    CHECK(a == tl);
+    CHECK(b == tr);
+    CHECK(c == bl);
+    CHECK(d == br);
+  }
+
+  TEST_CASE("a stroke across the middle lands in every frame it crosses") {
+    Frame tl(2, 2), tr(2, 2), bl(2, 2), br(2, 2);
+    Frame big = joinBlock(tl, tr, bl, br);
+    line(big, 0, 0, 3, 3, 1);
+    splitBlock(big, tl, tr, bl, br);
+    CHECK_EQ(show(tl), "1.\n.1\n");
+    CHECK_EQ(show(tr), "..\n..\n");
+    CHECK_EQ(show(bl), "..\n..\n");
+    CHECK_EQ(show(br), "1.\n.1\n");
+  }
+}
+
 TEST_SUITE("sprite PNG") {
   TEST_CASE("a strip survives the round trip, index for index, with its frames and speed") {
     Strip s = blank(3, 2, 3);
