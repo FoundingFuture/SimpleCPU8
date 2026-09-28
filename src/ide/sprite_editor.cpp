@@ -137,6 +137,40 @@ void drawGlyph(ImDrawList* dl, const sprite::Frame& f, ImVec2 o, float scale, in
   }
 }
 
+// Put the next item, `width` wide, beside the last one when it fits in the
+// window. Otherwise it starts the next line, so a narrow pane wraps its
+// controls where it would clip them.
+void flow(float width) {
+  const ImGuiStyle& st = ImGui::GetStyle();
+  const float right = ImGui::GetItemRectMax().x + st.ItemSpacing.x + width;
+  if (right <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
+}
+
+float textWidth(const char* s) { return ImGui::CalcTextSize(s).x; }
+float buttonWidth(const char* label) { return textWidth(label) + ImGui::GetStyle().FramePadding.x * 2.0f; }
+// A checkbox or a radio button with its label.
+float toggleWidth(const char* label) {
+  return ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + textWidth(label);
+}
+// An InputInt that shows `digits` digits beside its two step buttons.
+float intFieldWidth(int digits) {
+  const ImGuiStyle& st = ImGui::GetStyle();
+  return textWidth("0") * static_cast<float>(digits) + st.FramePadding.x * 2.0f +
+         (ImGui::GetFrameHeight() + st.ItemInnerSpacing.x) * 2.0f;
+}
+// A labelled field `width` wide: the field, then its label.
+float labelledWidth(float width, const char* label) {
+  return width + ImGui::GetStyle().ItemInnerSpacing.x + textWidth(label);
+}
+
+// A dim note after the last item, wrapped at the window's edge.
+void hint(const char* text) {
+  flow(textWidth(text));
+  ImGui::PushTextWrapPos(0.0f);
+  ImGui::TextDisabled("%s", text);
+  ImGui::PopTextWrapPos();
+}
+
 // The preview picture's pixel at (x, y) takes palette colour c.
 void plot(std::vector<uint8_t>& rgba, const std::vector<uint8_t>& pal, int x, int y, uint8_t c) {
   if (x < 0 || y < 0 || x >= SCREEN_W || y >= SCREEN_H) return;
@@ -466,7 +500,7 @@ void SpriteEditor::body() {
 
   // The canvas on the left, the colours and the frame tools in a column
   // on the right, the frames along the bottom.
-  const float side = std::min(280.0f, ImGui::GetContentRegionAvail().x * 0.45f);
+  const float side = std::min(ImGui::GetFontSize() * 22.0f, ImGui::GetContentRegionAvail().x * 0.45f);
   const float stripHeight = 72.0f + ImGui::GetFrameHeightWithSpacing() * 3.0f + ImGui::GetStyle().ScrollbarSize;
   const ImVec2 avail = ImGui::GetContentRegionAvail();
   const float leftWidth = std::max(120.0f, avail.x - side - ImGui::GetStyle().ItemSpacing.x);
@@ -481,6 +515,9 @@ void SpriteEditor::body() {
   ImGui::Spacing();
   sizeBox();
   frameOps("This frame");
+  // What follows the palette, so the next frame sizes the palette to leave
+  // room for it.
+  paletteTail_ = ImGui::GetCursorPosY() - paletteEnd_;
   ImGui::EndChild();
   ImGui::BeginChild("##frames", ImVec2(0, 0), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
   frameStrip();
@@ -492,9 +529,12 @@ void SpriteEditor::fontBody() {
   // it. The set and clear buttons, the cell and the glyph sheet go on the
   // right.
   const ImVec2 avail = ImGui::GetContentRegionAvail();
-  const float side = std::clamp(avail.x * 0.5f, 200.0f, 460.0f);
+  const float em = ImGui::GetFontSize();
+  const float side = std::clamp(avail.x * 0.5f, em * 15.0f, em * 36.0f);
   const float leftWidth = std::max(120.0f, avail.x - side - ImGui::GetStyle().ItemSpacing.x);
-  const float bottom = 64.0f + ImGui::GetFrameHeightWithSpacing() * 3.0f + ImGui::GetTextLineHeightWithSpacing() * 2.0f;
+  // The cells pane is as tall as its content was last frame, so wrapped
+  // buttons never need a scrollbar.
+  const float bottom = std::max(cellsHeight_, ImGui::GetFrameHeightWithSpacing() * 3.0f);
   ImGui::BeginChild("##left", ImVec2(leftWidth, 0), ImGuiChildFlags_None);
   ImGui::BeginChild("##canvas", ImVec2(0, std::max(120.0f, ImGui::GetContentRegionAvail().y - bottom)),
                     ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar);
@@ -503,6 +543,7 @@ void SpriteEditor::fontBody() {
   ImGui::BeginChild("##cells", ImVec2(0, 0), ImGuiChildFlags_Borders);
   fourCells();
   frameOps(blockView() ? "The block" : "This glyph");
+  cellsHeight_ = ImGui::GetCursorPosY() + ImGui::GetStyle().WindowPadding.y;
   ImGui::EndChild();
   ImGui::EndChild();
   ImGui::SameLine();
@@ -557,22 +598,23 @@ void SpriteEditor::toolbar() {
   const bool fontMode = mode_ == Mode::Font;
   View& v = view();
   ImGui::Text("%s%s", name_.c_str(), dirty_ ? " *" : "");
-  ImGui::SameLine();
+  char info[64];
   if (fontMode) {
-    ImGui::TextDisabled("cell %d x %d, 256 glyphs", cellW_, cellH_);
+    std::snprintf(info, sizeof info, "cell %d x %d, 256 glyphs", cellW_, cellH_);
   } else {
-    ImGui::TextDisabled("%d x %d, %zu frame(s)", strip_.width, strip_.height, strip_.frames.size());
+    std::snprintf(info, sizeof info, "%d x %d, %zu frame(s)", strip_.width, strip_.height, strip_.frames.size());
   }
-  ImGui::SameLine();
+  hint(info);
+  flow(buttonWidth("Save"));
   if (ImGui::SmallButton("Save")) {
     if (save()) host_.note("saved " + name_);
   }
-  ImGui::SameLine();
+  flow(buttonWidth("Undo"));
   ImGui::BeginDisabled(undo_.empty());
   if (ImGui::SmallButton("Undo")) undo();
   ImGui::EndDisabled();
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("Ctrl+Z");
-  ImGui::SameLine();
+  flow(buttonWidth("Redo"));
   ImGui::BeginDisabled(redo_.empty());
   if (ImGui::SmallButton("Redo")) redo();
   ImGui::EndDisabled();
@@ -580,42 +622,46 @@ void SpriteEditor::toolbar() {
 
   bool first = true;
   for (Tool t : tools()) {
-    if (!first) ImGui::SameLine();
-    first = false;
     const int i = static_cast<int>(t);
+    if (!first) flow(toggleWidth(toolName(i)));
+    first = false;
     if (ImGui::RadioButton(toolName(i), v.tool == t)) v.tool = t;
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", fontMode ? fontToolHelp(i) : toolHelp(i));
   }
   ImGui::Checkbox("Filled", &v.filled);
-  ImGui::SameLine();
   if (fontMode) {
     char turn[32];
     std::snprintf(turn, sizeof turn, "Turn: round %s", facingName(facing_));
+    flow(buttonWidth(turn));
     if (ImGui::SmallButton(turn)) {
       facing_ = static_cast<sprite::Facing>((static_cast<int>(facing_) + 1) % 4);
       v.tool = Tool::HalfCircle;
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("the half circle's round side; H with the tool picked turns it too");
   } else {
+    flow(toggleWidth("Dither"));
     ImGui::Checkbox("Dither", &dither_);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("the gradient mixes neighbouring colours in a fine pattern");
   }
-  ImGui::SameLine();
+  flow(toggleWidth("Grid"));
   ImGui::Checkbox("Grid", &v.grid);
-  ImGui::SameLine();
+  flow(toggleWidth("Onion skin"));
   ImGui::Checkbox("Onion skin", &v.onion);
   if (ImGui::IsItemHovered()) {
     ImGui::SetTooltip(fontMode ? "the glyph before this one shows faintly where this one is clear"
                                : "the frame before this one shows faintly where this one is transparent");
   }
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(120.0f);
+  const float zoomWidth = textWidth("00 x") * 2.5f;
+  flow(labelledWidth(zoomWidth, "Zoom"));
+  ImGui::SetNextItemWidth(zoomWidth);
   ImGui::SliderFloat("Zoom", &v.zoom, MIN_ZOOM, MAX_ZOOM, "%.0f x");
-  ImGui::SameLine();
+  flow(buttonWidth("Fit"));
   if (ImGui::SmallButton("Fit")) fit_ = 1;
   const int t = static_cast<int>(v.tool);
+  ImGui::PushTextWrapPos(0.0f);
   ImGui::TextDisabled("%s. A right click picks up %s.", fontMode ? fontToolHelp(t) : toolHelp(t),
                       fontMode ? "set or clear" : "a colour");
+  ImGui::PopTextWrapPos();
 }
 
 void SpriteEditor::canvas() {
@@ -803,16 +849,18 @@ void SpriteEditor::paletteBox() {
   ImGui::Text("draw %d, second %d", primary_, secondary_);
   if (ImGui::SmallButton("Swap")) std::swap(primary_, secondary_);
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("X");
-  ImGui::SameLine();
-  ImGui::TextDisabled("0 is transparent");
+  hint("0 is transparent");
   ImGui::EndGroup();
 
   // The 256 colours, 16 a row. A left click picks the drawing colour, a
-  // right click the second.
-  const float cell = std::floor(std::min(width, 320.0f) / 16.0f);
+  // right click the second. The palette gives up height so that the
+  // controls under it fit the column.
+  const float room = ImGui::GetContentRegionAvail().y - paletteTail_;
+  const float cell = std::max(4.0f, std::floor(std::min({width, 320.0f, room}) / 16.0f));
   p = ImGui::GetCursorScreenPos();
   ImGui::InvisibleButton("##palette", ImVec2(cell * 16, cell * 16),
                          ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+  paletteEnd_ = ImGui::GetCursorPosY();
   const ImVec2 m = ImGui::GetIO().MousePos;
   const int hx = static_cast<int>((m.x - p.x) / cell), hy = static_cast<int>((m.y - p.y) / cell);
   const bool over = ImGui::IsItemHovered() && hx >= 0 && hx < 16 && hy >= 0 && hy < 16;
@@ -832,7 +880,9 @@ void SpriteEditor::paletteBox() {
     const ImVec2 a(p.x + static_cast<float>(i % 16) * cell, p.y + static_cast<float>(i / 16) * cell);
     dl->AddRect(a, ImVec2(a.x + cell, a.y + cell), col, 0.0f, 0, 2.0f);
   }
+  ImGui::PushTextWrapPos(0.0f);
   ImGui::TextDisabled("left click: draw colour, right click: second");
+  ImGui::PopTextWrapPos();
 }
 
 void SpriteEditor::inkBox() {
@@ -840,24 +890,24 @@ void SpriteEditor::inkBox() {
   auto choice = [&](const char* label, bool set, const char* tip) {
     const bool on = ink_ == set;
     if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(label, ImVec2(80.0f, 0))) ink_ = set;
+    if (ImGui::Button(label, ImVec2(std::max(80.0f, buttonWidth(label)), 0))) ink_ = set;
     if (on) ImGui::PopStyleColor();
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tip);
   };
   choice("Set", true, "the tools set pixels; X swaps");
-  ImGui::SameLine();
+  flow(std::max(80.0f, buttonWidth("Clear")));
   choice("Clear", false, "the tools clear pixels; X swaps");
-  ImGui::SameLine();
-  ImGui::TextDisabled("Shift draws the other");
+  hint("Shift draws the other");
 }
 
 void SpriteEditor::cellBox() {
   ImGui::SeparatorText("Cell");
   int w = cellW_, h = cellH_;
-  ImGui::SetNextItemWidth(80.0f);
+  const float field = intFieldWidth(1);
+  ImGui::SetNextItemWidth(field);
   const bool wChanged = ImGui::InputInt("W", &w, 1, 1);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0f);
+  flow(labelledWidth(field, "H"));
+  ImGui::SetNextItemWidth(field);
   const bool hChanged = ImGui::InputInt("H", &h, 1, 1);
   w = std::clamp(w, gpu::TEXT_CELL_MIN, gpu::TEXT_CELL_MAX);
   h = std::clamp(h, gpu::TEXT_CELL_MIN, gpu::TEXT_CELL_MAX);
@@ -867,8 +917,9 @@ void SpriteEditor::cellBox() {
     cellH_ = h;
     changed();
   }
-  ImGui::SameLine();
-  ImGui::TextDisabled("%d x %d characters", SCREEN_W / cellW_, SCREEN_H / cellH_);
+  char grid[32];
+  std::snprintf(grid, sizeof grid, "%d x %d characters", SCREEN_W / cellW_, SCREEN_H / cellH_);
+  hint(grid);
   if (ImGui::IsItemHovered()) {
     ImGui::SetTooltip("the part of each glyph the GPU draws, from the top left, %d to %d each way. The rest is "
                       "shaded and kept",
@@ -884,7 +935,7 @@ void SpriteEditor::glyphSheet() {
                                "four codes in a row as the frames of a strip; the preview plays them",
                                "codes n, n+1, n+16 and n+17 as one 16 by 16 picture"};
   for (int i = 0; i < 3; i++) {
-    if (i) ImGui::SameLine();
+    if (i) flow(toggleWidth(labels[i]));
     if (ImGui::RadioButton(labels[i], fontView_ == static_cast<FontView>(i))) setFontView(static_cast<FontView>(i));
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tips[i]);
   }
@@ -933,18 +984,15 @@ void SpriteEditor::fourCells() {
   switch (fontView_) {
     case FontView::Single:
       ImGui::Text("%s, %d", codeLabel(frame_).c_str(), frame_);
-      ImGui::SameLine();
-      ImGui::TextDisabled(", and . step the code; a click in the sheet picks one");
+      hint(", and . step the code; a click in the sheet picks one");
       break;
     case FontView::Strip:
       ImGui::Text("Codes $%02X to $%02X, editing %s", group_, group_ + 3, codeLabel(frame_).c_str());
-      ImGui::SameLine();
-      ImGui::TextDisabled(", and . step; the preview plays the four");
+      hint(", and . step; the preview plays the four");
       break;
     case FontView::Block:
       ImGui::Text("Block $%02X $%02X / $%02X $%02X", group_, group_ + 1, group_ + SHEET_SIDE, group_ + SHEET_SIDE + 1);
-      ImGui::SameLine();
-      ImGui::TextDisabled(", and . move the block");
+      hint(", and . move the block");
       break;
   }
   if (fontView_ != FontView::Strip) return;
@@ -1042,14 +1090,15 @@ void SpriteEditor::fontPreviewBody() {
 
 void SpriteEditor::sizeBox() {
   ImGui::SeparatorText("Frame size");
-  ImGui::SetNextItemWidth(80.0f);
+  const float field = intFieldWidth(2);
+  ImGui::SetNextItemWidth(field);
   ImGui::InputInt("W", &newWidth_, 1, 8);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(80.0f);
+  flow(labelledWidth(field, "H"));
+  ImGui::SetNextItemWidth(field);
   ImGui::InputInt("H", &newHeight_, 1, 8);
   newWidth_ = std::clamp(newWidth_, 1, sprite::MAX_SIDE);
   newHeight_ = std::clamp(newHeight_, 1, sprite::MAX_SIDE);
-  ImGui::SameLine();
+  flow(buttonWidth("Resize"));
   ImGui::BeginDisabled(newWidth_ == strip_.width && newHeight_ == strip_.height);
   if (ImGui::Button("Resize")) {
     pushUndo();
@@ -1064,7 +1113,10 @@ void SpriteEditor::sizeBox() {
 
 void SpriteEditor::frameOps(const char* title) {
   ImGui::SeparatorText(title);
+  bool first = true;
   auto act = [&](const char* label, const char* tip, auto fn) {
+    if (!first) flow(buttonWidth(label));
+    first = false;
     if (ImGui::SmallButton(label)) {
       pushUndo();
       if (blockView()) loadBlock();
@@ -1075,17 +1127,11 @@ void SpriteEditor::frameOps(const char* title) {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tip);
   };
   act("Roll <", "every row one pixel left, wrapping round", [](sprite::Frame& f) { sprite::roll(f, -1, 0); });
-  ImGui::SameLine();
   act("Roll >", "every row one pixel right, wrapping round", [](sprite::Frame& f) { sprite::roll(f, 1, 0); });
-  ImGui::SameLine();
   act("Roll ^", "every column one pixel up, wrapping round", [](sprite::Frame& f) { sprite::roll(f, 0, -1); });
-  ImGui::SameLine();
   act("Roll v", "every column one pixel down, wrapping round", [](sprite::Frame& f) { sprite::roll(f, 0, 1); });
-  if (mode_ == Mode::Font) ImGui::SameLine();
   act("Flip H", "mirror left to right", [](sprite::Frame& f) { sprite::flipH(f); });
-  ImGui::SameLine();
   act("Flip V", "mirror top to bottom", [](sprite::Frame& f) { sprite::flipV(f); });
-  ImGui::SameLine();
   act("Clear", mode_ == Mode::Font ? "every pixel clear" : "every pixel transparent",
       [](sprite::Frame& f) { std::fill(f.px.begin(), f.px.end(), uint8_t{0}); });
 }
@@ -1093,15 +1139,8 @@ void SpriteEditor::frameOps(const char* title) {
 void SpriteEditor::frameStrip() {
   const int n = static_cast<int>(strip_.frames.size());
   const bool full = n >= sprite::MAX_FRAMES;
-  // Each button goes on the line when it fits, else it starts the next.
-  auto flow = [](const char* label) {
-    const ImGuiStyle& st = ImGui::GetStyle();
-    const float w = ImGui::CalcTextSize(label).x + st.FramePadding.x * 2.0f;
-    const float right = ImGui::GetItemRectMax().x + st.ItemSpacing.x + w;
-    if (right <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) ImGui::SameLine();
-  };
   auto frameOp = [&](const char* label, bool enabled, const char* tip, auto fn) {
-    flow(label);
+    flow(buttonWidth(label));
     ImGui::BeginDisabled(!enabled);
     if (ImGui::SmallButton(label)) {
       pushUndo();
@@ -1140,8 +1179,9 @@ void SpriteEditor::frameStrip() {
     strip_.frames.erase(at(frame_));
     frame_ = std::min(frame_, static_cast<int>(strip_.frames.size()) - 1);
   });
-  flow("at most 16 frames; , and . step");
-  ImGui::TextDisabled("at most %d frames; , and . step", sprite::MAX_FRAMES);
+  char limit[48];
+  std::snprintf(limit, sizeof limit, "at most %d frames; , and . step", sprite::MAX_FRAMES);
+  hint(limit);
 
   // The thumbnails, each fitted to a 72 unit square. A click selects.
   const float box = 72.0f;

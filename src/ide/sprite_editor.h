@@ -188,6 +188,11 @@ class SpriteEditor {
   // Fit the zoom to the canvas over the next few frames: a freshly
   // docked pane takes a frame or two to reach its size.
   int fit_ = 3;
+  // Heights measured last frame. The sprite palette shrinks by what follows
+  // it, and font mode's cells pane grows to its content.
+  float paletteEnd_ = 0.0f;
+  float paletteTail_ = 0.0f;
+  float cellsHeight_ = 0.0f;
 
   // Font mode. The cell is the header's, 4 to 8 each way. group_ is the
   // first of the four codes the strip and the block show.
