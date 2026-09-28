@@ -21,6 +21,8 @@ Eddie took on 2026-09-28, with the trade-offs behind them.
 
 ## What exists today
 
+This records the code before phase 1. 2866ea9, cd6a53a, 3a36824 and 38412d9 changed it.
+
 ### CMD_LOAD_FONT
 
 `CMD_LOAD_FONT` ($57) takes a cartridge address in DATA0 to DATA2
@@ -345,6 +347,8 @@ Each phase leaves master working.
 
 ### Phase 1, the asset format and the GPU
 
+Done in 2866ea9.
+
 The `.font` reader and writer, the blob converter, `CMD_LOAD_FONT` with the
 cell, `CMD_TEXT_CELL`, `CMD_RESET_FONT`, the crash, the two reads, and the
 grid in the overlay and in text mode. BASIC is untouched and still runs 42
@@ -370,6 +374,8 @@ Tests:
 
 ### Phase 2, the names
 
+Done in cd6a53a and 3a36824.
+
 STO_FIND, the ASET change, the placement rule in simplecpu-make, the name
 notes, and the `.font` and `__font` directives.
 
@@ -386,6 +392,8 @@ Tests:
 - `.font` and `__font` place the same blob simplecpu-make does.
 
 ### Phase 3, BASIC and the terminal
+
+Done in 38412d9.
 
 The buffer at $F000, `--heap-stack-top`, `SYS_COLS` and `SYS_ROWS`,
 `LOADFONT` and `SETTEXT`, errors 32 and 33, and the files listed under the
@@ -560,3 +568,7 @@ Confirmed by Eddie on 2026-09-28, as proposed:
 - `.font` as the file extension, and the blob as width, height and 2048
   glyph bytes.
 - The error names `E_TEXTSIZE` and `E_NOFONT`.
+
+### What exists today stays
+
+It records the code before phase 1, and its first line says so.
