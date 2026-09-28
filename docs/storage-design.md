@@ -226,7 +226,7 @@ On return, by `RET`:
 
 A routine may use the hardware stack in balance. It may not touch the zero
 page past the system page, which is BASIC's register file. It may not write
-BASIC's RAM other than through the address in D1 and the system page. The screen at $FAC0 is for printing.
+BASIC's RAM other than through the address in D1 and the system page. The screen at $F000 is for printing.
 
 BASIC's dispatch, in src/basic/bang.c:
 
@@ -346,6 +346,8 @@ existing design.
 - LOAD skips unnumbered lines rather than running them.
 - STO_FIND takes its name through STO_NAME, as every other command does,
   and answers at the block. Eddie, 2026-09-28.
+- BASIC's screen is 4 KB at $F000, and this note names it there. Eddie,
+  2026-09-28.
 
 ## Still open
 
