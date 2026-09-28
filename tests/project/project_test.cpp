@@ -16,6 +16,8 @@
 #include "assets/sprite.h"
 #if SC8_HAVE_BASIC
 #include "basic/program.h"
+#include "devices/font.h"
+#include "support/basic_session.h"
 #endif
 
 namespace fs = std::filesystem;
@@ -497,5 +499,100 @@ TEST_SUITE("assets on the cartridge by name") {
     CHECK(b.errors[0].find("bad.font:1:") != std::string::npos);
   }
 }
-#endif
 
+// examples/font as simplecpu-make builds it, booted headless. The program
+// waits for a key between its three steps, so each one is checked on
+// screen before the next.
+namespace {
+
+// The first cell on the text screen that holds `code`, as column and row.
+std::pair<int, int> cellOf(const testing::Session& s, int code) {
+  const int cols = s.m->ram[basic::SYS_COLS], rows = s.m->ram[basic::SYS_ROWS];
+  for (int i = 0; i < cols * rows; i++) {
+    if (s.m->ram[static_cast<size_t>(basic::SCREEN + i)] == code) return {i % cols, i / cols};
+  }
+  return {-1, -1};
+}
+
+// Pixels in the text colour in the w by h cell at col, row of the frame.
+int litInCell(const Gpu::Frame& f, std::pair<int, int> at, int w, int h, int fg) {
+  int n = 0;
+  for (int y = 0; y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      if (f[static_cast<size_t>((at.second * h + y) * gpu::SCREEN_W + at.first * w + x)] == fg) n++;
+    }
+  }
+  return n;
+}
+
+int bitsIn(uint8_t b) {
+  int n = 0;
+  for (; b; b = static_cast<uint8_t>(b & (b - 1))) n++;
+  return n;
+}
+
+void pressKey(testing::Session& s) {
+  s.pushKey(' ', false);
+  s.runBudget(200000);
+  s.pushKey(' ', true);
+  s.runBudget(20000000);
+}
+
+}  // namespace
+
+TEST_SUITE("examples/font") {
+  TEST_CASE("simplecpu-make builds it, and it runs its font, the built-in font, then 8 by 8 cells") {
+    const fs::path example = fs::path(SC8_EXAMPLES_DIR) / "font";
+    TempDir t;
+    fs::create_directories(t.path);
+    const fs::path rom = t.path / "font.rom";
+    const std::string cmd = "\"" + std::string(SC8_SIMPLECPU_MAKE) + "\" \"" + example.string() + "\" -o \"" +
+                            rom.string() + "\" > \"" + (t.path / "make.txt").string() + "\" 2>&1";
+    REQUIRE_EQ(std::system(cmd.c_str()), 0);
+    std::ifstream in(rom, std::ios::binary);
+    const CartridgeResult r = decodeCartridge(std::vector<uint8_t>(std::istreambuf_iterator<char>(in), {}));
+    REQUIRE_MESSAGE(r.cartridge, r.error);
+
+    std::ifstream fontIn(example / "assets" / "chunky.font");
+    const font::ReadResult chunky = font::read(std::string(std::istreambuf_iterator<char>(fontIn), {}));
+    REQUIRE_MESSAGE(chunky.font, chunky.error);
+    REQUIRE_EQ(chunky.font->width, 8);
+    REQUIRE_EQ(chunky.font->height, 8);
+
+    testing::Session s(*r.cartridge);
+    s.load();
+    s.runBudget(20000000);
+
+    // LOADFONT CHUNKY: the font's cell makes the grid 32 by 32, and the
+    // heart at $80 is on screen in the font's own pixels.
+    CHECK_EQ(s.m->ram[basic::SYS_COLS], 32);
+    CHECK_EQ(s.m->ram[basic::SYS_ROWS], 32);
+    const auto heart = cellOf(s, 0x80);
+    REQUIRE_GE(heart.first, 0);
+    int heartBits = 0;
+    for (int row = 0; row < 8; row++) heartBits += bitsIn(chunky.font->glyphs[static_cast<size_t>(0x80 * 8 + row)]);
+    CHECK_GT(heartBits, 0);
+    CHECK_EQ(litInCell(s.gpu.composeFrame(), heart, 8, 8, s.gpu.textColor), heartBits);
+
+    // LOADFONT alone: the built-in font at 6 by 8, 42 columns.
+    pressKey(s);
+    CHECK_EQ(s.m->ram[basic::SYS_COLS], 42);
+    CHECK_EQ(s.m->ram[basic::SYS_ROWS], 32);
+    int builtInT = 0;
+    for (int row = 0; row < 8; row++) builtInT += bitsIn(glyphRow('T', row));
+    const auto t6 = cellOf(s, 'T');
+    REQUIRE_GE(t6.first, 0);
+    CHECK_EQ(litInCell(s.gpu.composeFrame(), t6, 6, 8, s.gpu.textColor), builtInT);
+
+    // SETTEXT 8, 8: the same built-in glyphs in 8 by 8 cells, 32 by 32.
+    pressKey(s);
+    CHECK_EQ(s.m->ram[basic::SYS_COLS], 32);
+    CHECK_EQ(s.m->ram[basic::SYS_ROWS], 32);
+    CHECK_EQ(s.gpu.glyphRowOf('T', 0), glyphRow('T', 0));
+    const auto t8 = cellOf(s, 'T');
+    REQUIRE_GE(t8.first, 0);
+    CHECK_EQ(litInCell(s.gpu.composeFrame(), t8, 8, 8, s.gpu.textColor), builtInT);
+    CHECK_EQ(s.m->status, Status::Running);
+  }
+}
+#endif

@@ -73,6 +73,8 @@ sc8_asm_tests assembles golden-src and checks the bytes against it.
 - text: printf over graphics. Halts.
 - textmode: text mode from mapped RAM. Halts.
 - matrix: matrix rain in text mode. Endless.
+- font: a BASIC project with its own 8 by 8 font, LOADFONT and SETTEXT.
+  Waits for a key between its steps.
 
 ## Sound
 
