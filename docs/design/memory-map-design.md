@@ -48,13 +48,19 @@ $0000  zero page, 256 bytes, reached by addr8
 $0100  general data RAM
   .
   .
-$FAC0  text screen, 1344 bytes, 42 by 32 characters
+$F000  text screen, 4 KB, a grid the text cell sets
 $FFFF  top
 ```
 
 Free RAM when text mode is off. A screen when it is on. Writing to it while
 text mode runs shows up on the next frame. That is already how the mapped
 region behaves.
+
+The GPU's text cell sets the grid, 42 by 32 at power on. That grid reads
+1344 bytes. A 4 by 4 cell gives 64 by 64, which fills the 4 KB.
+
+The C stack grows down from $FAC0 by default, below a 42 by 32 screen.
+`--heap-stack-top ADDR` moves it. BASIC passes $F000, below its 4 KB screen.
 
 ## Address overflow
 
@@ -80,8 +86,10 @@ what the mapped-RAM demos teach.
 What changes is the convention: the top of RAM is where it belongs, and the
 demos and the manual say so. A program that maps it elsewhere is doing
 something deliberate rather than following the only example it saw. The
-address is `$FAC0` now that the 6 by 8 font gives a 42 by 32 grid. It was
-`$FC00` under the 8 by 8 font, and the demos moved with the font.
+address is `$F000`, room for the 64 by 64 grid of a 4 by 4 cell. It was
+`$FAC0` for the 42 by 32 grid alone, and `$FC00` under the 8 by 8 font.
+examples/matrix and examples/textmode keep 6 by 8 and map theirs at
+`$FAC0`.
 
 Room to move it is what makes double buffering possible. Show `$FAC0`, build
 the next frame at `$F580`, wait for `GPU_FRAME` to tick, then map `$F580` and
