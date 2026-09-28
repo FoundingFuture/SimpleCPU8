@@ -29,15 +29,16 @@ map is a separate design. This one knows nothing of fonts.
 ```basic
 10 FOR I = 0 TO 5: READ A: PRINT A;: NEXT I
 20 PRINT DATA(100)
+25 PRINT HEX$(DATA(100))
 30 POKE $E010, 1, 2, 3
 100 DATA $E000, 10, 20, 30
 110 DATA 40, 50, 60
 ```
 
-Line 10 prints `102030405060`. Line 20 prints -8192. A BASIC number runs
-from -32768 to 32767, so an address past `$7FFF` prints negative. POKE,
-PEEK and DATA(n) wrap it back to `$E000`. At RUN the six bytes 10 to 60
-land at `$E000` to `$E005`.
+Line 10 prints `102030405060`. Line 20 prints -8192, because the address
+is above 32767 and a BASIC number runs from -32768 to 32767. Line 25
+prints `E000`. POKE, PEEK and DATA(n) wrap -8192 back to `$E000`. At RUN
+the six bytes 10 to 60 land at `$E000` to `$E005`.
 Line 30 writes 1, 2 and 3 to `$E010` to `$E012`.
 
 | Word | Form | Does |
