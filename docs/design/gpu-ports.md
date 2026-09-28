@@ -213,8 +213,10 @@ RAM once, for tiles and backdrops.
 
 ## Text
 
-The GPU draws characters with a 6 by 8 font, which gives 42 columns by 32
-rows, 1344 cells. The font is five columns of face with a one pixel gap, so
+The GPU draws characters in a text cell, 4 to 8 pixels each way. The grid
+is the screen over the cell, rounded down. Power on's cell is the 6 by 8
+font, which gives 42 columns by 32 rows, 1344 cells. GPU_TEXT_COLS and
+GPU_TEXT_ROWS read the grid. The built-in font is five columns of face with a one pixel gap, so
 letters never touch.
 
 Codes 0x20 to 0x7F have a glyph. The last is a solid block, which is what a
@@ -243,8 +245,8 @@ glyph lights shows the picture under it. The text background fills a cell
 only when the style's opaque flag is set, as it does for the overlay.
 CMD_SET_TEXTMODE switches the mode and sets the base together, reading
 GPU_ADDR_HI and GPU_ADDR_LO. One command, so a mapped mode with no buffer
-under it cannot be reached. The GPU reads 1344 bytes every frame, so a store
-shows at once. CMD_SET_GRAPHICSMODE switches back, and graphics is
+under it cannot be reached. The GPU reads columns times rows bytes every
+frame, 1344 at power on, so a store shows at once. CMD_SET_GRAPHICSMODE switches back, and graphics is
 the power-on mode.
 
 ## Copying cartridge data into RAM
