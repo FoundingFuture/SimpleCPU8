@@ -1293,6 +1293,33 @@ TEST_SUITE("the storage driver") {
 // The system page: BASIC's own state at fixed zero page addresses, so a
 // program reads and writes it with the peek family and a driver in assembly
 // finds it. docs/basic-system-page.md is the table these pin.
+TEST_SUITE("numbers") {
+  // A number is 16 bits, so a decimal written past 32767 wraps the way a
+  // sum does: 40000 is 40000 - 65536. PEEK and POKE take the wrapped value
+  // back to the same box.
+  TEST_CASE("a decimal number past 32767 wraps, and still names the same box") {
+    auto s = boot();
+    settle(*s);
+    // The row right under the echoed command is what PRINT printed.
+    auto printed = [&](const std::string& command) {
+      type(*s, command);
+      const auto scr = screen(*s);
+      for (size_t row = 0; row + 1 < scr.size(); row++) {
+        if (scr[row] == ">" + command) return scr[row + 1];
+      }
+      return std::string("(no such row)");
+    };
+    CHECK_EQ(printed("PRINT 40000"), "-25536");
+    CHECK_EQ(printed("PRINT 65536"), "0");
+    CHECK_EQ(printed("PRINT 70000"), "4464");
+    type(*s, "POKE 40000,7");
+    CHECK_EQ(s->m->ram[0x9c40], 7);
+    type(*s, "DOKE 40000,61440: PRINT DEEK($9C40)=$F000");
+    CHECK_EQ(s->m->ram[0x9c40], 0xf0);
+    CHECK_EQ(s->m->ram[0x9c41], 0x00);
+  }
+}
+
 TEST_SUITE("the system page") {
   TEST_CASE("the cursor position lives at 5 and 6") {
     auto s = boot();
@@ -1825,6 +1852,19 @@ TEST_SUITE("DATA, READ and RESTORE") {
     CHECK_EQ(sysWord(*s, basic::SYS_READ), lineOffset(*s, 110));
     type(*s, "READ B");
     CHECK_EQ(intVar(*s, 'B'), 3);
+  }
+
+  TEST_CASE("LOAD makes READ start again, at the loaded program's first value") {
+    auto s = boot();
+    s->slots.emplace_back("TABLE", "100 DATA 7,8\n");
+    settle(*s);
+    type(*s, "100 DATA 1,2");
+    type(*s, "READ A");
+    CHECK_EQ(intVar(*s, 'A'), 1);
+    type(*s, "!LOAD \"TABLE\"");
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
+    type(*s, "READ B");
+    CHECK_EQ(intVar(*s, 'B'), 7);
   }
 
   TEST_CASE("DOKE 32,0 is RESTORE") {

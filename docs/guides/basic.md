@@ -177,6 +177,10 @@ PRINT 32767+1
 -32768
 ```
 
+A number written past 32767 wraps the same way, so `PRINT 40000` shows
+-25536. The boxes still come out right: `POKE 40000,7` and `PEEK(40000)`
+both reach box 40000.
+
 Text in quotes is called a string. A semicolon joins two things with no
 gap. A comma puts one space between them.
 
