@@ -168,19 +168,13 @@ uint8_t Storage::catalog() {
   return STO_OK;
 }
 
-// The name comes from the block rather than from STO_NAME, and the answer
-// goes back there, so one pointer serves both ways.
+// The name comes through STO_NAME like every other command's, and the
+// seven byte answer goes to the block.
 uint8_t Storage::findAsset() {
-  const uint32_t at = static_cast<uint32_t>(addrHi_) << 8 | addrLo_;
   std::string name;
-  for (uint32_t i = 0;; i++) {
-    const uint8_t c = byteAt(at + i);
-    if (c == 0) break;
-    if (i == static_cast<uint32_t>(NAME_LIMIT)) return STO_BAD_NAME;
-    name.push_back(static_cast<char>(c));
-  }
-  if (!validName(name)) return STO_BAD_NAME;
+  if (!readName(name)) return STO_BAD_NAME;
   if (!assets_) return STO_NOT_FOUND;
+  const uint32_t at = static_cast<uint32_t>(addrHi_) << 8 | addrLo_;
   const auto lower = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
   const auto same = [&](const std::string& a) {
     if (a.size() != name.size()) return false;

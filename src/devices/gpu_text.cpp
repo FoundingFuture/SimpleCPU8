@@ -41,8 +41,9 @@ uint8_t Gpu::glyphRowOf(int code, int row) const {
 bool Gpu::setCell(int w, int h) {
   const auto fits = [](int n) { return n >= TEXT_CELL_MIN && n <= TEXT_CELL_MAX; };
   if (!fits(w) || !fits(h)) {
-    fault_ = DeviceFault{CrashKind::BadTextCell, "the text cell is 4 to 8 pixels each way, and " + std::to_string(w) +
-                                                     " by " + std::to_string(h) + " was asked for"};
+    raiseFault(CrashKind::BadTextCell,
+               "the text cell is 4 to 8 pixels each way, and " + std::to_string(w) + " by " + std::to_string(h) +
+                   " was asked for");
     return false;
   }
   textCellW = w;
@@ -55,12 +56,6 @@ bool Gpu::setCell(int w, int h) {
   return true;
 }
 
-std::optional<DeviceFault> Gpu::takeFault() {
-  if (!fault_) return fallback_->takeFault();
-  std::optional<DeviceFault> f = std::move(fault_);
-  fault_.reset();
-  return f;
-}
 
 // Read the NUL-terminated template at the cartridge address, format it with
 // the arguments at the RAM address, and draw the result.

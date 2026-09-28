@@ -42,9 +42,8 @@ constexpr NamedValue CMDS[] = {
     {"STO_SAVE", 0x02},     // the block up to its NUL, into the slot.
     {"STO_DELETE", 0x03},   // drop the slot.
     {"STO_CATALOG", 0x04},  // a line per name to the block, then a NUL.
-    // The asset named at the block, up to 16 bytes, in any case. Its answer
-    // replaces the name: a kind, three bytes of cartridge address and three
-    // of length, high byte first.
+    // The asset of that name, in any case, to the block: a kind, three
+    // bytes of cartridge address and three of length, high byte first.
     {"STO_FIND", 0x05},
 };
 

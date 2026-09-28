@@ -93,7 +93,20 @@ Machine::Machine(std::vector<Instr> prog, Microcode mc, IoBus* io)
       ramReads(RAM_SIZE),
       ramWrites(RAM_SIZE) {
   if (io) io_ = io;
+  io_->attachFaultSink(this);
   setMicrocode(std::move(mc));
+}
+
+Machine::~Machine() { io_->detachFaultSink(this); }
+
+void Machine::setIo(IoBus* io) {
+  io_->detachFaultSink(this);
+  io_ = io ? io : &defaultIo_;
+  io_->attachFaultSink(this);
+}
+
+void Machine::deviceFault(DeviceFault f) {
+  if (!fault_) fault_ = std::move(f);
 }
 
 void Machine::setMicrocode(Microcode mc) {
@@ -142,13 +155,6 @@ Machine::RowInfo Machine::analyze(const Row& row) {
   return info;
 }
 
-bool Machine::deviceFailed(const Row& row) {
-  std::optional<DeviceFault> f = io_->takeFault();
-  if (!f) return false;
-  fail(f->kind, std::move(f->message), &row);
-  return true;
-}
-
 void Machine::fail(CrashKind kind, std::string message, const Row* row) {
   status = Status::Crashed;
   CrashInfo info{kind, std::move(message), pc, lastInstrPc, std::nullopt};
@@ -191,6 +197,7 @@ void Machine::setStackSize(int bytes) {
 }
 
 void Machine::reset() {
+  fault_.reset();
   pc = 0;
   irOp = 0;
   irOperand = 0;
@@ -493,13 +500,11 @@ bool Machine::executeRow(const Row& row, const RowInfo& info) {
         const uint8_t val = static_cast<uint8_t>(irOperand & 0xff);
         onBus(K::IoWrite, port(), val);
         io_->write(port(), val);
-        if (deviceFailed(row)) return false;
         break;
       }
       case S::IO_WRITE_ACC:
         onBus(K::IoWrite, port(), acc);
         io_->write(port(), acc);
-        if (deviceFailed(row)) return false;
         break;
       case S::IO_READ: ioRead(T::ACC); break;
       case S::IO_READ_D1H: ioRead(T::D1H); break;
@@ -628,6 +633,14 @@ void Machine::finishInstruction() {
   section_ = -1;
   rowIndex_ = 0;
   instructions++;
+  // PERF DECISION: a device reports a fault when it refuses a command, and
+  // the machine looks at one flag here. Asking every device after every
+  // port write cost 2.4 ns a write, 10% of a loop of nothing but writes.
+  if (fault_) {
+    DeviceFault f = std::move(*fault_);
+    fault_.reset();
+    fail(f.kind, std::move(f.message));
+  }
 }
 
 bool Machine::instructionStep() {
@@ -640,6 +653,9 @@ bool Machine::instructionStep() {
 }
 
 void Machine::run(uint64_t maxInstructions) {
+  // A machine copied or moved since it was built reports to its devices
+  // here, once a call, rather than once an instruction.
+  io_->attachFaultSink(this);
   for (uint64_t i = 0; i < maxInstructions && status == Status::Running; i++) {
     instructionStep();
   }

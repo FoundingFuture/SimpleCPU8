@@ -5,6 +5,8 @@
 
 #include <cstdint>
 #include <span>
+#include <string>
+#include <utility>
 
 #include "core/machine.h"
 
@@ -14,16 +16,32 @@ class ChainedDevice : public IoBus {
  public:
   explicit ChainedDevice(IoBus* fallback = nullptr) : fallback_(fallback ? fallback : &end_) {}
 
-  void setFallback(IoBus* fallback) { fallback_ = fallback ? fallback : &end_; }
+  void setFallback(IoBus* fallback) {
+    fallback_ = fallback ? fallback : &end_;
+    if (sink_) fallback_->attachFaultSink(sink_);
+  }
   IoBus& fallback() { return *fallback_; }
-  // A fault raised further down the chain comes up through every link.
-  std::optional<DeviceFault> takeFault() override { return fallback_->takeFault(); }
+
+  void attachFaultSink(FaultSink* sink) override {
+    sink_ = sink;
+    fallback_->attachFaultSink(sink);
+  }
+  void detachFaultSink(FaultSink* sink) override {
+    if (sink_ == sink) sink_ = nullptr;
+    fallback_->detachFaultSink(sink);
+  }
 
  protected:
   IoBus* fallback_;
+  // Report a refused command to the machine. With no machine attached the
+  // fault goes nowhere, and the device carries on as if it were ignored.
+  void raiseFault(CrashKind kind, std::string message) {
+    if (sink_) sink_->deviceFault(DeviceFault{kind, std::move(message)});
+  }
 
  private:
   LogIoBus end_;
+  FaultSink* sink_ = nullptr;
 };
 
 // The cartridge's data section, read by the GPU and the APU. A device keeps

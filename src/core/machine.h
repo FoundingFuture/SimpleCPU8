@@ -76,15 +76,25 @@ struct DeviceFault {
   std::string message;
 };
 
+// Where a device reports a command it refused, at the moment it refuses
+// it. The machine is one, and crashes when the instruction ends.
+class FaultSink {
+ public:
+  virtual ~FaultSink() = default;
+  virtual void deviceFault(DeviceFault f) = 0;
+};
+
 // The port gateway. Devices implement it and chain to a fallback.
 class IoBus {
  public:
   virtual ~IoBus() = default;
   virtual void write(uint8_t port, uint8_t value) = 0;
   virtual uint8_t read(uint8_t port) = 0;
-  // The fault the last write raised, handed over once. The machine asks
-  // after every port write. A device in a chain asks its fallback too.
-  virtual std::optional<DeviceFault> takeFault() { return std::nullopt; }
+  // The sink this bus's devices report faults to. A device in a chain
+  // passes it on. Detaching clears it only while it is still the one given,
+  // so a machine that goes away does not cut off the one that replaced it.
+  virtual void attachFaultSink(FaultSink*) {}
+  virtual void detachFaultSink(FaultSink*) {}
 };
 
 // Deterministic default bus: writes are logged, reads return 0.
@@ -111,9 +121,18 @@ struct MicroTrace {
   std::optional<uint16_t> ea;
 };
 
-class Machine {
+class Machine : public FaultSink {
  public:
   Machine(std::vector<Instr> program, Microcode microcode, IoBus* io = nullptr);
+  Machine(const Machine&) = default;
+  Machine(Machine&&) = default;
+  Machine& operator=(const Machine&) = default;
+  Machine& operator=(Machine&&) = default;
+  ~Machine() override;
+
+  // A device refused a command. The first fault of an instruction crashes
+  // the machine when that instruction ends.
+  void deviceFault(DeviceFault f) override;
 
   // Architectural state. Public on purpose: tests and the IDE poke it.
   uint16_t pc = 0;
@@ -166,7 +185,7 @@ class Machine {
 
   const Microcode& microcode() const { return microcode_; }
   void setMicrocode(Microcode mc);
-  void setIo(IoBus* io) { io_ = io ? io : &defaultIo_; }
+  void setIo(IoBus* io);
   IoBus& io() { return *io_; }
 
   // Reset clears CPU state only. RAM and stack keep their content.
@@ -211,8 +230,8 @@ class Machine {
   static RowInfo analyze(const Row& row);
   bool executeRow(const Row& row, const RowInfo& info);
   void fail(CrashKind kind, std::string message, const Row* row = nullptr);
-  // After a port write: crash with the device's fault, when it raised one.
-  bool deviceFailed(const Row& row);
+  // A fault a device reported during the current instruction.
+  std::optional<DeviceFault> fault_;
   AluOut alu(AluOp op) const;
   uint16_t effectiveAddress(const Row& row);
   uint16_t stackAddress(const Row& row) const;

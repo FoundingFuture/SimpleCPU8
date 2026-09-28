@@ -349,7 +349,6 @@ class Gpu : public ChainedDevice {
 
   void write(uint8_t port, uint8_t value) override;
   uint8_t read(uint8_t port) override;
-  std::optional<DeviceFault> takeFault() override;
 
   // The grid the text cell gives: the screen divided by the cell.
   int textCols() const { return gpu::SCREEN_W / textCellW; }
@@ -495,8 +494,6 @@ class Gpu : public ChainedDevice {
 
   void reseed();
   void seedFont();
-  // The command this GPU refused, until the machine takes it.
-  std::optional<DeviceFault> fault_;
   // A new cell, 4 to 8 each way, or a fault that leaves the cell as it was.
   // Either way the overlay clears and its cursor goes home.
   bool setCell(int w, int h);

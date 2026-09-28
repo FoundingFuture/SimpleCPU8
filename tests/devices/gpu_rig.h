@@ -28,6 +28,13 @@ struct Clock {
   void setCycles(uint64_t c) { cycles = c; }
 };
 
+// A machine's side of the fault line, for a test with no machine: every
+// fault a device reports, in order.
+struct Faults : sc8::FaultSink {
+  std::vector<sc8::DeviceFault> got;
+  void deviceFault(sc8::DeviceFault f) override { got.push_back(std::move(f)); }
+};
+
 inline void cmd(sc8::Gpu& g, int c, std::initializer_list<int> args = {}) {
   int i = 0;
   for (int a : args) g.write(static_cast<uint8_t>(sc8::gpu::GPU_DATA0 + i++), static_cast<uint8_t>(a & 0xff));

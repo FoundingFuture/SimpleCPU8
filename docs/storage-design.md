@@ -12,6 +12,7 @@ this design rests on. src/devices/storage_ports.h holds the numbers.
 - [The slots](#the-slots)
 - [The ports](#the-ports)
 - [The commands](#the-commands)
+- [The answer to STO_FIND](#the-answer-to-sto_find)
 - [The status byte](#the-status-byte)
 - [The host side](#the-host-side)
 - [The C library](#the-c-library)
@@ -79,6 +80,7 @@ the ACP follows.
 | $02 | STO_SAVE | the name, the block up to its NUL | the slot, created or replaced | the text's length |
 | $03 | STO_DELETE | the name | nothing | 0 |
 | $04 | STO_CATALOG | the room | every name at the block, each with a newline, then a NUL | the listing's length |
+| $05 | STO_FIND | the name | the asset's answer at the block, seven bytes | 7 |
 
 SAVE scans the block for its NUL and stops at 65535 bytes. A block with no
 NUL inside that cap is refused as STO_FULL. The cap is the whole of RAM
@@ -89,6 +91,28 @@ CATALOG with no slots writes a single NUL and reports a length of 0.
 STO_COUNT reads the slot count at any time, with no command in between.
 
 The command is one cycle, like every device command on this machine.
+
+## The answer to STO_FIND
+
+STO_FIND looks the name up in the cartridge's ASET entries, in any case,
+and writes seven bytes at the block, high byte first:
+
+| Byte | Holds |
+|---|---|
+| 0 | the kind, a STO_KIND_ value |
+| 1 to 3 | the cartridge address: bank, high, low |
+| 4 to 6 | the length in bytes |
+
+| Value | Name | ASET kind |
+|---|---|---|
+| 1 | STO_KIND_FONT | font |
+| 2 | STO_KIND_FILE | file |
+| 3 | STO_KIND_IMAGE | image |
+| 4 | STO_KIND_PALETTE | palette |
+| 5 | STO_KIND_SAMPLE | sample |
+| 6 | STO_KIND_SPRITE | sprite |
+
+A name the entries lack is STO_NOT_FOUND, and the block is left alone.
 
 ## The status byte
 
@@ -121,6 +145,10 @@ after the change. The host decides what a change means: simplecpu writes
 the ROM file back, a test counts. LOAD and CATALOG never call it. With no
 list attached, LOAD and DELETE report STO_NOT_FOUND. SAVE then reports
 STO_FULL, as if the cartridge held no slots and had no room.
+
+The host hands the device the cartridge's ASET entries alongside the BAS
+slots, with `storage.attachAssets(&cartridge.assets)`. STO_FIND reads them
+and never changes them. With none attached, every name is STO_NOT_FOUND.
 
 ## The C library
 
@@ -316,6 +344,8 @@ existing design.
 - STO_BAD_CMD exists. The ACP reports an unknown command as ACP_BADFMT, and
   a status of its own is more honest.
 - LOAD skips unnumbered lines rather than running them.
+- STO_FIND takes its name through STO_NAME, as every other command does,
+  and answers at the block. Eddie, 2026-09-28.
 
 ## Still open
 

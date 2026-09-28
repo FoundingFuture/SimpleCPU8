@@ -193,7 +193,6 @@ void Gpu::powerOn() {
   overlayChar.fill(0);
   textCellW = FONT_W;
   textCellH = FONT_H;
-  fault_.reset();
   textCol = 0;
   textRow = 0;
   textColor = 0xff;

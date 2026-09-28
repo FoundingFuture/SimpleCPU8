@@ -422,9 +422,9 @@ TEST_SUITE("STO_FIND") {
     return {{"image", "ship", 0x000010, 64}, {"font", "small", 0x012345, 2050}, {"sample", "boom", 0x200, 0x10203}};
   }
 
-  // The name at the block, then STO_FIND. The answer comes back there.
+  // The name through STO_NAME, the block at STO_ADDR, then STO_FIND.
   uint8_t find(Rig& r, std::string_view name) {
-    r.putText(BLOCK, name);
+    r.name(name);
     r.block(BLOCK, 0);
     r.out(STO_CMD, STO_FIND);
     return r.status();
@@ -449,13 +449,22 @@ TEST_SUITE("STO_FIND") {
     CHECK(answer(r) == std::vector<int>{kindCode("sample"), 0x00, 0x02, 0x00, 0x01, 0x02, 0x03});
   }
 
-  TEST_CASE("a name the directory lacks is STO_NOT_FOUND, and leaves the name in place") {
+  TEST_CASE("a name the directory lacks is STO_NOT_FOUND, and writes nothing") {
     Rig r;
     std::vector<RomAsset> assets = table();
     r.dev->attachAssets(&assets);
     CHECK_EQ(find(r, "BIG"), STO_NOT_FOUND);
-    CHECK_EQ(r.textAt(BLOCK), "BIG");
+    for (size_t i = 0; i < 7; i++) CHECK_EQ(r.ram[BLOCK + i], 0xaa);
     CHECK_EQ(r.moved(), 0);
+  }
+
+  TEST_CASE("takes the name through STO_NAME and leaves it where it was") {
+    Rig r;
+    std::vector<RomAsset> assets = table();
+    r.dev->attachAssets(&assets);
+    CHECK_EQ(find(r, "small"), STO_OK);
+    CHECK_EQ(r.textAt(NAME), "small");
+    CHECK_EQ(r.ram[BLOCK], 1);
   }
 
   TEST_CASE("a ROM without ASET answers STO_NOT_FOUND for everything") {

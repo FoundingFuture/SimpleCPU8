@@ -1,5 +1,6 @@
 #include <doctest.h>
 
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -336,13 +337,15 @@ TEST_SUITE("the text cell") {
     for (int w = TEXT_CELL_MIN; w <= TEXT_CELL_MAX; w++) {
       for (int h = TEXT_CELL_MIN; h <= TEXT_CELL_MAX; h++) {
         Rig r;
+        gpu_rig::Faults faults;
+        r.g.attachFaultSink(&faults);
         load(r, fontBlob(w, h, 0x41));
         CAPTURE(w);
         CAPTURE(h);
         CHECK_EQ(r.g.read(GPU_TEXT_COLS), 256 / w);
         CHECK_EQ(r.g.read(GPU_TEXT_ROWS), 256 / h);
         CHECK_EQ(r.g.glyphRowOf(0x41, 7), 0xff);
-        CHECK_FALSE(r.g.takeFault().has_value());
+        CHECK(faults.got.empty());
       }
     }
   }
@@ -395,26 +398,43 @@ TEST_SUITE("the text cell") {
     check("CMD_RESET_FONT");
   }
 
-  TEST_CASE("a width or height outside 4 to 8 is a fault named bad-text-cell, and changes nothing") {
+  TEST_CASE("a width or height outside 4 to 8 reports bad-text-cell at once, and changes nothing") {
     Rig r;
-    CHECK_FALSE(r.g.takeFault().has_value());
+    gpu_rig::Faults faults;
+    r.g.attachFaultSink(&faults);
+    size_t n = 0;
     for (const auto& [w, h] : std::vector<std::pair<int, int>>{{3, 8}, {9, 8}, {6, 3}, {6, 9}, {0, 0}}) {
       CAPTURE(w);
       CAPTURE(h);
       cmd(r.g, CMD_TEXT_CELL, {w, h});
-      const auto f = r.g.takeFault();
-      REQUIRE(f.has_value());
-      CHECK_EQ(f->kind, CrashKind::BadTextCell);
+      REQUIRE_EQ(faults.got.size(), ++n);
+      CHECK_EQ(faults.got.back().kind, CrashKind::BadTextCell);
       CHECK_EQ(r.g.read(GPU_TEXT_COLS), 42);
-      // Taken once: the next question finds nothing.
-      CHECK_FALSE(r.g.takeFault().has_value());
     }
     load(r, fontBlob(9, 8, 'A'));
-    const auto f = r.g.takeFault();
-    REQUIRE(f.has_value());
-    CHECK_EQ(f->kind, CrashKind::BadTextCell);
-    CHECK(f->message.find("9 by 8") != std::string::npos);
+    REQUIRE_EQ(faults.got.size(), ++n);
+    CHECK_EQ(faults.got.back().kind, CrashKind::BadTextCell);
+    CHECK(faults.got.back().message.find("9 by 8") != std::string::npos);
     CHECK_EQ(r.g.glyphRowOf('A', 0), glyphRow('A', 0));
+    // A good cell reports nothing.
+    cmd(r.g, CMD_TEXT_CELL, {8, 8});
+    CHECK_EQ(faults.got.size(), n);
+  }
+
+  TEST_CASE("a fault reaches the machine through every device in the chain") {
+    gpu_rig::Faults faults;
+    LogIoBus end;
+    Gpu inner([] { return uint64_t{0}; }, &end);
+    Gpu outer([] { return uint64_t{0}; }, &inner);
+    outer.attachFaultSink(&faults);
+    inner.write(GPU_DATA0, 3);
+    inner.write(GPU_DATA1, 8);
+    inner.write(GPU_CMD, CMD_TEXT_CELL);
+    REQUIRE_EQ(faults.got.size(), 1u);
+    outer.detachFaultSink(&faults);
+    inner.write(GPU_DATA0, 3);
+    inner.write(GPU_CMD, CMD_TEXT_CELL);
+    CHECK_EQ(faults.got.size(), 1u);
   }
 
   TEST_CASE("a glyph draws only inside its cell") {
@@ -481,6 +501,26 @@ TEST_SUITE("a bad text cell through the bus") {
     REQUIRE(m.crash);
     CHECK_EQ(m.crash->kind, CrashKind::BadTextCell);
     CHECK_EQ(crashKindName(m.crash->kind), "bad-text-cell");
+    // The crash names the OUT that ran the command. The HLT never ran.
+    CHECK_EQ(m.crash->lastInstrPc, 2);
+    CHECK_EQ(m.instructions, 3u);
+  }
+
+  TEST_CASE("a machine that goes away does not cut off the one that replaced it") {
+    const Assembled a = assemble(
+        "        OUT GPU_DATA0, 9\n"
+        "        OUT GPU_DATA1, 8\n"
+        "        OUT GPU_CMD, CMD_TEXT_CELL\n"
+        "        HLT\n");
+    REQUIRE(a.errors.empty());
+    uint64_t cycles = 0;
+    Gpu g([&cycles] { return cycles; });
+    auto first = std::make_unique<Machine>(a.program, buildOptimal(), &g);
+    Machine second(a.program, buildOptimal(), &g);
+    first.reset();
+    // Stepped, as the IDE steps, which does not report to the devices anew.
+    for (int i = 0; i < 4; i++) second.instructionStep();
+    CHECK_EQ(second.status, Status::Crashed);
   }
 }
 

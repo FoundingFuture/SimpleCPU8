@@ -1266,7 +1266,7 @@ also finds the cartridge's assets by name.
 
 | Port | Name | Meaning |
 |---|---|---|
-| `$50`, `$51` | `STO_ADDR_HI`, `STO_ADDR_LO` | the text block in RAM |
+| `$50`, `$51` | `STO_ADDR_HI`, `STO_ADDR_LO` | the text block in RAM, or where `STO_FIND` answers |
 | `$52`, `$53` | `STO_NAME_HI`, `STO_NAME_LO` | a zero terminated name in RAM |
 | `$54`, `$55` | `STO_LEN_HI`, `STO_LEN_LO` | write: the room at the block. Read: bytes moved |
 | `$56` | `STO_CMD` | `STO_LOAD`, `STO_SAVE`, `STO_DELETE`, `STO_CATALOG` or `STO_FIND` |
@@ -1318,9 +1318,10 @@ rebuild of the project writes a fresh cartridge without it. `%s` takes
 the address of the catalog text as two bytes, and the program stores
 the two halves of `list` into the argument block by hand.
 
-`STO_FIND` looks an asset up in the ROM's asset table. Put its name at
-the block, zero terminated, up to 16 characters, in any case. The
-answer replaces the name: seven bytes, high byte first.
+`STO_FIND` looks an asset up in the ROM's asset table. Its name goes in
+through `STO_NAME_HI` and `STO_NAME_LO`, zero terminated, up to 16
+characters, in any case. The answer goes to the block: seven bytes, high
+byte first. `STO_LEN_HI` and `STO_LEN_LO` then read 7.
 
 | Byte | Holds |
 |---|---|
@@ -1329,12 +1330,14 @@ answer replaces the name: seven bytes, high byte first.
 | 4 to 6 | the length in bytes |
 
 `STO_STATUS` is `STO_NOT_FOUND` when the table has no such name, and
-the block keeps the name. A label on a directive names an asset, and so
+nothing is written. A label on a directive names an asset, and so
 does the file's name without its extension in a project with BASIC.
 `IN` sets no flags, so compare the status before a jump.
 
 ```asm
 ; Find the font called SMALL and load it.
+        OUT STO_NAME_HI, get_highbyte(small)
+        OUT STO_NAME_LO, get_lowbyte(small)
         OUT STO_ADDR_HI, get_highbyte(found)
         OUT STO_ADDR_LO, get_lowbyte(found)
         OUT STO_CMD, STO_FIND
@@ -1350,7 +1353,8 @@ does the file's name without its extension in a project with BASIC.
         OUT GPU_CMD, CMD_LOAD_FONT
 missing: HLT
 .ram
-found:  db "SMALL", 0, 0              ; the name, then room for the answer
+small:  db "SMALL", 0
+found:  ds 7                          ; the answer
 ```
 
 ## How C becomes assembly
