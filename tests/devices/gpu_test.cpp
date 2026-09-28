@@ -773,7 +773,8 @@ TEST_SUITE("the command and port tables") {
   constexpr Named PORT_ENUM[] = {
       {"GPU_CMD", GPU_CMD},     {"GPU_CMD_MOD", GPU_CMD_MOD}, {"GPU_DATA0", GPU_DATA0}, {"GPU_DATA1", GPU_DATA1},
       {"GPU_DATA2", GPU_DATA2}, {"GPU_DATA3", GPU_DATA3},     {"GPU_DATA4", GPU_DATA4}, {"GPU_DATA5", GPU_DATA5},
-      {"GPU_DATA6", GPU_DATA6}, {"GPU_RAND", GPU_RAND},       {"GPU_FRAME", GPU_FRAME},
+      {"GPU_DATA6", GPU_DATA6}, {"GPU_TEXT_ROWS", GPU_TEXT_ROWS}, {"GPU_TEXT_COLS", GPU_TEXT_COLS},
+      {"GPU_RAND", GPU_RAND},   {"GPU_FRAME", GPU_FRAME},
   };
   constexpr Named ALIAS_ENUM[] = {
       {"GPU_X_HI", GPU_X_HI},
@@ -830,6 +831,8 @@ TEST_SUITE("the command and port tables") {
       {"GPU_TEXT_CHAR", GPU_TEXT_CHAR},
       {"GPU_TEXT_ARG_HI", GPU_TEXT_ARG_HI},
       {"GPU_TEXT_ARG_LO", GPU_TEXT_ARG_LO},
+      {"GPU_CELL_W", GPU_CELL_W},
+      {"GPU_CELL_H", GPU_CELL_H},
       {"GPU_MESH", GPU_MESH},
       {"GPU_MESH_BYTE", GPU_MESH_BYTE},
       {"GPU_RAMP", GPU_RAMP},
@@ -887,6 +890,8 @@ TEST_SUITE("the command and port tables") {
       {"CMD_TEXT_CLEAR", CMD_TEXT_CLEAR},
       {"CMD_PRINTF", CMD_PRINTF},
       {"CMD_LOAD_FONT", CMD_LOAD_FONT},
+      {"CMD_TEXT_CELL", CMD_TEXT_CELL},
+      {"CMD_RESET_FONT", CMD_RESET_FONT},
       {"CMD_SET_WORLDMODE", CMD_SET_WORLDMODE},
       {"CMD_MESH_LOAD", CMD_MESH_LOAD},
       {"CMD_MESH_WRITE", CMD_MESH_WRITE},

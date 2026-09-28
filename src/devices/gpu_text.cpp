@@ -21,21 +21,45 @@ constexpr uint32_t PRINTF_ARG_MAX = 256;
 // Copy the built-in font into the active font RAM. Codes outside the
 // printable range stay blank.
 //
-// The layout is one byte a row with bit 0 on the left, and the blitter
-// reads FONT_W of those bits. A wider font is the same format with more
-// bits read, so a font change is a change of cell rather than of format.
+// The layout is one byte a row with bit 0 on the left, 8 rows a glyph, and
+// the blitter reads as much of it as the cell says. A font change is a
+// change of cell rather than of format.
 void Gpu::seedFont() {
   fontRam.fill(0);
   for (int code = FONT_FIRST; code <= FONT_LAST; code++) {
     for (int r = 0; r < FONT_H; r++) {
-      fontRam[static_cast<size_t>(code * FONT_H + r)] = FONT[static_cast<size_t>((code - FONT_FIRST) * FONT_H + r)];
+      fontRam[static_cast<size_t>(code * GLYPH_BYTES + r)] = FONT[static_cast<size_t>((code - FONT_FIRST) * FONT_H + r)];
     }
   }
 }
 
 uint8_t Gpu::glyphRowOf(int code, int row) const {
-  if (row < 0 || row >= FONT_H) return 0;
-  return fontRam[static_cast<size_t>((code & 0xff) * FONT_H + row)];
+  if (row < 0 || row >= GLYPH_BYTES) return 0;
+  return fontRam[static_cast<size_t>((code & 0xff) * GLYPH_BYTES + row)];
+}
+
+bool Gpu::setCell(int w, int h) {
+  const auto fits = [](int n) { return n >= TEXT_CELL_MIN && n <= TEXT_CELL_MAX; };
+  if (!fits(w) || !fits(h)) {
+    fault_ = DeviceFault{CrashKind::BadTextCell, "the text cell is 4 to 8 pixels each way, and " + std::to_string(w) +
+                                                     " by " + std::to_string(h) + " was asked for"};
+    return false;
+  }
+  textCellW = w;
+  textCellH = h;
+  // A new cell moves every overlay cell and can leave the cursor outside
+  // the grid, so the overlay starts over.
+  overlayChar.fill(0);
+  textCol = 0;
+  textRow = 0;
+  return true;
+}
+
+std::optional<DeviceFault> Gpu::takeFault() {
+  if (!fault_) return fallback_->takeFault();
+  std::optional<DeviceFault> f = std::move(fault_);
+  fault_.reset();
+  return f;
 }
 
 // Read the NUL-terminated template at the cartridge address, format it with
@@ -70,37 +94,39 @@ void Gpu::putChar(uint8_t code) {
     textNewline();
     return;
   }
-  const size_t cell = static_cast<size_t>(textRow * TEXT_COLS + textCol);
+  const size_t cell = static_cast<size_t>(textRow * textCols() + textCol);
   overlayChar[cell] = code == 0 ? 0x20 : code;
   textCol++;
-  if (textCol >= TEXT_COLS) textNewline();
+  if (textCol >= textCols()) textNewline();
 }
 
 void Gpu::textNewline() {
   textCol = 0;
   textRow++;
-  if (textRow >= TEXT_ROWS) {
+  if (textRow >= textRows()) {
     scrollText();
-    textRow = TEXT_ROWS - 1;
+    textRow = textRows() - 1;
   }
 }
 
 // Shift the overlay up by one row. The top row is lost, the bottom clears.
 void Gpu::scrollText() {
-  std::copy(overlayChar.begin() + TEXT_COLS, overlayChar.end(), overlayChar.begin());
-  std::fill(overlayChar.begin() + (TEXT_ROWS - 1) * TEXT_COLS, overlayChar.end(), 0);
+  const auto cols = static_cast<std::ptrdiff_t>(textCols());
+  const auto grid = cols * textRows();
+  std::copy(overlayChar.begin() + cols, overlayChar.begin() + grid, overlayChar.begin());
+  std::fill(overlayChar.begin() + grid - cols, overlayChar.begin() + grid, 0);
 }
 
 // Draw one glyph into a screen buffer at a cell, in the given foreground.
 // An opaque background fills the whole cell first.
 void Gpu::drawGlyph(std::span<uint8_t> dest, int col, int row, int code, uint8_t fg, bool opaque) const {
-  const int px0 = col * FONT_W;
-  const int py0 = row * FONT_H;
-  for (int gy = 0; gy < FONT_H; gy++) {
+  const int px0 = col * textCellW;
+  const int py0 = row * textCellH;
+  for (int gy = 0; gy < textCellH; gy++) {
     const int py = py0 + gy;
     if (py < 0 || py >= SCREEN_H) continue;
     const uint8_t bits = glyphRowOf(code, gy);
-    for (int gx = 0; gx < FONT_W; gx++) {
+    for (int gx = 0; gx < textCellW; gx++) {
       const int px = px0 + gx;
       if (px < 0 || px >= SCREEN_W) continue;
       const size_t at = static_cast<size_t>(py * SCREEN_W + px);
@@ -119,9 +145,10 @@ void Gpu::drawGlyph(std::span<uint8_t> dest, int col, int row, int code, uint8_t
 // real gap. Text mode is left out on purpose: that mode IS characters, and
 // a second layer of them would mean nothing.
 void Gpu::drawOverlay(std::span<uint8_t> out) const {
-  for (int row = 0; row < TEXT_ROWS; row++) {
-    for (int col = 0; col < TEXT_COLS; col++) {
-      const uint8_t code = overlayChar[static_cast<size_t>(row * TEXT_COLS + col)];
+  const int cols = textCols();
+  for (int row = 0; row < textRows(); row++) {
+    for (int col = 0; col < cols; col++) {
+      const uint8_t code = overlayChar[static_cast<size_t>(row * cols + col)];
       if (code != 0) drawGlyph(out, col, row, code, static_cast<uint8_t>(textColor), textOpaqueBg);
     }
   }
@@ -150,11 +177,12 @@ void Gpu::composeText(std::span<uint8_t> out) const {
     return;
   }
   std::copy(vram.begin(), vram.end(), out.begin());
-  for (int row = 0; row < TEXT_ROWS; row++) {
-    for (int col = 0; col < TEXT_COLS; col++) {
+  const int cols = textCols();
+  for (int row = 0; row < textRows(); row++) {
+    for (int col = 0; col < cols; col++) {
       // DESIGN: wrap, do not clamp. The CPU wraps at 16 bits, so a screen
       // mapped near the top reads the bottom of RAM rather than zeros.
-      const uint8_t code = ramByte(static_cast<uint32_t>(textBase + row * TEXT_COLS + col));
+      const uint8_t code = ramByte(static_cast<uint32_t>(textBase + row * cols + col));
       drawGlyph(out, col, row, code, static_cast<uint8_t>(textColor), textOpaqueBg);
     }
   }

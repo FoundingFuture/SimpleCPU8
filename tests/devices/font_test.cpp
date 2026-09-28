@@ -98,8 +98,8 @@ TEST_SUITE("the art") {
 
 TEST_SUITE("what the cell puts on the screen") {
   TEST_CASE("gives 42 columns across the screen") {
-    CHECK_EQ(TEXT_COLS, SCREEN_W / FONT_W);
-    CHECK_EQ(TEXT_COLS, 42);
+    CHECK_EQ(POWER_ON_COLS, SCREEN_W / FONT_W);
+    CHECK_EQ(POWER_ON_COLS, 42);
   }
 
   TEST_CASE("draws the second character six pixels along, not eight") {

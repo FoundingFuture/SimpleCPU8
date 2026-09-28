@@ -868,13 +868,15 @@ real time on its own clock.
 ## The GPU
 
 The GPU owns the 256 by 256 screen, 256 sprites, the character plane
-and the cartridge reader. It has eleven ports:
+and the cartridge reader. It has thirteen ports:
 
 | Port | Name | Meaning |
 |---|---|---|
 | `$00` | `GPU_CMD` | write a command byte to run it |
 | `$01` | `GPU_CMD_MOD` | modifier bits for the commands that follow |
 | `$02` to `$08` | `GPU_DATA0` to `GPU_DATA6` | arguments in, results out |
+| `$1C` | `GPU_TEXT_ROWS` | read the character grid's rows |
+| `$1D` | `GPU_TEXT_COLS` | read the character grid's columns |
 | `$1E` | `GPU_RAND` | read a random byte, or write a seed |
 | `$1F` | `GPU_FRAME` | the frame counter |
 
@@ -895,7 +897,7 @@ The commands, by family:
 | sprites | `CMD_SPRITE_DEF`, `CMD_SPRITE_MOVE`, `CMD_SPRITE_SHOW`, `CMD_SPRITE_HIDE`, `CMD_SPRITE_FRAME`, `CMD_SPRITE_FLIP`, `CMD_STAMP`, `CMD_BLIT` |
 | collision | `CMD_HIT_TEST`, `CMD_HIT_SCAN`, `CMD_COLLIDE_ALL`, `CMD_SPRITE_HITS`, `CMD_GROUP_HITS`, `CMD_HIT_IN_GROUP`, `CMD_COLLIDE_GROUP_ALL` |
 | transforms | `CMD_ROT_X`, `CMD_ROT_Y`, `CMD_ROT_Z`, `CMD_SET_SCALE`, `CMD_DRAW_PATH`, `CMD_DRAW_PATH3D` |
-| text | `CMD_SET_TEXTMODE`, `CMD_SET_GRAPHICSMODE`, `CMD_TEXT_STYLE`, `CMD_TEXT_AT`, `CMD_TEXT_CHAR`, `CMD_TEXT_CLEAR`, `CMD_PRINTF`, `CMD_LOAD_FONT` |
+| text | `CMD_SET_TEXTMODE`, `CMD_SET_GRAPHICSMODE`, `CMD_TEXT_STYLE`, `CMD_TEXT_AT`, `CMD_TEXT_CHAR`, `CMD_TEXT_CLEAR`, `CMD_PRINTF`, `CMD_LOAD_FONT`, `CMD_TEXT_CELL`, `CMD_RESET_FONT` |
 | the 3D world | `CMD_SET_WORLDMODE`, `CMD_MESH_LOAD`, `CMD_MESH_WRITE`, `CMD_WORLD_RAMP`, `CMD_MATRIX_MAP` |
 | memory | `CMD_COPY`, `CMD_MEMMAP`, `CMD_RAM_MOVE` |
 
@@ -912,8 +914,9 @@ The data ports clear after every command. `MOD_STICKY` written to
 `GPU_CMD_MOD` keeps them instead, and `MOD_INC0` steps `GPU_DATA0` by
 one after each command. Both hold until the modifier is written again.
 
-The character plane is 42 columns by 32 rows in a 6 by 8 font, drawn
-over the pixels. `CMD_TEXT_STYLE` takes the foreground colour, the
+The character plane is drawn over the pixels. At power on it is 42
+columns by 32 rows of a 6 by 8 cell, and the font section below changes
+that. `CMD_TEXT_STYLE` takes the foreground colour, the
 background colour and style bits. `CMD_TEXT_AT` moves the cursor to a
 column and a row. `CMD_TEXT_CHAR` draws one character there.
 `CMD_PRINTF` takes a template in the cartridge and arguments in RAM.
@@ -924,9 +927,38 @@ first, `%s` a two byte pointer to a string in RAM. The game at the end
 prints its score this way.
 
 `CMD_SET_TEXTMODE` switches the screen to read characters from RAM at
-the address in `GPU_ADDR_HI` and `GPU_ADDR_LO`. BASIC runs in that
-mode with the buffer at `$FAC0`, so a store to `$FAC0` shows a
-character at the top left. `CMD_SET_GRAPHICSMODE` switches back.
+the address in `GPU_ADDR_HI` and `GPU_ADDR_LO`. The grid is read row
+after row, one byte a character, as many columns to a row as the grid
+has. BASIC runs in that mode with the buffer at `$FAC0`, so a store to
+`$FAC0` shows a character at the top left. `CMD_SET_GRAPHICSMODE`
+switches back.
+
+A glyph is 8 rows of 8 pixels, one byte a row with bit 0 the left
+pixel. The text cell says how much of each glyph is drawn, from its top
+left corner: 4 to 8 pixels wide and 4 to 8 high. The grid is the screen
+divided by the cell, rounded down. A 6 by 8 cell gives 42 by 32, an 8 by
+8 cell 32 by 32, and a 4 by 4 cell 64 by 64. `GPU_TEXT_COLS` and
+`GPU_TEXT_ROWS` read the grid as it stands.
+
+`CMD_LOAD_FONT` loads a font from the cartridge address in
+`GPU_CART_BANK`, `GPU_CART_HI` and `GPU_CART_LO`. The font there is 2050
+bytes: the cell's width, its height, then 256 glyphs of 8 bytes, code 0
+first. The command takes all 256 glyphs and the cell. `CMD_TEXT_CELL`
+changes the cell alone, width in `GPU_CELL_W` and height in
+`GPU_CELL_H`, and keeps the glyphs. `CMD_RESET_FONT` brings back the
+built-in font and the 6 by 8 cell of power on.
+
+```asm
+        OUT GPU_CELL_W, 8
+        OUT GPU_CELL_H, 8
+        OUT GPU_CMD, CMD_TEXT_CELL     ; 32 by 32 characters
+        IN GPU_TEXT_COLS               ; A is 32
+```
+
+Every cell change clears the character plane and puts its cursor at the
+top left, because the old characters would land in new places. A width
+or height outside 4 to 8 stops the machine with the crash
+`bad-text-cell`, the way a bad instruction does.
 
 `CMD_COPY` moves bytes from the cartridge into RAM: the cartridge
 address in `GPU_CART_BANK`, `GPU_CART_HI` and `GPU_CART_LO`, then

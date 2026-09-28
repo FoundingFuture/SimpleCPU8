@@ -35,11 +35,19 @@ namespace gpu {
 
 constexpr int64_t CYCLES_PER_FRAME = 65536;
 
-// Text grid: the 6 by 8 font over the 256 by 256 screen gives 42 by 32.
-// Derived from the font's own cell, so a font change is one number.
-constexpr int TEXT_COLS = SCREEN_W / FONT_W;
-constexpr int TEXT_ROWS = SCREEN_H / FONT_H;
-constexpr int TEXT_CELLS = TEXT_COLS * TEXT_ROWS;
+// A glyph is 8 rows of 8 bits, and the text cell says how much of it is
+// drawn, from the top left: 4 to 8 pixels each way. The grid is the
+// screen divided by the cell. docs/design/font-design.md.
+constexpr int GLYPHS = 256;
+constexpr int GLYPH_BYTES = 8;
+constexpr int TEXT_CELL_MIN = 4;
+constexpr int TEXT_CELL_MAX = 8;
+// The largest grid, at a 4 by 4 cell, which sizes the overlay.
+constexpr int TEXT_GRID_MAX = SCREEN_W / TEXT_CELL_MIN;
+constexpr int OVERLAY_CELLS = TEXT_GRID_MAX * TEXT_GRID_MAX;
+// Power on: the built-in 6 by 8 font, 42 by 32.
+constexpr int POWER_ON_COLS = SCREEN_W / FONT_W;
+constexpr int POWER_ON_ROWS = SCREEN_H / FONT_H;
 
 constexpr int SPRITE_MAX = 64;  // pixels per side
 constexpr int SPRITE_COUNT = 256;
@@ -78,6 +86,8 @@ enum Port : uint8_t {
   GPU_DATA4 = 0x06,
   GPU_DATA5 = 0x07,
   GPU_DATA6 = 0x08,
+  GPU_TEXT_ROWS = 0x1c,
+  GPU_TEXT_COLS = 0x1d,
   GPU_RAND = 0x1e,
   GPU_FRAME = 0x1f,
 };
@@ -139,6 +149,8 @@ enum Alias : uint8_t {
   GPU_TEXT_CHAR = 0x02,
   GPU_TEXT_ARG_HI = 0x05,
   GPU_TEXT_ARG_LO = 0x06,
+  GPU_CELL_W = 0x02,
+  GPU_CELL_H = 0x03,
   GPU_MESH = 0x02,
   GPU_MESH_BYTE = 0x02,
   GPU_RAMP = 0x02,
@@ -205,6 +217,8 @@ enum Cmd : uint8_t {
   CMD_TEXT_CLEAR = 0x55,
   CMD_PRINTF = 0x56,
   CMD_LOAD_FONT = 0x57,
+  CMD_TEXT_CELL = 0x58,
+  CMD_RESET_FONT = 0x59,
   CMD_SET_WORLDMODE = 0x60,
   CMD_MESH_LOAD = 0x61,
   CMD_MESH_WRITE = 0x62,
@@ -335,6 +349,13 @@ class Gpu : public ChainedDevice {
 
   void write(uint8_t port, uint8_t value) override;
   uint8_t read(uint8_t port) override;
+  std::optional<DeviceFault> takeFault() override;
+
+  // The grid the text cell gives: the screen divided by the cell.
+  int textCols() const { return gpu::SCREEN_W / textCellW; }
+  int textRows() const { return gpu::SCREEN_H / textCellH; }
+  // One row of a glyph in the active font, bit 0 the left pixel.
+  uint8_t glyphRowOf(int code, int row) const;
 
   // Device time: frames tick every CYCLES_PER_FRAME machine cycles, plus
   // whatever fast-frame reads have forced.
@@ -423,8 +444,13 @@ class Gpu : public ChainedDevice {
 
   // Text state. The overlay is a GPU-owned plane of character cells drawn on
   // top of the graphics. A cell char of 0 is empty and shows the graphics
-  // through. One foreground and one background color serve all text.
-  std::array<uint8_t, gpu::TEXT_CELLS> overlayChar{};
+  // through. One foreground and one background color serve all text. The
+  // cells run row after row at the current column count, and the array
+  // holds the largest grid, 64 by 64 at a 4 by 4 cell.
+  std::array<uint8_t, gpu::OVERLAY_CELLS> overlayChar{};
+  // How much of each 8 by 8 glyph is drawn, from its top left: 4 to 8.
+  int textCellW = FONT_W;
+  int textCellH = FONT_H;
   int textCol = 0;
   int textRow = 0;
   int textColor = 0xff;  // foreground palette index, white-ish by default
@@ -441,10 +467,10 @@ class Gpu : public ChainedDevice {
   // the same as VRAM and the cartridge.
   std::vector<uint8_t> worldRam;
 
-  // The active font, 256 glyphs of FONT_H bytes, one byte a row with bit 0 on
-  // the left. It starts as a copy of the built-in font, and CMD_LOAD_FONT
-  // replaces glyphs from the cartridge.
-  std::array<uint8_t, 256 * FONT_H> fontRam{};
+  // The active font, 256 glyphs of 8 bytes, one byte a row with bit 0 on
+  // the left. It starts as a copy of the built-in font. CMD_LOAD_FONT
+  // replaces it from the cartridge and CMD_RESET_FONT brings it back.
+  std::array<uint8_t, gpu::GLYPHS * gpu::GLYPH_BYTES> fontRam{};
 
   // Bumped on every visible change, so the host can skip unchanged frames.
   int64_t version = 0;
@@ -469,7 +495,11 @@ class Gpu : public ChainedDevice {
 
   void reseed();
   void seedFont();
-  uint8_t glyphRowOf(int code, int row) const;
+  // The command this GPU refused, until the machine takes it.
+  std::optional<DeviceFault> fault_;
+  // A new cell, 4 to 8 each way, or a fault that leaves the cell as it was.
+  // Either way the overlay clears and its cursor goes home.
+  bool setCell(int w, int h);
   uint8_t nextRandom();
 
   void command(uint8_t cmd);

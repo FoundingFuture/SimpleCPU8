@@ -2,10 +2,10 @@
 // ports $00 to $1F: 256x256 pixels, one byte each, through a 256 entry RGB
 // palette. See docs/gpu-ports.md for the reference these tables generate.
 //
-// Eleven ports, where there were thirty. Everything is a command, and a
-// data port means whatever the running command says it means. The two
-// direct reads sit at the ceiling and the command block grows from the
-// floor, so the map grows from both ends into the middle.
+// Thirteen ports, where there were thirty. Everything is a command, and a
+// data port means whatever the running command says it means. The direct
+// reads sit at the ceiling and grow down, and the command block grows from
+// the floor, so the map grows from both ends into the middle.
 #pragma once
 
 #include <cstdint>
@@ -32,6 +32,8 @@ constexpr NamedValue PORTS[] = {
     {"GPU_DATA4", 0x06},
     {"GPU_DATA5", 0x07},
     {"GPU_DATA6", 0x08},
+    {"GPU_TEXT_ROWS", 0x1c},  // read: the text grid's rows
+    {"GPU_TEXT_COLS", 0x1d},  // read: the text grid's columns
     {"GPU_RAND", 0x1e},   // read: a random byte. write: reseed
     {"GPU_FRAME", 0x1f},  // read: the frame counter
 };
@@ -111,6 +113,9 @@ constexpr NamedValue ALIASES[] = {
     {"GPU_TEXT_CHAR", 0x02},
     {"GPU_TEXT_ARG_HI", 0x05},
     {"GPU_TEXT_ARG_LO", 0x06},
+    // CMD_TEXT_CELL: the cell's width and height, 4 to 8 each.
+    {"GPU_CELL_W", 0x02},
+    {"GPU_CELL_H", 0x03},
     // The 3D world.
     {"GPU_MESH", 0x02},
     {"GPU_MESH_BYTE", 0x02},
@@ -185,6 +190,8 @@ constexpr NamedValue CMDS[] = {
     {"CMD_TEXT_CLEAR", 0x55},
     {"CMD_PRINTF", 0x56},
     {"CMD_LOAD_FONT", 0x57},
+    {"CMD_TEXT_CELL", 0x58},
+    {"CMD_RESET_FONT", 0x59},
     {"CMD_SET_WORLDMODE", 0x60},
     {"CMD_MESH_LOAD", 0x61},
     {"CMD_MESH_WRITE", 0x62},

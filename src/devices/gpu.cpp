@@ -68,6 +68,8 @@ const std::vector<CmdArgs> CMD_ARGS = {
     {"CMD_TEXT_CLEAR", {}},
     {"CMD_PRINTF", {"GPU_CART_BANK", "GPU_CART_HI", "GPU_CART_LO", "GPU_TEXT_ARG_HI", "GPU_TEXT_ARG_LO"}},
     {"CMD_LOAD_FONT", {"GPU_CART_BANK", "GPU_CART_HI", "GPU_CART_LO"}},
+    {"CMD_TEXT_CELL", {"GPU_CELL_W", "GPU_CELL_H"}},
+    {"CMD_RESET_FONT", {}},
     {"CMD_SET_WORLDMODE", {"GPU_ADDR_HI", "GPU_ADDR_LO", "GPU_COUNT_HI", "GPU_COUNT_LO"}},
     {"CMD_MESH_LOAD", {"GPU_MESH", "GPU_SPRITE", "GPU_SRC_BANK", "GPU_SRC_HI", "GPU_SRC_LO"}},
     {"CMD_MESH_WRITE", {"GPU_MESH_BYTE"}},
@@ -189,6 +191,9 @@ void Gpu::powerOn() {
   frameBoost_ = 0;
   lastForcedAt_ = -std::numeric_limits<double>::infinity();
   overlayChar.fill(0);
+  textCellW = FONT_W;
+  textCellH = FONT_H;
+  fault_.reset();
   textCol = 0;
   textRow = 0;
   textColor = 0xff;
@@ -273,6 +278,10 @@ uint8_t Gpu::read(uint8_t port) {
       return static_cast<uint8_t>(frame() & 0xff);
     case GPU_RAND:
       return nextRandom();
+    case GPU_TEXT_COLS:
+      return static_cast<uint8_t>(textCols());
+    case GPU_TEXT_ROWS:
+      return static_cast<uint8_t>(textRows());
     case GPU_CMD_MOD:
       return static_cast<uint8_t>(cmdMod & 0xff);
     default:
@@ -676,8 +685,8 @@ void Gpu::command(uint8_t cmd) {
       version++;
       break;
     case CMD_TEXT_AT:
-      textCol = u8(0) % TEXT_COLS;
-      textRow = u8(1) % TEXT_ROWS;
+      textCol = u8(0) % textCols();
+      textRow = u8(1) % textRows();
       break;
     case CMD_TEXT_CHAR:
       putChar(static_cast<uint8_t>(u8(0)));
@@ -696,17 +705,23 @@ void Gpu::command(uint8_t cmd) {
       version++;
       break;
     case CMD_LOAD_FONT: {
-      // The blob leads with its glyph count and its height.
+      // The blob is the cell's width and height, then 256 glyphs of 8
+      // bytes, code 0 first. A bad cell changes nothing, glyphs included.
       const uint32_t base = cartAddr(0);
-      const int glyphs = cartByte(base);
-      const int height = cartByte(base + 1);
-      const size_t count = static_cast<size_t>((glyphs == 0 ? 256 : glyphs) * (height == 0 ? FONT_H : height));
-      for (size_t i = 0; i < count && i < fontRam.size(); i++) {
-        fontRam[i] = cartByte(base + 2 + static_cast<uint32_t>(i));
-      }
+      if (!setCell(cartByte(base), cartByte(base + 1))) break;
+      for (size_t i = 0; i < fontRam.size(); i++) fontRam[i] = cartByte(base + 2 + static_cast<uint32_t>(i));
       version++;
       break;
     }
+    case CMD_TEXT_CELL:
+      if (setCell(u8(0), u8(1))) version++;
+      break;
+    case CMD_RESET_FONT:
+      // What power on does to the font and the cell, as one command.
+      seedFont();
+      setCell(FONT_W, FONT_H);
+      version++;
+      break;
     // ---- the 3D world ----
     case CMD_SET_WORLDMODE:
       // The scene is a framebuffer: the GPU reads it every frame, the way
@@ -963,7 +978,10 @@ std::string Gpu::displayKey() const {
       // mapped bytes into the key. Wrap, do not clamp: the CPU wraps at 16
       // bits, so a wrapped screen must fold in the wrapped bytes too.
       uint32_t h = 2166136261u;
-      for (int a = textBase; a < textBase + TEXT_CELLS; a++) {
+      // The cell decides how many bytes the screen is, so it keys too.
+      h ^= static_cast<uint32_t>(textCellW * 16 + textCellH);
+      h *= 16777619u;
+      for (int a = textBase; a < textBase + textCols() * textRows(); a++) {
         h ^= ram_[static_cast<size_t>(a) & 0xffff];
         h *= 16777619u;
       }

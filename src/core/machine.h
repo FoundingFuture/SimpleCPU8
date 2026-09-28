@@ -33,6 +33,8 @@ enum class CrashKind {
   IllegalProgramAddress,
   StackOverflow,
   StackUnderflow,
+  // A device refused a command. docs/design/font-design.md.
+  BadTextCell,
 };
 
 std::string_view crashKindName(CrashKind k);
@@ -67,12 +69,22 @@ struct Flags {
   bool operator==(const Flags&) const = default;
 };
 
+// A command a device refused, which crashes the machine the way a bad
+// instruction does. A device has no other way to say no.
+struct DeviceFault {
+  CrashKind kind;
+  std::string message;
+};
+
 // The port gateway. Devices implement it and chain to a fallback.
 class IoBus {
  public:
   virtual ~IoBus() = default;
   virtual void write(uint8_t port, uint8_t value) = 0;
   virtual uint8_t read(uint8_t port) = 0;
+  // The fault the last write raised, handed over once. The machine asks
+  // after every port write. A device in a chain asks its fallback too.
+  virtual std::optional<DeviceFault> takeFault() { return std::nullopt; }
 };
 
 // Deterministic default bus: writes are logged, reads return 0.
@@ -199,6 +211,8 @@ class Machine {
   static RowInfo analyze(const Row& row);
   bool executeRow(const Row& row, const RowInfo& info);
   void fail(CrashKind kind, std::string message, const Row* row = nullptr);
+  // After a port write: crash with the device's fault, when it raised one.
+  bool deviceFailed(const Row& row);
   AluOut alu(AluOp op) const;
   uint16_t effectiveAddress(const Row& row);
   uint16_t stackAddress(const Row& row) const;

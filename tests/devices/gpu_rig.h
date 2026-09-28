@@ -77,8 +77,8 @@ inline std::unique_ptr<Bytes> newRam() { return std::make_unique<Bytes>(static_c
 // The overlay's row as text, trailing blanks trimmed.
 inline std::string overlayText(const sc8::Gpu& g, int row) {
   std::string s;
-  for (int col = 0; col < sc8::gpu::TEXT_COLS; col++) {
-    const uint8_t code = g.overlayChar[static_cast<size_t>(row * sc8::gpu::TEXT_COLS + col)];
+  for (int col = 0; col < g.textCols(); col++) {
+    const uint8_t code = g.overlayChar[static_cast<size_t>(row * g.textCols() + col)];
     s += code == 0 ? ' ' : static_cast<char>(code);
   }
   while (!s.empty() && s.back() == ' ') s.pop_back();

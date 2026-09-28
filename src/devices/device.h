@@ -16,6 +16,8 @@ class ChainedDevice : public IoBus {
 
   void setFallback(IoBus* fallback) { fallback_ = fallback ? fallback : &end_; }
   IoBus& fallback() { return *fallback_; }
+  // A fault raised further down the chain comes up through every link.
+  std::optional<DeviceFault> takeFault() override { return fallback_->takeFault(); }
 
  protected:
   IoBus* fallback_;

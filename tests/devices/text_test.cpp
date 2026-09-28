@@ -103,7 +103,7 @@ TEST_SUITE("printf overlay") {
     r.tpl("X");
     cmd(r.g, CMD_TEXT_AT, {4, 2});
     cmd(r.g, CMD_PRINTF, {0, 0, 0, ARGS >> 8, ARGS & 0xff});
-    CHECK_EQ(r.g.overlayChar[2 * TEXT_COLS + 4], 'X');
+    CHECK_EQ(r.g.overlayChar[2 * POWER_ON_COLS + 4], 'X');
   }
 
   TEST_CASE("wraps a newline to the next row") {
@@ -283,29 +283,204 @@ TEST_SUITE("video mode and text mode") {
   }
 }
 
-TEST_SUITE("custom font") {
-  TEST_CASE("loads a 256-glyph font from the cartridge") {
-    Rig r;
-    // A font blob leads with its glyph count and its height, then the
-    // glyphs. All blank except code 65 as a solid block.
-    r.cart.assign(2 + 256 * 8, 0);
-    r.cart[0] = 0;  // 0 means 256 glyphs: a byte cannot say 256
-    r.cart[1] = 8;
-    for (size_t row = 0; row < 8; row++) r.cart[2 + 65 * 8 + row] = 0xff;
+TEST_SUITE("the text cell") {
+  // A font blob as CMD_LOAD_FONT reads it: width, height, 2048 glyph bytes.
+  std::vector<uint8_t> fontBlob(int w, int h, int code = -1, uint8_t row = 0xff) {
+    std::vector<uint8_t> b(2 + GLYPHS * GLYPH_BYTES, 0);
+    b[0] = static_cast<uint8_t>(w);
+    b[1] = static_cast<uint8_t>(h);
+    if (code >= 0) {
+      for (size_t r = 0; r < GLYPH_BYTES; r++) b[2 + static_cast<size_t>(code) * GLYPH_BYTES + r] = row;
+    }
+    return b;
+  }
+
+  void load(Rig& r, const std::vector<uint8_t>& blob) {
+    r.cart = blob;
     r.g.attachCart(r.cart);
     cmd(r.g, CMD_LOAD_FONT, {0, 0, 0});
+  }
+
+  // Pixels at the fg colour inside the w by h cell at col, row.
+  int litInCell(const Gpu::Frame& out, int col, int row, int w, int h, int fg) {
+    int n = 0;
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        if (gpu_rig::px(out, col * w + x, row * h + y) == fg) n++;
+      }
+    }
+    return n;
+  }
+
+  TEST_CASE("power on is the built-in font at 6 by 8, 42 by 32") {
+    Rig r;
+    CHECK_EQ(r.g.read(GPU_TEXT_COLS), 42);
+    CHECK_EQ(r.g.read(GPU_TEXT_ROWS), 32);
+    CHECK_EQ(r.g.glyphRowOf('A', 0), glyphRow('A', 0));
+  }
+
+  TEST_CASE("CMD_LOAD_FONT stores 256 glyphs of 8 bytes and draws one in a 6 by 8 cell") {
+    Rig r;
+    load(r, fontBlob(6, 8, 65));
     cmd(r.g, CMD_TEXT_STYLE, {6});
     cmd(r.g, CMD_TEXT_CHAR, {65});
     const auto out = r.g.composeFrame();
-    // A loaded glyph row is eight bits wide, and the CELL reads the first
-    // six of them. The two past the cell belong to the next character.
-    bool allFg = true;
-    for (int gy = 0; gy < FONT_H; gy++) {
-      for (int gx = 0; gx < FONT_W; gx++) {
-        if (gpu_rig::px(out, gx, gy) != 6) allFg = false;
+    CHECK_EQ(litInCell(out, 0, 0, 6, 8, 6), 6 * 8);
+    // The two bits past the cell belong to the next character, and stay dark.
+    CHECK_EQ(gpu_rig::px(out, 6, 0), 0);
+    CHECK_EQ(r.g.glyphRowOf(65, 7), 0xff);
+    CHECK_EQ(r.g.glyphRowOf(66, 0), 0);
+  }
+
+  TEST_CASE("CMD_LOAD_FONT sets the cell from its header, every size 4 to 8") {
+    for (int w = TEXT_CELL_MIN; w <= TEXT_CELL_MAX; w++) {
+      for (int h = TEXT_CELL_MIN; h <= TEXT_CELL_MAX; h++) {
+        Rig r;
+        load(r, fontBlob(w, h, 0x41));
+        CAPTURE(w);
+        CAPTURE(h);
+        CHECK_EQ(r.g.read(GPU_TEXT_COLS), 256 / w);
+        CHECK_EQ(r.g.read(GPU_TEXT_ROWS), 256 / h);
+        CHECK_EQ(r.g.glyphRowOf(0x41, 7), 0xff);
+        CHECK_FALSE(r.g.takeFault().has_value());
       }
     }
-    CHECK(allFg);
+  }
+
+  TEST_CASE("the reads give 32 by 32 at 8 by 8 and 64 by 64 at 4 by 4") {
+    Rig r;
+    cmd(r.g, CMD_TEXT_CELL, {8, 8});
+    CHECK_EQ(r.g.read(GPU_TEXT_COLS), 32);
+    CHECK_EQ(r.g.read(GPU_TEXT_ROWS), 32);
+    cmd(r.g, CMD_TEXT_CELL, {4, 4});
+    CHECK_EQ(r.g.read(GPU_TEXT_COLS), 64);
+    CHECK_EQ(r.g.read(GPU_TEXT_ROWS), 64);
+  }
+
+  TEST_CASE("CMD_TEXT_CELL keeps the glyphs and changes the grid") {
+    Rig r;
+    load(r, fontBlob(6, 8, 65));
+    cmd(r.g, CMD_TEXT_CELL, {8, 4});
+    CHECK_EQ(r.g.read(GPU_TEXT_COLS), 32);
+    CHECK_EQ(r.g.read(GPU_TEXT_ROWS), 64);
+    CHECK_EQ(r.g.glyphRowOf(65, 0), 0xff);
+  }
+
+  TEST_CASE("CMD_RESET_FONT brings back the built-in glyphs and 6 by 8") {
+    Rig r;
+    load(r, fontBlob(8, 8, 'A', 0x81));
+    cmd(r.g, CMD_RESET_FONT);
+    CHECK_EQ(r.g.read(GPU_TEXT_COLS), 42);
+    CHECK_EQ(r.g.read(GPU_TEXT_ROWS), 32);
+    for (int row = 0; row < GLYPH_BYTES; row++) CHECK_EQ(r.g.glyphRowOf('A', row), glyphRow('A', row));
+    CHECK_EQ(r.g.glyphRowOf(0x80, 0), 0);
+  }
+
+  TEST_CASE("a cell change clears the overlay and homes its cursor, by any of the three commands") {
+    Rig r;
+    const auto check = [&](const char* what) {
+      CAPTURE(what);
+      CHECK_EQ(overlayText(r.g, 0), "");
+      cmd(r.g, CMD_TEXT_CHAR, {'X'});
+      CHECK_EQ(r.g.overlayChar[0], 'X');
+    };
+    r.printf("HELLO\nWORLD");
+    cmd(r.g, CMD_TEXT_CELL, {8, 8});
+    check("CMD_TEXT_CELL");
+    r.printf("HELLO\nWORLD");
+    load(r, fontBlob(5, 7));
+    check("CMD_LOAD_FONT");
+    r.printf("HELLO\nWORLD");
+    cmd(r.g, CMD_RESET_FONT);
+    check("CMD_RESET_FONT");
+  }
+
+  TEST_CASE("a width or height outside 4 to 8 is a fault named bad-text-cell, and changes nothing") {
+    Rig r;
+    CHECK_FALSE(r.g.takeFault().has_value());
+    for (const auto& [w, h] : std::vector<std::pair<int, int>>{{3, 8}, {9, 8}, {6, 3}, {6, 9}, {0, 0}}) {
+      CAPTURE(w);
+      CAPTURE(h);
+      cmd(r.g, CMD_TEXT_CELL, {w, h});
+      const auto f = r.g.takeFault();
+      REQUIRE(f.has_value());
+      CHECK_EQ(f->kind, CrashKind::BadTextCell);
+      CHECK_EQ(r.g.read(GPU_TEXT_COLS), 42);
+      // Taken once: the next question finds nothing.
+      CHECK_FALSE(r.g.takeFault().has_value());
+    }
+    load(r, fontBlob(9, 8, 'A'));
+    const auto f = r.g.takeFault();
+    REQUIRE(f.has_value());
+    CHECK_EQ(f->kind, CrashKind::BadTextCell);
+    CHECK(f->message.find("9 by 8") != std::string::npos);
+    CHECK_EQ(r.g.glyphRowOf('A', 0), glyphRow('A', 0));
+  }
+
+  TEST_CASE("a glyph draws only inside its cell") {
+    Rig r;
+    load(r, fontBlob(5, 7, 65));
+    cmd(r.g, CMD_TEXT_STYLE, {6});
+    cmd(r.g, CMD_TEXT_CHAR, {65});
+    cmd(r.g, CMD_TEXT_CHAR, {65});
+    const auto out = r.g.composeFrame();
+    CHECK_EQ(litInCell(out, 0, 0, 5, 7, 6), 5 * 7);
+    CHECK_EQ(litInCell(out, 1, 0, 5, 7, 6), 5 * 7);
+    CHECK_EQ(gpu_rig::px(out, 0, 7), 0);   // below the cell
+    CHECK_EQ(gpu_rig::px(out, 10, 0), 0);  // past the second cell
+    CHECK_EQ(gpu_rig::litPixels(out), static_cast<size_t>(2 * 5 * 7));
+  }
+
+  TEST_CASE("text mode reads the grid at the stride of the cell") {
+    Rig r;
+    r.withRam();
+    r.mapped(0x4000);
+    load(r, fontBlob(8, 8, 65));
+    cmd(r.g, CMD_TEXT_STYLE, {6});
+    // Row 1, column 2 of a 32 column grid.
+    (*r.ram)[0x4000 + 1 * 32 + 2] = 65;
+    const auto out = r.g.composeFrame();
+    CHECK_EQ(litInCell(out, 2, 1, 8, 8, 6), 64);
+    CHECK_EQ(gpu_rig::litPixels(out), 64u);
+    // The last cell of a 64 by 64 grid is byte 4095.
+    cmd(r.g, CMD_TEXT_CELL, {4, 4});
+    (*r.ram)[0x4000 + 4095] = 65;
+    CHECK_EQ(litInCell(r.g.composeFrame(), 63, 63, 4, 4, 6), 16);
+  }
+
+  TEST_CASE("the overlay wraps at the cell's columns and scrolls at its rows") {
+    Rig r;
+    cmd(r.g, CMD_TEXT_CELL, {8, 8});
+    r.printf(std::string(33, 'A'));
+    CHECK_EQ(overlayText(r.g, 0), std::string(32, 'A'));
+    CHECK_EQ(overlayText(r.g, 1), "A");
+    cmd(r.g, CMD_TEXT_CELL, {8, 8});
+    r.printf("TOP" + std::string(32, '\n') + "END");
+    // 32 rows: the newline past the last one scrolled TOP away.
+    CHECK_EQ(overlayText(r.g, 31), "END");
+    CHECK_EQ(overlayText(r.g, 0), "");
+    cmd(r.g, CMD_TEXT_AT, {40, 70});
+    cmd(r.g, CMD_TEXT_CHAR, {'Q'});
+    CHECK_EQ(overlayText(r.g, 70 % 32).substr(40 % 32), "Q");
+  }
+}
+
+TEST_SUITE("a bad text cell through the bus") {
+  TEST_CASE("crashes the machine with bad-text-cell") {
+    const Assembled a = assemble(
+        "        OUT GPU_DATA0, 3\n"
+        "        OUT GPU_DATA1, 8\n"
+        "        OUT GPU_CMD, CMD_TEXT_CELL\n"
+        "        HLT\n");
+    REQUIRE(a.errors.empty());
+    Machine m(a.program, buildOptimal());
+    Gpu g([&m] { return m.cycles; });
+    m.setIo(&g);
+    m.run(50);
+    CHECK_EQ(m.status, Status::Crashed);
+    REQUIRE(m.crash);
+    CHECK_EQ(m.crash->kind, CrashKind::BadTextCell);
+    CHECK_EQ(crashKindName(m.crash->kind), "bad-text-cell");
   }
 }
 

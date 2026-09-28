@@ -14,6 +14,7 @@ std::string_view crashKindName(CrashKind k) {
     case CrashKind::IllegalProgramAddress: return "illegal-program-address";
     case CrashKind::StackOverflow: return "stack-overflow";
     case CrashKind::StackUnderflow: return "stack-underflow";
+    case CrashKind::BadTextCell: return "bad-text-cell";
   }
   return "?";
 }
@@ -139,6 +140,13 @@ Machine::RowInfo Machine::analyze(const Row& row) {
     if (meta.aluSelect != AluOp::AluNone) info.aluOp = meta.aluSelect;
   }
   return info;
+}
+
+bool Machine::deviceFailed(const Row& row) {
+  std::optional<DeviceFault> f = io_->takeFault();
+  if (!f) return false;
+  fail(f->kind, std::move(f->message), &row);
+  return true;
 }
 
 void Machine::fail(CrashKind kind, std::string message, const Row* row) {
@@ -485,11 +493,13 @@ bool Machine::executeRow(const Row& row, const RowInfo& info) {
         const uint8_t val = static_cast<uint8_t>(irOperand & 0xff);
         onBus(K::IoWrite, port(), val);
         io_->write(port(), val);
+        if (deviceFailed(row)) return false;
         break;
       }
       case S::IO_WRITE_ACC:
         onBus(K::IoWrite, port(), acc);
         io_->write(port(), acc);
+        if (deviceFailed(row)) return false;
         break;
       case S::IO_READ: ioRead(T::ACC); break;
       case S::IO_READ_D1H: ioRead(T::D1H); break;
