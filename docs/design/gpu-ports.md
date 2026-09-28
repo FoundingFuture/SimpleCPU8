@@ -5,7 +5,8 @@ talks to it with OUT, OUTA, and IN. The GPU claims ports 0x00 to 0x1F.
 Writes to other ports go to the rest of the bus.
 
 The GPU is deterministic. Every visible effect follows from the values
-written and the machine cycle counter. The GPU never crashes the CPU.
+written and the machine cycle counter. The GPU crashes the machine for one
+thing only: a text cell outside 4 to 8, the crash kind bad-text-cell.
 Off screen drawing clips at the edges. Unknown commands do nothing.
 
 ## Screen model
@@ -41,6 +42,8 @@ direct-value port can be added without renumbering anything.
 | 0x06 | GPU_DATA4 | both | arguments in, results out |
 | 0x07 | GPU_DATA5 | both | arguments in, results out |
 | 0x08 | GPU_DATA6 | both | arguments in, results out |
+| 0x1C | GPU_TEXT_ROWS | read | read: the character grid's rows |
+| 0x1D | GPU_TEXT_COLS | read | read: the character grid's columns |
 | 0x1E | GPU_RAND | both | read: a random byte. write: reseed |
 | 0x1F | GPU_FRAME | read | read: the frame counter |
 
@@ -124,7 +127,9 @@ high, low.
 | 0x54 | CMD_TEXT_CHAR | 0: character, drawn at the cursor | 0: character, drawn at the cursor |
 | 0x55 | CMD_TEXT_CLEAR | none |  |
 | 0x56 | CMD_PRINTF | 0-2: template in cart | 3-4: arguments in RAM |
-| 0x57 | CMD_LOAD_FONT | 0-2: cart address | 0-2: cart address |
+| 0x57 | CMD_LOAD_FONT | 0-2: cart address | The blob is width, height, 2048 glyph bytes. Sets the cell |
+| 0x58 | CMD_TEXT_CELL | 0: width | 1: height, 4 to 8 each. Keeps the glyphs |
+| 0x59 | CMD_RESET_FONT | none | The built-in font and the 6 by 8 cell of power on |
 | 0x60 | CMD_SET_WORLDMODE | 0-1: scene address | 2-3: object count |
 | 0x61 | CMD_MESH_LOAD | 0: mesh id | 1-3: cart address |
 | 0x62 | CMD_MESH_WRITE | 0: byte | 0: byte |
@@ -216,9 +221,11 @@ Codes 0x20 to 0x7F have a glyph. The last is a solid block, which is what a
 text cursor wants. It fills the whole cell rather than the face, so a cursor
 leaves no stripe down its right hand side.
 
-CMD_LOAD_FONT loads a custom font, 256 glyphs of 8 bytes, from the
-cartridge. A glyph row is a byte and the cell reads its low six bits.
-Restart brings the built-in font back.
+CMD_LOAD_FONT loads a custom font from the cartridge. The blob is the
+cell's width, its height, then 2048 glyph bytes: 256 glyphs of 8 bytes
+from code 0. The load sets the cell. A glyph row is a byte, bit 0 the left
+pixel, and the cell reads as many of its low bits as it is wide. Restart
+brings the built-in font back.
 
 printf draws over the graphics. Put a template in the cartridge, push the
 parameters into RAM, point GPU_TEXT_ARG_HI and GPU_TEXT_ARG_LO at them,
