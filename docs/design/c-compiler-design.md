@@ -205,9 +205,10 @@ $0100-        the runtime: the ACP scratch block, sized by the program,
 $FAC0-$FFFF   the text screen, when mapped
 ```
 
-The stack top is a linker constant, not an address. `$FBFF` when the program
-maps text mode, `$FFFF` when it does not. BASIC lives in text mode. A stack
-that started at `$FFFD` would overwrite the bottom of its own screen on the
+The stack top is a default, `$FAC0`, below a 42 by 32 text screen, whether
+or not the program maps one. `simplecpu-cc --heap-stack-top ADDR` moves it.
+BASIC's build and BASIC and C projects pass `$F000`, below BASIC's 4 KB
+screen. A stack that started above the screen would overwrite it on the
 first call.
 
 ## The zero page is the scarce memory
@@ -368,7 +369,8 @@ goes through `[D2]`.
 
 ### How big the heap stack is
 
-It runs from under the text screen down to a floor. By default the floor
+It runs from under the text screen down to a floor. The top is `$FAC0`
+unless `--heap-stack-top ADDR` moves it. By default the floor
 is the end of the program's data, so the heap stack gets every free byte.
 `#pragma heap_stack_size N` in any file, or `simplecpu-cc
 --heap-stack-size N`, sets the floor N bytes below the top instead. A size
@@ -1097,7 +1099,7 @@ bytes the CPU could only ever copy.
 ## Settled, recorded so they are not reopened
 
 The heap stack under D3, which is the frame base too. The stack top as a
-linker constant. `__ROM` as a storage class the
+default that `--heap-stack-top` moves. `__ROM` as a storage class the
 CPU cannot read, with `ROM.h` generated from both sources on every compile.
 `rom_copy` as the only way to read ROM, and `__ROM` as its spelling. A build
 line in a comment rather than a Makefile. No mouse for now, so the `io` library covers the pad and the keyboard, and a
