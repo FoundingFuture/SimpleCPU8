@@ -3,8 +3,8 @@
 A font becomes an asset a program draws, loads and switches like any other.
 The GPU learns a text cell smaller or larger than 6 by 8, and the grid
 follows the cell. BASIC gets two words for it, and the sprite editor gets a
-font mode. This note records what the code does today and the decisions
-Eddie took on 2026-09-28, with the trade-offs behind them.
+font mode. This note records the decisions Eddie took on 2026-09-28, with
+their trade-offs, and what the code did before them.
 
 ## Contents
 
