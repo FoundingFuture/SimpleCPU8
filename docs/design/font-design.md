@@ -18,7 +18,6 @@ Eddie took on 2026-09-28, with the trade-offs behind them.
 - [Order of work](#order-of-work)
 - [Documents this changes](#documents-this-changes)
 - [Decisions taken here](#decisions-taken-here)
-- [Proposals to confirm](#proposals-to-confirm)
 
 ## What exists today
 
@@ -123,7 +122,7 @@ stays as it is.
 
 ### The file on disk
 
-Proposed: the extension `.font`, beside `.image`, `.palette` and `.sample`.
+The extension is `.font`, beside `.image`, `.palette` and `.sample`.
 The file is text drawn as art, the way src/devices/font.h keeps the
 built-in font. It diffs line by line in git and opens in any editor.
 
@@ -158,7 +157,7 @@ and 20 KB.
 
 ### On the cartridge
 
-Proposed: the blob `CMD_LOAD_FONT` reads is two header bytes, width then
+The blob `CMD_LOAD_FONT` reads is two header bytes, width then
 height, and the 2048 glyph bytes, code 0 first. The glyph count goes. A
 font always has 256 codes, so a count has nothing left to say.
 
@@ -175,11 +174,11 @@ rows 256 divided by the height, rounded down. A 5 wide cell gives 51
 columns and leaves one pixel unused at the right.
 
 `CMD_TEXT_CELL` sets the cell alone, width and height 4 to 8 in DATA0 and
-DATA1, and leaves the glyphs as they are. Proposed code: $58, the next free
+DATA1, and leaves the glyphs as they are. Its code is $58, the next free
 text command.
 
 `CMD_RESET_FONT` puts the built-in glyphs back and sets the cell to 6 by 8.
-It takes no arguments. Proposed code: $59. It is what power on does, as one
+It takes no arguments. Its code is $59. It is what power on does, as one
 command.
 
 Every cell change, by any of the three, clears the overlay and puts the
@@ -187,7 +186,7 @@ overlay's cursor at column 0, row 0.
 
 A width or height outside 4 to 8 crashes the machine with a named error,
 the way a bad instruction does. That holds for a font header and for
-DATA0 and DATA1. Proposed name: `bad-text-cell`. No device crashes the machine today,
+DATA0 and DATA1. Its name is `bad-text-cell`. No device crashes the machine today,
 so this adds the first crash kind a device raises.
 
 Two direct reads give the current grid: `GPU_TEXT_COLS` at $1D and
@@ -217,7 +216,7 @@ A name in, the asset's kind, cartridge address and length out, in one
 cycle. The name goes in the way STO_LOAD takes one, through STO_NAME_HI and
 STO_NAME_LO. A name the directory lacks sets STO_STATUS to `STO_NOT_FOUND`.
 
-Proposed: the answer is seven bytes written at STO_ADDR_HI and STO_ADDR_LO,
+The answer is seven bytes written at STO_ADDR_HI and STO_ADDR_LO,
 high byte first. One byte of kind, three of cartridge address, three of
 length. The kinds are named constants in src/devices/storage_ports.h and in
 the registry, `STO_KIND_FONT` among them.
@@ -279,7 +278,7 @@ The text buffer moves to a fixed 4 KB at $F000, so a 64 by 64 grid fits.
 It ends at $FFFF as it does now.
 
 What has to move is the C heap stack. Its top is `C_STACK_TOP`, $FAC0, in
-src/cc/layout.h. The compiler gets an option to set it. Proposed flag:
+src/cc/layout.h. The compiler gets an option to set it. The flag is
 `--heap-stack-top ADDR`, beside the existing `--heap-stack-size`. BASIC's
 build and BASIC and C projects pass $F000. Every other C program keeps
 $FAC0. BASIC's heap stack then runs from $F000 down to the end of its .ram,
@@ -548,9 +547,9 @@ font.h keeps its six column block for the built-in font.
 
 They need the same converter as the directory, so they arrive with it.
 
-## Proposals to confirm
+### The names and layouts proposed in this note
 
-These names and layouts are proposed in this note and not yet agreed:
+Confirmed by Eddie on 2026-09-28, as proposed:
 
 - `CMD_TEXT_CELL` at $58 and `CMD_RESET_FONT` at $59.
 - The crash kind `bad-text-cell`.
