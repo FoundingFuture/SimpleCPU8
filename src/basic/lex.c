@@ -1,5 +1,6 @@
 
 #include "basic.h"
+#include "keywords.h"
 
 char *lx_text;
 unsigned int lx_pos;
@@ -10,6 +11,13 @@ unsigned int lx_str;
 unsigned char lx_len;
 unsigned int lx_tokpos;
 unsigned char lx_raw;
+unsigned char lx_kw;
+
+/* The reserved words, and where each starts in the list. lx_init fills
+ * kw_at once at power on, so a word's text is one load away.
+ */
+static char *kw_all;
+static unsigned int kw_at[KW_COUNT];
 
 static unsigned char upper(unsigned char c)
 {
@@ -38,6 +46,40 @@ static unsigned char hexval(unsigned char c)
     return c - 48;
 }
 
+void lx_init(void)
+{
+    unsigned int i;
+    unsigned char n;
+    kw_all = BASIC_KEYWORDS;
+    i = 1;
+    n = 0;
+    while (kw_all[i]) {
+        kw_at[n] = i;
+        n = n + 1;
+        while (kw_all[i] != 32) i = i + 1;
+        i = i + 1;
+    }
+}
+
+char *kw_text(unsigned char k)
+{
+    return &kw_all[kw_at[k - KW_FIRST]];
+}
+
+unsigned char kw_find(char *w, unsigned char n)
+{
+    unsigned char k;
+    unsigned char i;
+    char *t;
+    for (k = 0; k < KW_COUNT; k++) {
+        t = &kw_all[kw_at[k]];
+        i = 0;
+        while (i < n && t[i] == upper(w[i])) i = i + 1;
+        if (i == n && t[n] == 32) return KW_FIRST + k;
+    }
+    return 0;
+}
+
 void lx_start(char *text)
 {
     lx_seek(text, 0);
@@ -59,11 +101,25 @@ void lx_next(void)
     unsigned char i;
     unsigned int start;
 
+    /* lx_kw is 0 but for a keyword, and lx_word[0] 0 but for a name or
+     * punctuation, so IS_PUNCT and a test of lx_kw need no lx_tok first.
+     */
+    lx_kw = 0;
+    lx_word[0] = 0;
     while (lx_text[lx_pos] == 32) lx_pos = lx_pos + 1;
     lx_tokpos = lx_pos;
     c = lx_text[lx_pos];
 
     if (c == 0) { lx_tok = T_END; lx_len = 0; return; }
+
+    /* A keyword a stored line holds as its byte. */
+    if (c >= KW_FIRST) {
+        lx_kw = c;
+        lx_tok = T_KEY;
+        lx_len = 0;
+        lx_pos = lx_pos + 1;
+        return;
+    }
 
     if (isdig(c)) {
         lx_num = 0;
@@ -134,6 +190,14 @@ void lx_next(void)
         lx_word[i] = 0;
         lx_len = i;
         lx_tok = T_NAME;
+        /* A keyword written out: typed at the prompt, in a DATA line or a
+         * bang's text, or run into a number, as TO in 1TO. A variable's
+         * second character is never a letter, so a variable skips this.
+         */
+        if (i >= 2 && lx_word[1] >= 65) {
+            lx_kw = kw_find(lx_word, i);
+            if (lx_kw) lx_tok = T_KEY;
+        }
         return;
     }
 
@@ -155,6 +219,16 @@ void lx_next(void)
 unsigned char lx_is(char *word)
 {
     unsigned char i;
+    char *t;
+    if (lx_tok == T_KEY) {
+        t = kw_text(lx_kw);
+        i = 0;
+        while (word[i]) {
+            if (t[i] != word[i]) return 0;
+            i = i + 1;
+        }
+        return t[i] == 32;
+    }
     if (lx_tok != T_NAME && lx_tok != T_PUNCT) return 0;
     i = 0;
     while (word[i]) {
@@ -162,4 +236,21 @@ unsigned char lx_is(char *word)
         i = i + 1;
     }
     return lx_word[i] == 0;
+}
+
+void lx_name(void)
+{
+    char *t;
+    unsigned char i;
+    if (lx_tok != T_KEY) return;
+    t = kw_text(lx_kw);
+    i = 0;
+    while (t[i] != 32) {
+        lx_word[i] = t[i];
+        i = i + 1;
+    }
+    lx_word[i] = 0;
+    lx_len = i;
+    lx_tok = T_NAME;
+    lx_kw = 0;
 }

@@ -57,12 +57,16 @@ static unsigned char serialise(void)
         n = (prog[p] << 8) | prog[p + 1];
         d = 0;
         while (n) { digits[d] = 48 + (n % 10); n = n / 10; d = d + 1; }
-        if (at + d + prog[p + 2] + 2 >= TEXTMAX) { rt_error(E_SAVEBIG); return 0; }
+        /* The keywords as text, the way LIST shows them. The test is the
+         * one a line of that text as its own record would take.
+         */
+        n = ed_expand(&prog[p + 3], ed_line);
+        if (at + d + n + 6 >= TEXTMAX) { rt_error(E_SAVEBIG); return 0; }
         while (d) { d = d - 1; textbuf[at] = digits[d]; at = at + 1; }
         textbuf[at] = 32;
         at = at + 1;
         i = 0;
-        while (prog[p + 3 + i]) { textbuf[at] = prog[p + 3 + i]; at = at + 1; i = i + 1; }
+        while (ed_line[i]) { textbuf[at] = ed_line[i]; at = at + 1; i = i + 1; }
         textbuf[at] = 10;
         at = at + 1;
         p = p + prog[p + 2];

@@ -7,6 +7,8 @@
 #include <sys.h>
 #include <storage.h>
 
+#include "keywords.h"
+
 /* The screen is 4 KB at the top of RAM, room for the 64 by 64 grid of a
  * 4 by 4 cell. The C stack starts just below it and grows down, so the two
  * never meet: the build passes --heap-stack-top 0xF000.
@@ -84,6 +86,10 @@ extern unsigned int lx_tokpos;  /* where the token last read starts in lx_text *
  * Nothing goes on the heap, so walking DATA lines leaves no garbage.
  */
 extern unsigned char lx_raw;
+/* The keyword byte, KW_ in keywords.h, when the token is a keyword, and 0
+ * for every other token. A stored line holds a keyword as that byte.
+ */
+extern unsigned char lx_kw;
 
 #define T_END    0
 #define T_NUM    1
@@ -92,17 +98,42 @@ extern unsigned char lx_raw;
 #define T_PUNCT  4
 #define T_KEY    5
 
+/* Fill the keyword table. Once, before anything reads a line. */
+void lx_init(void);
 void lx_start(char *text);
 void lx_seek(char *text, unsigned int pos);
 void lx_next(void);
+/* True when the token is the keyword, name or punctuation word spells. A
+ * keyword's byte compares by its text. It is for the paths that run once.
+ * The statements test lx_kw and IS_PUNCT.
+ */
 unsigned char lx_is(char *word);
+/* A keyword where a name stands, as in INPUT PRINT, TO = 5 or CALL PEEK,
+ * becomes the name it spells. The code that reads a name then runs as it
+ * did when every keyword reached it as a name.
+ */
+void lx_name(void);
+/* The keyword byte k's text, up to the space after it. */
+char *kw_text(unsigned char k);
+/* The keyword byte that the n characters at w spell, capitals or not, or
+ * 0 when they spell none.
+ */
+unsigned char kw_find(char *w, unsigned char n);
+
+/* True when the token is the punctuation c. lx_next leaves lx_word[0] 0
+ * for every token but a name or punctuation, and a name starts with a
+ * letter. Not for < and >, which start two character operators.
+ */
+#define IS_PUNCT(c) (lx_word[0] == (c))
 
 /* A name is a variable when it is one letter, or a letter and a digit. A
  * trailing dollar makes it a string variable instead. These read lx_len
  * rather than looking past the terminator: lx_word keeps whatever the last
  * token left in it, and PRINT A once read the I of PRINT as part of A.
  */
-#define IS_STRNAME (lx_tok == T_NAME && lx_len >= 2 && lx_word[lx_len - 1] == 36)
+/* A keyword that ends in a dollar is a string function. */
+#define IS_STRKW (lx_kw == KW_CHRS || lx_kw == KW_HEXS || lx_kw == KW_INKEYS || lx_kw == KW_MIDS || lx_kw == KW_STRS)
+#define IS_STRNAME ((lx_tok == T_NAME && lx_len >= 2 && lx_word[lx_len - 1] == 36) || IS_STRKW)
 #define IS_STRVAR (lx_tok == T_NAME && lx_len == 2 && lx_word[1] == 36)
 #define IS_INTVAR (lx_tok == T_NAME && (lx_len == 1 || (lx_len == 2 && lx_word[1] >= 48 && lx_word[1] <= 57)))
 
@@ -127,8 +158,15 @@ void str_collect(void);
 /* edit.c: the stored program. */
 extern unsigned char prog[PROGMAX];
 
+/* One line as text, 256 bytes: ed_expand's answer, and a line on its way
+ * into the program.
+ */
+extern char ed_line[256];
+
 void ed_new(void);
 void ed_store(int line, char *text);
+/* The stored line text as LIST shows it, into o, with its length. */
+unsigned int ed_expand(unsigned char *t, char *o);
 unsigned int ed_find(int line);
 void ed_list(unsigned int first, unsigned int last);
 /* Number the lines again from start in steps of step, and change the

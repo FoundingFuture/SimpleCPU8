@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstddef>
 #include <map>
+#include <vector>
 
 #include "basic/keywords.h"
 
@@ -25,6 +26,23 @@ const std::set<std::string, std::less<>>& basicKeywords() {
 }
 
 namespace {
+
+// The keywords in the order of keywords.h. A stored keyword is the byte
+// 128 plus its place here.
+const std::vector<std::string>& keywordOrder() {
+  static const std::vector<std::string> words = [] {
+    std::vector<std::string> w;
+    const std::string_view all = BASIC_KEYWORDS;
+    size_t at = 0;
+    while ((at = all.find_first_not_of(' ', at)) != std::string_view::npos) {
+      const size_t end = all.find(' ', at);
+      w.emplace_back(all.substr(at, end - at));
+      at = end;
+    }
+    return w;
+  }();
+  return words;
+}
 
 bool isNameStart(char c) { return std::isalpha(static_cast<unsigned char>(c)) != 0 || c == '_'; }
 bool isDigit(char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }
@@ -70,6 +88,95 @@ std::string canonicalLine(std::string_view body) {
     }
     out += body.substr(i, end - i);
     i = end;
+  }
+  return out;
+}
+
+namespace {
+
+// A keyword's byte, or 0 when the word in capitals is none.
+uint8_t keywordByte(std::string_view word) {
+  const auto& order = keywordOrder();
+  for (size_t i = 0; i < order.size(); i++) {
+    if (order[i] == word) return static_cast<uint8_t>(KW_FIRST + i);
+  }
+  return 0;
+}
+
+// data_line in edit.c: the first word, read the way the lexer reads a
+// name, is DATA. A letter or a digit goes on, then one dollar.
+bool isDataLine(std::string_view t) {
+  size_t i = 0;
+  while (i < t.size() && t[i] == ' ') i++;
+  size_t end = i;
+  while (end < t.size() && std::isalnum(static_cast<unsigned char>(t[end])) != 0) end++;
+  if (end < t.size() && t[end] == '$') end++;
+  std::string w(t.substr(i, end - i));
+  for (char& ch : w) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+  return w == "DATA";
+}
+
+}  // namespace
+
+// The walk is canonicalLine's, and a word it puts in capitals becomes its
+// byte. crunch in edit.c is the machine's copy of this rule.
+std::string crunchLine(std::string_view body) {
+  if (isDataLine(body)) return canonicalLine(body);
+  std::string out;
+  size_t i = 0;
+  while (i < body.size()) {
+    const char c = body[i];
+    size_t end = i + 1;
+    if (c == '"') {
+      end = body.find('"', i + 1);
+      end = end == std::string_view::npos ? body.size() : end + 1;
+    } else if (c == '$' && i + 1 < body.size() && isHexDigit(body[i + 1])) {
+      while (end < body.size() && isHexDigit(body[end])) end++;
+    } else if (isDigit(c)) {
+      while (end < body.size() && (isNameChar(body[end]) || body[end] == '.')) end++;
+    } else if (isNameStart(c)) {
+      while (end < body.size() && isNameChar(body[end])) end++;
+      if (end < body.size() && body[end] == '$') end++;
+      std::string w(body.substr(i, end - i));
+      for (char& ch : w) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+      if (const uint8_t k = keywordByte(w)) {
+        out += static_cast<char>(k);
+        i = end;
+        if (w == "REM") {
+          out += body.substr(i);
+          i = body.size();
+        }
+        continue;
+      }
+    } else if (c == '!') {
+      end = body.size();
+    }
+    out += body.substr(i, end - i);
+    i = end;
+  }
+  return out;
+}
+
+// ed_expand in edit.c is the machine's copy of this walk.
+std::string expandLine(std::string_view stored) {
+  if (isDataLine(stored)) return std::string(stored);
+  std::string out;
+  size_t i = 0;
+  while (i < stored.size()) {
+    uint8_t c = static_cast<uint8_t>(stored[i++]);
+    if (c >= KW_FIRST && c < KW_FIRST + keywordOrder().size()) {
+      out += keywordOrder()[c - KW_FIRST];
+      if (c == KW_REM) c = '!';
+    } else {
+      out += static_cast<char>(c);
+    }
+    if (c == '"') {
+      while (i < stored.size() && stored[i] != '"') out += stored[i++];
+      if (i < stored.size()) out += stored[i++];
+    } else if (c == '!') {
+      out += stored.substr(i);
+      i = stored.size();
+    }
   }
   return out;
 }
@@ -138,7 +245,8 @@ std::vector<uint8_t> encodeProgram(const std::string& text) {
     else lines[n] = canonicalLine(body);
   }
   std::vector<uint8_t> out;
-  for (const auto& [n, body] : lines) {
+  for (const auto& [n, canonical] : lines) {
+    const std::string body = crunchLine(canonical);
     const size_t rec = body.size() + 4;
     if (out.size() + rec + 3 >= PROGRAM_MAX) break;
     out.push_back(static_cast<uint8_t>(n >> 8));
@@ -153,6 +261,17 @@ std::vector<uint8_t> encodeProgram(const std::string& text) {
   return out;
 }
 
+namespace {
+
+// The stored text of the record at p, rec bytes long, without its zero.
+std::string storedText(std::span<const uint8_t> bytes, size_t p, size_t rec) {
+  std::string t;
+  for (size_t i = p + 3; i < p + rec - 1 && bytes[i]; i++) t += static_cast<char>(bytes[i]);
+  return t;
+}
+
+}  // namespace
+
 std::string decodeProgram(std::span<const uint8_t> bytes) {
   std::string out;
   size_t p = 0;
@@ -163,7 +282,7 @@ std::string decodeProgram(std::span<const uint8_t> bytes) {
     if (rec < 4 || p + rec > bytes.size()) break;
     out += std::to_string(n);
     out += ' ';
-    for (size_t i = p + 3; i < p + rec - 1 && bytes[i]; i++) out += static_cast<char>(bytes[i]);
+    out += expandLine(storedText(bytes, p, rec));
     out += '\n';
     p += rec;
   }
@@ -178,9 +297,7 @@ std::map<int, std::string> programLines(std::span<const uint8_t> bytes) {
     if (n == 0) break;
     const size_t rec = bytes[p + 2];
     if (rec < 4 || p + rec > bytes.size()) break;
-    std::string body;
-    for (size_t i = p + 3; i < p + rec - 1 && bytes[i]; i++) body += static_cast<char>(bytes[i]);
-    lines[n] = std::move(body);
+    lines[n] = expandLine(storedText(bytes, p, rec));
     p += rec;
   }
   return lines;

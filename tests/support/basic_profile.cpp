@@ -2,9 +2,9 @@
 //
 // The measurements in docs/design/basic-speed.md come from this program.
 // It boots basic.rom on the tests' headless Session with the optimal
-// microcode, stores a program with basic::storeProgram, types RUN and steps
-// the machine one instruction at a time. It counts from the first
-// instruction of rt_run to the RET that leaves it.
+// microcode and stores a program with basic::storeProgram. Then it types
+// RUN and steps the machine one instruction at a time. It counts from the
+// first instruction of rt_run to the RET that leaves it.
 //
 // Each instruction's cycles go to the C function whose code holds its slot,
 // the function's own cycles. A shadow call stack, pushed on JSR and popped
@@ -12,12 +12,12 @@
 // callee's cycles by caller. The labels come from assembling the build's
 // basic.asm, whose program must equal the ROM's slot for slot.
 //
-//   basic_profile                  the statement table of the note
-//   basic_profile --detail         each row's cycles by function as well
-//   basic_profile --tokens STMT    lx_next per token, STMT in the note's loop
-//   basic_profile --pair A B       program file A over program file B, each
-//                                  a loop of 1000 passes, per pass
-//   basic_profile --asm PATH       another basic.asm, before any of those
+//   basic_profile                  The statement table of the note.
+//   basic_profile --detail         Each row's cycles by function as well.
+//   basic_profile --tokens STMT    lx_next per token, STMT in the loop.
+//   basic_profile --pair A B       Program file A over program file B.
+//                                  Each loops 1000 times. Cycles a pass.
+//   basic_profile --asm PATH       Another basic.asm, before any of those.
 //
 // A statement's cost is the difference between the program with it and the
 // same program without it, divided by the 1000 passes of the loop.
@@ -209,7 +209,7 @@ bool readAssembly(const std::string& asmPath) {
   std::vector<std::string> lines;
   std::stringstream ss(source);
   for (std::string l; std::getline(ss, l);) lines.push_back(l);
-  // Assembly line to C line, from the "; file.c:N" comment over each block.
+  // Assembly line to C line, from the file.c:N comment over each block.
   std::vector<int> lineSrc(lines.size() + 2, -1);
   std::map<std::string, int> ids;
   int cur = -1;

@@ -22,40 +22,40 @@ static int fn_call(void)
     int a;
     unsigned int s;
 
-    if (lx_is("RND")) {
+    if (lx_kw == KW_RND) {
         lx_next();
         a = 0;
-        if (lx_is("(")) { lx_next(); a = ex_int(); if (lx_is(")")) lx_next(); }
+        if (IS_PUNCT(40)) { lx_next(); a = ex_int(); if (IS_PUNCT(41)) lx_next(); }
         if (a <= 0) return rand();
         return rand() % a;
     }
-    if (lx_is("ABS")) {
+    if (lx_kw == KW_ABS) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         a = ex_int();
-        if (lx_is(")")) lx_next();
+        if (IS_PUNCT(41)) lx_next();
         if (a < 0) return -a;
         return a;
     }
-    if (lx_is("LEN")) {
+    if (lx_kw == KW_LEN) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         s = ex_str();
-        if (lx_is(")")) lx_next();
+        if (IS_PUNCT(41)) lx_next();
         return str_len(s);
     }
-    if (lx_is("ASC")) {
+    if (lx_kw == KW_ASC) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         s = ex_str();
-        if (lx_is(")")) lx_next();
+        if (IS_PUNCT(41)) lx_next();
         return str_at(s, 0);
     }
-    if (lx_is("VAL")) {
+    if (lx_kw == KW_VAL) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         s = ex_str();
-        if (lx_is(")")) lx_next();
+        if (IS_PUNCT(41)) lx_next();
         {
             unsigned int i;
             unsigned char neg;
@@ -74,9 +74,9 @@ static int fn_call(void)
             return a;
         }
     }
-    if (lx_is("KEY")) {
+    if (lx_kw == KW_KEY) {
         lx_next();
-        if (lx_is("(")) { lx_next(); if (lx_is(")")) lx_next(); }
+        if (IS_PUNCT(40)) { lx_next(); if (IS_PUNCT(41)) lx_next(); }
         {
             unsigned char k;
             k = key_get();
@@ -85,9 +85,9 @@ static int fn_call(void)
             return io_key_code(k);
         }
     }
-    if (lx_is("PAD")) {
+    if (lx_kw == KW_PAD) {
         lx_next();
-        if (lx_is("(")) { lx_next(); if (lx_is(")")) lx_next(); }
+        if (IS_PUNCT(40)) { lx_next(); if (IS_PUNCT(41)) lx_next(); }
         return io_pad();
     }
     /* USR(width, target, p1, p2, p3) calls a routine the way compiled C
@@ -99,15 +99,15 @@ static int fn_call(void)
      * buffer the routine filled. The stack pointer is put back after the
      * call, so a routine that ignores its parameters leaves it level.
      */
-    if (lx_is("USR")) {
+    if (lx_kw == KW_USR) {
         int width;
         int n;
         int v;
         lx_next();
-        if (!lx_is("(")) { rt_expect("( AFTER USR"); return 0; }
+        if (!IS_PUNCT(40)) { rt_expect("( AFTER USR"); return 0; }
         lx_next();
         width = ex_int();
-        if (!lx_is(",")) { rt_expect(", AND A ROUTINE AFTER THE WIDTH"); return 0; }
+        if (!IS_PUNCT(44)) { rt_expect(", AND A ROUTINE AFTER THE WIDTH"); return 0; }
         lx_next();
         if (rt_routine_name()) return 0;
         a = ex_int();
@@ -115,11 +115,11 @@ static int fn_call(void)
         n = 0;
         while (n < 3) {
             v = 0;
-            if (lx_is(",")) { lx_next(); v = ex_int(); }
+            if (IS_PUNCT(44)) { lx_next(); v = ex_int(); }
             doke(SYS_USR + n * 2, v);
             n = n + 1;
         }
-        if (!lx_is(")")) { rt_expect(") TO CLOSE USR, AFTER AT MOST THREE PARAMETERS"); return 0; }
+        if (!IS_PUNCT(41)) { rt_expect(") TO CLOSE USR, AFTER AT MOST THREE PARAMETERS"); return 0; }
         lx_next();
         if (err) return 0;
         if (width < 0 || width > 2) { rt_error(E_USRWIDTH); return 0; }
@@ -159,42 +159,42 @@ static int fn_call(void)
     /* DATA(n): where line n's bytes go. The walk runs while the lexer
      * stands on the closing bracket, which data.c reads back after it.
      */
-    if (lx_is("DATA")) {
+    if (lx_kw == KW_DATA) {
         lx_next();
-        if (!lx_is("(")) { rt_expect("( AFTER DATA"); return 0; }
+        if (!IS_PUNCT(40)) { rt_expect("( AFTER DATA"); return 0; }
         lx_next();
         a = ex_int();
         if (err) return 0;
-        if (!lx_is(")")) { rt_expect(")"); return 0; }
+        if (!IS_PUNCT(41)) { rt_expect(")"); return 0; }
         a = dt_addr(a);
         if (err) return 0;
         lx_next();
         return a;
     }
-    if (lx_is("PEEK")) {
+    if (lx_kw == KW_PEEK) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         a = ex_int();
-        if (lx_is(")")) lx_next();
+        if (IS_PUNCT(41)) lx_next();
         return peek(a);
     }
     /* The word DOKE stores, so a driver's vector reads back as it was set. */
-    if (lx_is("DEEK")) {
+    if (lx_kw == KW_DEEK) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         a = ex_int();
-        if (lx_is(")")) lx_next();
+        if (IS_PUNCT(41)) lx_next();
         return (peek(a) << 8) | peek(a + 1);
     }
-    if (lx_is("PIXEL")) {
+    if (lx_kw == KW_PIXEL) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         a = ex_int();
-        if (lx_is(",")) lx_next();
+        if (IS_PUNCT(44)) lx_next();
         {
             int y;
             y = ex_int();
-            if (lx_is(")")) lx_next();
+            if (IS_PUNCT(41)) lx_next();
             return gpu_read_pixel(a >> 8, a, y >> 8, y);
         }
     }
@@ -209,18 +209,18 @@ static int primary(void)
 
     if (lx_tok == T_NUM) { v = lx_num; lx_next(); return v; }
 
-    if (lx_is("(")) {
+    if (IS_PUNCT(40)) {
         lx_next();
         v = ex_or();
-        if (lx_is(")")) lx_next(); else rt_expect(")");
+        if (IS_PUNCT(41)) lx_next(); else rt_expect(")");
         return v;
     }
 
-    if (lx_is("-")) { lx_next(); return -primary(); }
-    if (lx_is("+")) { lx_next(); return primary(); }
-    if (lx_is("NOT")) { lx_next(); return primary() ? 0 : 1; }
+    if (IS_PUNCT(45)) { lx_next(); return -primary(); }
+    if (IS_PUNCT(43)) { lx_next(); return primary(); }
+    if (lx_kw == KW_NOT) { lx_next(); return primary() ? 0 : 1; }
 
-    if (lx_tok == T_NAME) {
+    if (lx_tok == T_NAME || lx_tok == T_KEY) {
         /* A name with a dollar on it is a string, and a string is not an
          * integer. Everything else is a function or a variable.
          */
@@ -243,15 +243,15 @@ static int ex_mul(void)
     int b;
     a = primary();
     for (;;) {
-        if (lx_is("*")) { lx_next(); a = a * primary(); continue; }
-        if (lx_is("/")) {
+        if (IS_PUNCT(42)) { lx_next(); a = a * primary(); continue; }
+        if (IS_PUNCT(47)) {
             lx_next();
             b = primary();
             if (b == 0) { rt_error(E_DIVZERO); return 0; }
             a = a / b;
             continue;
         }
-        if (lx_is("MOD")) {
+        if (lx_kw == KW_MOD) {
             lx_next();
             b = primary();
             if (b == 0) { rt_error(E_DIVZERO); return 0; }
@@ -267,8 +267,8 @@ static int ex_add(void)
     int a;
     a = ex_mul();
     for (;;) {
-        if (lx_is("+")) { lx_next(); a = a + ex_mul(); continue; }
-        if (lx_is("-")) { lx_next(); a = a - ex_mul(); continue; }
+        if (IS_PUNCT(43)) { lx_next(); a = a + ex_mul(); continue; }
+        if (IS_PUNCT(45)) { lx_next(); a = a - ex_mul(); continue; }
         return a;
     }
 }
@@ -330,7 +330,7 @@ static int ex_and(void)
 {
     int a;
     a = ex_cmp();
-    while (lx_is("AND")) { lx_next(); a = (a != 0) & (ex_cmp() != 0); }
+    while (lx_kw == KW_AND) { lx_next(); a = (a != 0) & (ex_cmp() != 0); }
     return a;
 }
 
@@ -338,7 +338,7 @@ static int ex_or(void)
 {
     int a;
     a = ex_and();
-    while (lx_is("OR")) { lx_next(); a = (a != 0) | (ex_and() != 0); }
+    while (lx_kw == KW_OR) { lx_next(); a = (a != 0) | (ex_and() != 0); }
     return a;
 }
 
@@ -356,21 +356,21 @@ static unsigned int str_primary(void)
 
     if (lx_tok == T_STR) { s = lx_str; lx_next(); return s; }
 
-    if (lx_is("CHR$")) {
+    if (lx_kw == KW_CHRS) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         {
             int v;
             v = ex_int();
-            if (lx_is(")")) lx_next();
+            if (IS_PUNCT(41)) lx_next();
             s = str_new(1);
             if (s) heap[s + 1] = v;
             return s;
         }
     }
-    if (lx_is("STR$")) {
+    if (lx_kw == KW_STRS) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         {
             int v;
             unsigned char buf[8];
@@ -378,7 +378,7 @@ static unsigned int str_primary(void)
             unsigned int u;
             unsigned char neg;
             v = ex_int();
-            if (lx_is(")")) lx_next();
+            if (IS_PUNCT(41)) lx_next();
             neg = 0;
             if (v < 0) { neg = 1; u = -v; } else u = v;
             n = 0;
@@ -399,9 +399,9 @@ static unsigned int str_primary(void)
      * is never cut. An address past 32767 prints negative, and this shows
      * the $ number it is.
      */
-    if (lx_is("HEX$")) {
+    if (lx_kw == KW_HEXS) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         {
             unsigned int u;
             int w;
@@ -411,8 +411,8 @@ static unsigned int str_primary(void)
             unsigned char i;
             u = ex_int();
             w = 1;
-            if (lx_is(",")) { lx_next(); w = ex_int(); }
-            if (lx_is(")")) lx_next();
+            if (IS_PUNCT(44)) { lx_next(); w = ex_int(); }
+            if (IS_PUNCT(41)) lx_next();
             if (err) return 0;
             if (w < 1 || w > 4) { rt_error(E_HEXWIDTH); return 0; }
             n = 0;
@@ -429,20 +429,20 @@ static unsigned int str_primary(void)
             return s;
         }
     }
-    if (lx_is("MID$")) {
+    if (lx_kw == KW_MIDS) {
         lx_next();
-        if (lx_is("(")) lx_next();
+        if (IS_PUNCT(40)) lx_next();
         {
             unsigned int src;
             int from;
             int count;
             unsigned int i;
             src = ex_str();
-            if (lx_is(",")) lx_next();
+            if (IS_PUNCT(44)) lx_next();
             from = ex_int();
             count = 255;
-            if (lx_is(",")) { lx_next(); count = ex_int(); }
-            if (lx_is(")")) lx_next();
+            if (IS_PUNCT(44)) { lx_next(); count = ex_int(); }
+            if (IS_PUNCT(41)) lx_next();
             if (from < 1) from = 1;
             if (from > str_len(src)) return 0;
             if (count > str_len(src) - from + 1) count = str_len(src) - from + 1;
@@ -453,7 +453,7 @@ static unsigned int str_primary(void)
             return s;
         }
     }
-    if (lx_is("INKEY$")) {
+    if (lx_kw == KW_INKEYS) {
         lx_next();
         {
             unsigned char k;
@@ -479,6 +479,6 @@ unsigned int ex_str(void)
 {
     unsigned int a;
     a = str_primary();
-    while (lx_is("+")) { lx_next(); a = str_cat(a, str_primary()); }
+    while (IS_PUNCT(43)) { lx_next(); a = str_cat(a, str_primary()); }
     return a;
 }

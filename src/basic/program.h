@@ -3,7 +3,7 @@
 // two forms, and this is the bridge between them.
 //
 // A stored line is two bytes of line number, high first, one byte of
-// record length, the text, and a zero. A line number of zero ends the
+// record length, the text with each keyword as one byte, and a zero. A line number of zero ends the
 // program, so an empty program is three bytes. edit.c is the C side of the
 // same format. The system page says where the program sits: SYS_PROG holds
 // its address and SYS_PROG_LEN its length. docs/basic-system-page.md.
@@ -50,6 +50,16 @@ const std::set<std::string, std::less<>>& basicKeywords();
 // numbers and spacing stay as written.
 std::string canonicalLine(std::string_view body);
 
+// A line's body as the interpreter stores it. The walk is canonicalLine's.
+// Each word it puts in capitals is one byte, 128 plus the word's place in
+// basic/keywords.h. A DATA line stays canonicalLine's text.
+// crunch in edit.c is the machine's copy of the rule.
+std::string crunchLine(std::string_view body);
+
+// A stored line's text back to what LIST prints. ed_expand in edit.c is
+// the machine's copy. expandLine(crunchLine(b)) is canonicalLine(b).
+std::string expandLine(std::string_view stored);
+
 // The editor's text with canonicalLine applied to the body of every
 // numbered row but row `skip`, the one being typed in. The number, the
 // spaces around it and rows without a number stay. The size never changes.
@@ -61,7 +71,7 @@ std::string canonicalText(std::string_view text, int skip = -1);
 // skipped. Leading spaces after the number are dropped, as ed_store
 // receives them. Text past 250 characters is cut. A program that does not
 // fit is cut at the last line that does. Each stored line is
-// canonicalLine of its body, so the reserved words are stored in capitals.
+// crunchLine of its body.
 std::vector<uint8_t> encodeProgram(const std::string& text);
 
 // The program into the interpreter's memory, where SYS_PROG says it sits,

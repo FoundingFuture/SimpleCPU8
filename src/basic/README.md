@@ -7,7 +7,7 @@ packages/ui/src/basic/ with extract.mjs. The script writes each TypeScript
 string constant to a file with its exact value. bang.c, store.c and data.c
 are new in this tree.
 This BASIC differs from the browser's in its drawing words, in RENUM, in
-DATA, in HEX$, in its fonts and in its jump cache. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
+DATA, in HEX$, in its fonts, in its jump cache and in its stored keywords. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
 expr.c. `PLOT` draws in the INK colour, where it drew white. `CIRCLE rx,
 ry, fill` draws a ring in INK with an optional fill, where `CIRCLE r`
 filled a disc. main.c sets INK to white at boot. `RENUM start, step` is
@@ -22,6 +22,12 @@ the GPU into SYS_COLS and SYS_ROWS on the system page.
 run.c keeps the line each GOTO, GOSUB and `THEN n` found while a program
 runs, docs/design/basic-speed.md. A POKE into the program text while it
 runs is not supported.
+A stored line holds each keyword as one byte, 128 plus its place in
+keywords.h. edit.c turns the words into bytes when a line is stored and
+back into text for LIST, SAVE and RENUM. A DATA line, a string, the rest
+of a REM line and a bang's text stay as typed. lex.c reads the byte, and
+still looks up a keyword written out, as in a typed command or `1TO`.
+run.c and expr.c test `lx_kw` where they called `lx_is`.
 A refresh from upstream undoes all of this, so redo it after one.
 
 ## Files

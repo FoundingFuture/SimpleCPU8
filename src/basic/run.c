@@ -129,6 +129,7 @@ static void note_found(void)
     unsigned char d;
     unsigned char i;
     if (lx_tok == T_END) { err_found[0] = 0; return; }
+    if (lx_tok == T_KEY) { rt_found(kw_text(lx_kw)); return; }
     if (lx_tok == T_STR) {
         rt_found("A");
         err_found[1] = 32;
@@ -158,6 +159,7 @@ void rt_error(unsigned char code)
 
 unsigned char rt_routine_name(void)
 {
+    lx_name();
     if (lx_tok != T_NAME || IS_INTVAR) return 0;
     rt_error(E_ROUTINE);
     return 1;
@@ -286,9 +288,9 @@ static void do_print(void)
     newline = 1;
     for (;;) {
         if (lx_tok == T_END) break;
-        if (lx_is(":")) break;
-        if (lx_is(";")) { newline = 0; lx_next(); continue; }
-        if (lx_is(",")) { term_putc(32); newline = 1; lx_next(); continue; }
+        if (IS_PUNCT(58)) break;
+        if (IS_PUNCT(59)) { newline = 0; lx_next(); continue; }
+        if (IS_PUNCT(44)) { term_putc(32); newline = 1; lx_next(); continue; }
         newline = 1;
         /* The value is checked before it is printed. An expression that
          * failed comes back as 0, and PRINT 1/0 used to show that 0 in
@@ -315,9 +317,10 @@ static void do_input(void)
     int slot;
     unsigned char letter;
 
-    if (lx_tok == T_STR) { str_put(lx_str); lx_next(); if (lx_is(";") || lx_is(",")) lx_next(); }
+    if (lx_tok == T_STR) { str_put(lx_str); lx_next(); if (IS_PUNCT(59) || IS_PUNCT(44)) lx_next(); }
     term_putc(63);
     term_putc(32);
+    lx_name();
     if (lx_tok != T_NAME) { rt_expect("A VARIABLE AFTER INPUT"); return; }
     is_str = IS_STRVAR;
     letter = lx_word[0] - 65;
@@ -344,35 +347,275 @@ static void do_input(void)
     }
 }
 
+/* An assignment. A name that is not a variable is a statement mistyped,
+ * or a variable name too long, and the = after it tells which.
+ */
+static unsigned char assign(void)
+{
+    unsigned char is_str;
+    int slot;
+    unsigned char letter;
+    char name[12];
+    unsigned char valid;
+    unsigned char i;
+    valid = IS_INTVAR || IS_STRVAR;
+    for (i = 0; i < 11 && lx_word[i]; i++) name[i] = lx_word[i];
+    name[i] = 0;
+    is_str = IS_STRVAR;
+    letter = lx_word[0] - 65;
+    slot = var_slot();
+    lx_next();
+    if (!valid) {
+        rt_error(IS_PUNCT(61) ? E_NOTVAR : E_UNKNOWN);
+        rt_found(name);
+        return 1;
+    }
+    if (!IS_PUNCT(61)) { rt_expect("= AFTER THE VARIABLE"); return 1; }
+    lx_next();
+    if (is_str) svar[letter] = ex_str();
+    else vars[slot] = ex_int();
+    return 1;
+}
+
+/* The statements LET may stand in front of, then the assignment. A word
+ * that only works before LET reads as a name here, as in LET PRINT. The
+ * string compares this switch replaced went in the same order.
+ */
+static unsigned char after_let(void)
+{
+    if (lx_tok == T_NAME) return assign();
+    switch (lx_kw) {
+    /* Graphics, so a program can draw. Each is one GPU command, or two
+     * for a filled CIRCLE. All draw in the INK colour.
+     */
+    case KW_INK: lx_next(); rt_ink(ex_int()); return 1;
+    case KW_PLOT:
+        lx_next();
+        {
+            int x;
+            int y;
+            x = ex_int();
+            if (IS_PUNCT(44)) lx_next();
+            y = ex_int();
+            gpu_plot(x >> 8, x, y >> 8, y, ink);
+            return 1;
+        }
+    case KW_MOVE:
+        lx_next();
+        {
+            int x;
+            int y;
+            x = ex_int();
+            if (IS_PUNCT(44)) lx_next();
+            y = ex_int();
+            gpu_move_to(x >> 8, x, y >> 8, y);
+            return 1;
+        }
+    case KW_DRAW:
+        lx_next();
+        {
+            int x;
+            int y;
+            x = ex_int();
+            if (IS_PUNCT(44)) lx_next();
+            y = ex_int();
+            gpu_line_to(x >> 8, x, y >> 8, y);
+            return 1;
+        }
+    /* CIRCLE rx, ry, fill: an outline around the pen in INK. ry is
+     * optional and makes an ellipse, fill is optional and fills the inside
+     * first. Brackets around the three are allowed, as for a function.
+     */
+    case KW_CIRCLE:
+        lx_next();
+        {
+            int rx;
+            int ry;
+            int fill;
+            unsigned char bracket;
+            unsigned char filled;
+            bracket = 0;
+            filled = 0;
+            fill = 0;
+            if (IS_PUNCT(40)) { lx_next(); bracket = 1; }
+            rx = ex_int();
+            ry = rx;
+            if (IS_PUNCT(44)) { lx_next(); ry = ex_int(); }
+            if (IS_PUNCT(44)) { lx_next(); fill = ex_int(); filled = 1; }
+            if (bracket) {
+                if (!IS_PUNCT(41)) { rt_expect(")"); return 1; }
+                lx_next();
+            }
+            if (filled) {
+                gpu_set_color(fill);
+                out(GPU_RADIUS_Y, ry);
+                gpu_circle(rx);
+                gpu_set_color(ink);
+            }
+            out(GPU_RADIUS_Y, ry);
+            gpu_ring(rx);
+            return 1;
+        }
+    case KW_PAPER: lx_next(); term_paper(ex_int()); return 1;
+    /* LOADFONT name: the font of that name on the cartridge, which the
+     * storage device finds in any case. LOADFONT alone: the built-in font.
+     * The grid follows the font's cell, and the screen starts over.
+     */
+    case KW_LOADFONT:
+        lx_next();
+        if (lx_tok == T_END || IS_PUNCT(58)) { gpu_reset_font(); term_grid(); return 1; }
+        lx_name();
+        if (lx_tok != T_NAME) { rt_expect("A FONT NAME AFTER LOADFONT"); return 1; }
+        {
+            /* STO_FIND's answer: a kind, three bytes of cartridge address,
+             * three of length. A local, so the zero page keeps what the
+             * interpreter's loops use.
+             */
+            unsigned char found[7];
+            sto_find(found, lx_word);
+            if (sto_status() != STO_OK || found[0] != STO_KIND_FONT) { rt_error(E_NOFONT); return 1; }
+            gpu_load_font(found[1], found[2], found[3]);
+        }
+        lx_next();
+        term_grid();
+        return 1;
+    /* SETTEXT w, h: the cell in pixels, 4 to 8 each, checked before the GPU
+     * hears of it. A size the GPU refuses would stop the machine.
+     */
+    case KW_SETTEXT:
+        lx_next();
+        {
+            int w;
+            int h;
+            w = ex_int();
+            if (!IS_PUNCT(44)) { rt_expect(", AND THE HEIGHT"); return 1; }
+            lx_next();
+            h = ex_int();
+            if (err) return 1;
+            if (w < 4 || w > 8 || h < 4 || h > 8) { rt_error(E_TEXTSIZE); return 1; }
+            gpu_text_cell(w, h);
+            term_grid();
+            return 1;
+        }
+    case KW_WAIT:
+        lx_next();
+        {
+            int n;
+            n = ex_int();
+            while (n > 0) { wait_frame(); n = n - 1; }
+            return 1;
+        }
+    case KW_POKE:
+        lx_next();
+        {
+            int a;
+            a = ex_int();
+            if (IS_PUNCT(44)) lx_next();
+            poke(a, ex_int());
+            /* POKE a, 1, 2, 3 fills the boxes after a in turn. */
+            while (IS_PUNCT(44)) {
+                lx_next();
+                a = a + 1;
+                poke(a, ex_int());
+            }
+            return 1;
+        }
+    /* CALL n calls the routine at instruction slot n and parks the A it
+     * came back with at SYS_RESULT, the way the bang dispatcher does, so
+     * PEEK(4) reads it. JSR is the same word, spelled the way the machine
+     * spells it. JMP n goes there and never comes back. The slot is
+     * parked at SYS_CALL first, because inline assembly cannot name a C
+     * local. The routine keeps D3, the C frame pointer, as bang.c says.
+     * A name in place of the number is what a project build resolves to a
+     * slot before the program reaches the ROM. Here it is a syntax error,
+     * the way any unknown word in an expression is.
+     */
+    case KW_CALL:
+    case KW_JSR:
+        lx_next();
+        if (rt_routine_name()) return 1;
+        {
+            int n;
+            n = ex_int();
+            if (err) return 1;
+            doke(SYS_CALL, n);
+            asm("LD D2 <- [$0018]");
+            asm("JSR D2");
+            asm("LD D1 <- $0004");
+            asm("LD [D1] <- A");
+            return 1;
+        }
+    case KW_JMP:
+        lx_next();
+        if (rt_routine_name()) return 1;
+        {
+            int n;
+            n = ex_int();
+            if (err) return 1;
+            doke(SYS_CALL, n);
+            asm("LD D2 <- [$0018]");
+            asm("JMP D2");
+            return 1;
+        }
+    /* A word, high byte first, the way every word on this machine is. */
+    case KW_DOKE:
+        lx_next();
+        {
+            int a;
+            int v;
+            a = ex_int();
+            if (IS_PUNCT(44)) lx_next();
+            v = ex_int();
+            poke(a, v >> 8);
+            poke(a + 1, v);
+            return 1;
+        }
+    }
+
+    /* Anything else has to be an assignment. A keyword no case took reads
+     * as the name it spells, and gets the name's message.
+     */
+    lx_name();
+    if (lx_tok == T_NAME) return assign();
+    rt_expect("A STATEMENT");
+    return 1;
+}
+
 /* One statement. Returns 0 when the rest of the line is to be skipped, which
  * is what a taken GOTO and an untaken IF both want.
+ *
+ * PERF DECISION: a statement is picked by a switch on the keyword's byte,
+ * where it used to be a chain of string compares. An assignment, the most
+ * common statement, is tested first. docs/design/basic-speed.md, proposal 2.
  */
 static unsigned char statement(void)
 {
+    if (lx_tok == T_NAME) return assign();
     if (lx_tok == T_END) return 1;
 
-    if (lx_is("REM")) { lx_tok = T_END; return 1; }
-    /* The bang statement takes the whole rest of the line, colons and all:
-     * what a driver makes of its text is the driver's business.
-     */
-    if (lx_is("!")) { bang_run(&lx_text[lx_pos]); lx_tok = T_END; return 1; }
+    switch (lx_kw) {
+    case KW_REM: lx_tok = T_END; return 1;
     /* RUN, DATA(n) and READ read a DATA line. Running it does nothing.
      * DATA must open its line, because that is where they look for it.
      */
-    if (lx_is("DATA")) {
+    case KW_DATA:
         if (lx_tokpos) { rt_expect("A STATEMENT"); return 1; }
         lx_tok = T_END;
         return 1;
-    }
-    if (lx_is("PRINT")) { lx_next(); do_print(); return 1; }
-    if (lx_is("CLS")) { lx_next(); term_cls(); return 1; }
-    if (lx_is("END") || lx_is("STOP")) { lx_next(); running = 0; return 0; }
-    if (lx_is("INPUT")) { lx_next(); do_input(); return 1; }
+    case KW_PRINT: lx_next(); do_print(); return 1;
+    case KW_CLS: lx_next(); term_cls(); return 1;
+    case KW_END:
+    case KW_STOP:
+        lx_next();
+        running = 0;
+        return 0;
+    case KW_INPUT: lx_next(); do_input(); return 1;
 
     /* READ A, B$: the next DATA values, across lines. */
-    if (lx_is("READ")) {
+    case KW_READ:
         lx_next();
         for (;;) {
+            lx_name();
             if (lx_tok != T_NAME) { rt_expect("A VARIABLE AFTER READ"); return 1; }
             if (IS_STRVAR) {
                 unsigned char letter;
@@ -393,14 +636,13 @@ static unsigned char statement(void)
                 return 1;
             }
             lx_next();
-            if (!lx_is(",")) return 1;
+            if (!IS_PUNCT(44)) return 1;
             lx_next();
         }
-    }
 
-    if (lx_is("RESTORE")) {
+    case KW_RESTORE:
         lx_next();
-        if (lx_tok == T_END || lx_is(":")) { dt_restore(); return 1; }
+        if (lx_tok == T_END || IS_PUNCT(58)) { dt_restore(); return 1; }
         {
             int n;
             n = ex_int();
@@ -408,9 +650,8 @@ static unsigned char statement(void)
             dt_restore_line(n);
             return 1;
         }
-    }
 
-    if (lx_is("GOTO")) {
+    case KW_GOTO:
         if (jc_hit()) { pc = jc_found; return 0; }
         lx_next();
         {
@@ -423,9 +664,8 @@ static unsigned char statement(void)
             pc = p;
             return 0;
         }
-    }
 
-    if (lx_is("GOSUB")) {
+    case KW_GOSUB:
         {
             unsigned int p;
             unsigned char lone;
@@ -452,17 +692,15 @@ static unsigned char statement(void)
             pc = p;
             return 0;
         }
-    }
 
-    if (lx_is("RETURN")) {
+    case KW_RETURN:
         lx_next();
         if (ngosub == 0) { rt_error(E_RETURN); return 0; }
         ngosub = ngosub - 1;
         pc = gosub[ngosub];
         return 0;
-    }
 
-    if (lx_is("IF")) {
+    case KW_IF:
         lx_next();
         {
             int cond;
@@ -470,7 +708,7 @@ static unsigned char statement(void)
             cond = ex_int();
             if (err) return 0;
             then = 0;
-            if (lx_is("THEN")) {
+            if (lx_kw == KW_THEN) {
                 /* THEN 100 takes the number alone, so its target is kept
                  * whatever follows it.
                  */
@@ -490,26 +728,26 @@ static unsigned char statement(void)
             }
             return statement();
         }
-    }
 
-    if (lx_is("FOR")) {
+    case KW_FOR:
         lx_next();
         {
             int slot;
             int from;
+            lx_name();
             if (lx_tok != T_NAME) { rt_expect("A VARIABLE AFTER FOR"); return 1; }
             if (!IS_INTVAR) { rt_error(E_NOTVAR); return 1; }
             slot = var_slot();
             lx_next();
-            if (lx_is("=")) lx_next(); else { rt_expect("="); return 1; }
+            if (IS_PUNCT(61)) lx_next(); else { rt_expect("="); return 1; }
             from = ex_int();
             vars[slot] = from;
-            if (lx_is("TO")) lx_next(); else { rt_expect("TO"); return 1; }
+            if (lx_kw == KW_TO) lx_next(); else { rt_expect("TO"); return 1; }
             if (nfor >= FORMAX) { rt_error(E_FORS); return 1; }
             for_var[nfor] = slot;
             for_to[nfor] = ex_int();
             for_step[nfor] = 1;
-            if (lx_is("STEP")) { lx_next(); for_step[nfor] = ex_int(); }
+            if (lx_kw == KW_STEP) { lx_next(); for_step[nfor] = ex_int(); }
             /* The body starts at the token after the FOR. lx_pos is past
              * it already, so seeking there reads the body's first token.
              */
@@ -518,11 +756,11 @@ static unsigned char statement(void)
             nfor = nfor + 1;
             return 1;
         }
-    }
 
-    if (lx_is("NEXT")) {
+    case KW_NEXT:
         lx_next();
-        if (lx_tok == T_NAME) lx_next();   /* NEXT I, and the name is ignored */
+        /* NEXT I, and the name is ignored. So is a keyword there. */
+        if (lx_tok == T_NAME || lx_tok == T_KEY) lx_next();
         if (nfor == 0) { rt_error(E_NEXT); return 1; }
         {
             unsigned char t;
@@ -544,237 +782,15 @@ static unsigned char statement(void)
             nfor = nfor - 1;
             return 1;
         }
+
+    case KW_LET: lx_next(); return after_let();
     }
 
-    if (lx_is("LET")) lx_next();
-
-    /* Graphics, so a program can draw. Each is one GPU command, or two
-     * for a filled CIRCLE. All draw in the INK colour.
+    /* The bang statement takes the whole rest of the line, colons and all:
+     * what a driver makes of its text is the driver's business.
      */
-    if (lx_is("INK")) { lx_next(); rt_ink(ex_int()); return 1; }
-    if (lx_is("PLOT")) {
-        lx_next();
-        {
-            int x;
-            int y;
-            x = ex_int();
-            if (lx_is(",")) lx_next();
-            y = ex_int();
-            gpu_plot(x >> 8, x, y >> 8, y, ink);
-            return 1;
-        }
-    }
-    if (lx_is("MOVE")) {
-        lx_next();
-        {
-            int x;
-            int y;
-            x = ex_int();
-            if (lx_is(",")) lx_next();
-            y = ex_int();
-            gpu_move_to(x >> 8, x, y >> 8, y);
-            return 1;
-        }
-    }
-    if (lx_is("DRAW")) {
-        lx_next();
-        {
-            int x;
-            int y;
-            x = ex_int();
-            if (lx_is(",")) lx_next();
-            y = ex_int();
-            gpu_line_to(x >> 8, x, y >> 8, y);
-            return 1;
-        }
-    }
-    /* CIRCLE rx, ry, fill: an outline around the pen in INK. ry is
-     * optional and makes an ellipse, fill is optional and fills the inside
-     * first. Brackets around the three are allowed, as for a function.
-     */
-    if (lx_is("CIRCLE")) {
-        lx_next();
-        {
-            int rx;
-            int ry;
-            int fill;
-            unsigned char bracket;
-            unsigned char filled;
-            bracket = 0;
-            filled = 0;
-            fill = 0;
-            if (lx_is("(")) { lx_next(); bracket = 1; }
-            rx = ex_int();
-            ry = rx;
-            if (lx_is(",")) { lx_next(); ry = ex_int(); }
-            if (lx_is(",")) { lx_next(); fill = ex_int(); filled = 1; }
-            if (bracket) {
-                if (!lx_is(")")) { rt_expect(")"); return 1; }
-                lx_next();
-            }
-            if (filled) {
-                gpu_set_color(fill);
-                out(GPU_RADIUS_Y, ry);
-                gpu_circle(rx);
-                gpu_set_color(ink);
-            }
-            out(GPU_RADIUS_Y, ry);
-            gpu_ring(rx);
-            return 1;
-        }
-    }
-    if (lx_is("PAPER")) { lx_next(); term_paper(ex_int()); return 1; }
-    /* LOADFONT name: the font of that name on the cartridge, which the
-     * storage device finds in any case. LOADFONT alone: the built-in font.
-     * The grid follows the font's cell, and the screen starts over.
-     */
-    if (lx_is("LOADFONT")) {
-        lx_next();
-        if (lx_tok == T_END || lx_is(":")) { gpu_reset_font(); term_grid(); return 1; }
-        if (lx_tok != T_NAME) { rt_expect("A FONT NAME AFTER LOADFONT"); return 1; }
-        {
-            /* STO_FIND's answer: a kind, three bytes of cartridge address,
-             * three of length. A local, so the zero page keeps what the
-             * interpreter's loops use.
-             */
-            unsigned char found[7];
-            sto_find(found, lx_word);
-            if (sto_status() != STO_OK || found[0] != STO_KIND_FONT) { rt_error(E_NOFONT); return 1; }
-            gpu_load_font(found[1], found[2], found[3]);
-        }
-        lx_next();
-        term_grid();
-        return 1;
-    }
-    /* SETTEXT w, h: the cell in pixels, 4 to 8 each, checked before the GPU
-     * hears of it. A size the GPU refuses would stop the machine.
-     */
-    if (lx_is("SETTEXT")) {
-        lx_next();
-        {
-            int w;
-            int h;
-            w = ex_int();
-            if (!lx_is(",")) { rt_expect(", AND THE HEIGHT"); return 1; }
-            lx_next();
-            h = ex_int();
-            if (err) return 1;
-            if (w < 4 || w > 8 || h < 4 || h > 8) { rt_error(E_TEXTSIZE); return 1; }
-            gpu_text_cell(w, h);
-            term_grid();
-            return 1;
-        }
-    }
-    if (lx_is("WAIT")) {
-        lx_next();
-        {
-            int n;
-            n = ex_int();
-            while (n > 0) { wait_frame(); n = n - 1; }
-            return 1;
-        }
-    }
-    if (lx_is("POKE")) {
-        lx_next();
-        {
-            int a;
-            a = ex_int();
-            if (lx_is(",")) lx_next();
-            poke(a, ex_int());
-            /* POKE a, 1, 2, 3 fills the boxes after a in turn. */
-            while (lx_is(",")) {
-                lx_next();
-                a = a + 1;
-                poke(a, ex_int());
-            }
-            return 1;
-        }
-    }
-    /* CALL n calls the routine at instruction slot n and parks the A it
-     * came back with at SYS_RESULT, the way the bang dispatcher does, so
-     * PEEK(4) reads it. JSR is the same word, spelled the way the machine
-     * spells it. JMP n goes there and never comes back. The slot is
-     * parked at SYS_CALL first, because inline assembly cannot name a C
-     * local. The routine keeps D3, the C frame pointer, as bang.c says.
-     * A name in place of the number is what a project build resolves to a
-     * slot before the program reaches the ROM. Here it is a syntax error,
-     * the way any unknown word in an expression is.
-     */
-    if (lx_is("CALL") || lx_is("JSR")) {
-        lx_next();
-        if (rt_routine_name()) return 1;
-        {
-            int n;
-            n = ex_int();
-            if (err) return 1;
-            doke(SYS_CALL, n);
-            asm("LD D2 <- [$0018]");
-            asm("JSR D2");
-            asm("LD D1 <- $0004");
-            asm("LD [D1] <- A");
-            return 1;
-        }
-    }
-    if (lx_is("JMP")) {
-        lx_next();
-        if (rt_routine_name()) return 1;
-        {
-            int n;
-            n = ex_int();
-            if (err) return 1;
-            doke(SYS_CALL, n);
-            asm("LD D2 <- [$0018]");
-            asm("JMP D2");
-            return 1;
-        }
-    }
-    /* A word, high byte first, the way every word on this machine is. */
-    if (lx_is("DOKE")) {
-        lx_next();
-        {
-            int a;
-            int v;
-            a = ex_int();
-            if (lx_is(",")) lx_next();
-            v = ex_int();
-            poke(a, v >> 8);
-            poke(a + 1, v);
-            return 1;
-        }
-    }
-
-    /* Anything else has to be an assignment. A name that is not a
-     * variable is a statement mistyped, or a variable name too long, and
-     * the = after it tells which.
-     */
-    if (lx_tok == T_NAME) {
-        unsigned char is_str;
-        int slot;
-        unsigned char letter;
-        char name[12];
-        unsigned char valid;
-        unsigned char i;
-        valid = IS_INTVAR || IS_STRVAR;
-        for (i = 0; i < 11 && lx_word[i]; i++) name[i] = lx_word[i];
-        name[i] = 0;
-        is_str = IS_STRVAR;
-        letter = lx_word[0] - 65;
-        slot = var_slot();
-        lx_next();
-        if (!valid) {
-            rt_error(lx_is("=") ? E_NOTVAR : E_UNKNOWN);
-            rt_found(name);
-            return 1;
-        }
-        if (!lx_is("=")) { rt_expect("= AFTER THE VARIABLE"); return 1; }
-        lx_next();
-        if (is_str) svar[letter] = ex_str();
-        else vars[slot] = ex_int();
-        return 1;
-    }
-
-    rt_expect("A STATEMENT");
-    return 1;
+    if (IS_PUNCT(33)) { bang_run(&lx_text[lx_pos]); lx_tok = T_END; return 1; }
+    return after_let();
 }
 
 /* Every statement on one line, separated by colons, from a position in the
@@ -800,7 +816,7 @@ static void run_line(char *text, unsigned int pos)
             lx_seek(text, resume_pos);
             continue;
         }
-        if (lx_is(":")) { lx_next(); continue; }
+        if (IS_PUNCT(58)) { lx_next(); continue; }
         if (lx_tok == T_END) return;
         rt_expect(": OR THE END OF THE LINE");
         return;

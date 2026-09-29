@@ -26,6 +26,7 @@
 
 #include "assets/font.h"
 #include "basic/basic_rom.h"
+#include "basic/keywords.h"
 #include "basic/program.h"
 #include "core/cartridge.h"
 #include "core/machine.h"
@@ -1508,7 +1509,8 @@ TEST_SUITE("basic program codec") {
   }
   TEST_CASE("a line already in capitals encodes to the same bytes") {
     const std::vector<uint8_t> p = basic::encodeProgram("10 PRINT \"x\"\n");
-    CHECK(p == std::vector<uint8_t>{0, 10, 13, 'P', 'R', 'I', 'N', 'T', ' ', '"', 'x', '"', 0, 0, 0, 3});
+    CHECK(p == std::vector<uint8_t>{0, 10, 9, KW_PRINT, ' ', '"', 'x', '"', 0, 0, 0, 3});
+    CHECK(basic::encodeProgram("10 print \"x\"\n") == p);
   }
   TEST_CASE("a lowercase document keeps its spelling where the machine did not change it") {
     const std::string text = "10 for i = 1 to 3\n20   print i\n30 next i\n";
@@ -2185,9 +2187,9 @@ TEST_SUITE("basic speed") {
   }
 
   // The addresses are around $6000, above the interpreter's globals and
-  // below its stack, where nothing else lives. The bang vector is the word at 0. A comparison's 0 or 1 as an address
-  // reaches it, so it holds a known word while the program runs and gets
-  // its own back at the end.
+  // below its stack, where nothing else lives. A comparison's 0 or 1 as an
+  // address reaches the bang vector, the word at 0. So the vector holds a
+  // known word while the program runs, and gets its own back at the end.
   const std::string SAVE_VEC = "S=DEEK(0):DOKE 0,4660";
   const std::string RESTORE_VEC = "DOKE 0,S";
 
@@ -2224,8 +2226,8 @@ TEST_SUITE("basic speed") {
 
   TEST_CASE("an operand without an operator: every operator reads as it did before the fast path") {
     // POKE: the operator in the value, then in the address. Each address
-    // line writes its own number, and the bytes it could reach are shown
-    // at the end, so an address worked out wrong shows on the screen.
+    // line writes its own number. The bytes it could reach are shown at the
+    // end, so an address worked out wrong shows on the screen.
     auto poke = [](const std::string& left, const std::string& addr) {
       return operatorLines(10, SAVE_VEC + ":V=7:M=24576", left, "3", [&](const std::string& e) {
                return "POKE " + addr + ", " + e + ":PRINT PEEK(" + addr + ");\" \";";
@@ -2442,4 +2444,285 @@ TEST_SUITE("basic speed") {
     CHECK(has(out, "112233"));
     CHECK_FALSE(has(out, "BAD"));
   }
+
+  // Proposal 2: keywords stored as their byte.
+
+  TEST_CASE("each KW_ constant is 128 plus its word's place in the keyword list") {
+    const std::vector<std::pair<int, std::string>> named = {
+        {KW_ABS, "ABS"},
+        {KW_AND, "AND"},
+        {KW_ASC, "ASC"},
+        {KW_CALL, "CALL"},
+        {KW_CATALOG, "CATALOG"},
+        {KW_CHRS, "CHR$"},
+        {KW_CIRCLE, "CIRCLE"},
+        {KW_CLS, "CLS"},
+        {KW_DATA, "DATA"},
+        {KW_DEEK, "DEEK"},
+        {KW_DELETE, "DELETE"},
+        {KW_DOKE, "DOKE"},
+        {KW_DRAW, "DRAW"},
+        {KW_END, "END"},
+        {KW_FOR, "FOR"},
+        {KW_GOSUB, "GOSUB"},
+        {KW_GOTO, "GOTO"},
+        {KW_HEXS, "HEX$"},
+        {KW_IF, "IF"},
+        {KW_INK, "INK"},
+        {KW_INKEYS, "INKEY$"},
+        {KW_INPUT, "INPUT"},
+        {KW_JMP, "JMP"},
+        {KW_JSR, "JSR"},
+        {KW_KEY, "KEY"},
+        {KW_LEN, "LEN"},
+        {KW_LET, "LET"},
+        {KW_LIST, "LIST"},
+        {KW_LOAD, "LOAD"},
+        {KW_LOADFONT, "LOADFONT"},
+        {KW_MIDS, "MID$"},
+        {KW_MOD, "MOD"},
+        {KW_MOVE, "MOVE"},
+        {KW_NEW, "NEW"},
+        {KW_NEXT, "NEXT"},
+        {KW_NOT, "NOT"},
+        {KW_OR, "OR"},
+        {KW_PAD, "PAD"},
+        {KW_PAPER, "PAPER"},
+        {KW_PEEK, "PEEK"},
+        {KW_PIXEL, "PIXEL"},
+        {KW_PLOT, "PLOT"},
+        {KW_POKE, "POKE"},
+        {KW_PRINT, "PRINT"},
+        {KW_READ, "READ"},
+        {KW_REM, "REM"},
+        {KW_RENUM, "RENUM"},
+        {KW_RESTORE, "RESTORE"},
+        {KW_RETURN, "RETURN"},
+        {KW_RND, "RND"},
+        {KW_RUN, "RUN"},
+        {KW_SAVE, "SAVE"},
+        {KW_SETTEXT, "SETTEXT"},
+        {KW_STEP, "STEP"},
+        {KW_STOP, "STOP"},
+        {KW_STRS, "STR$"},
+        {KW_THEN, "THEN"},
+        {KW_TO, "TO"},
+        {KW_USR, "USR"},
+        {KW_VAL, "VAL"},
+        {KW_WAIT, "WAIT"}};
+    std::vector<std::string> order;
+    const std::string all = BASIC_KEYWORDS;
+    for (size_t at = all.find_first_not_of(' '); at != std::string::npos; at = all.find_first_not_of(' ', at)) {
+      const size_t end = all.find(' ', at);
+      order.push_back(all.substr(at, end - at));
+      at = end;
+    }
+    CHECK_EQ(order.size(), static_cast<size_t>(KW_COUNT));
+    CHECK_EQ(named.size(), order.size());
+    for (const auto& [byte, word] : named) {
+      CAPTURE(word);
+      REQUIRE(byte >= KW_FIRST);
+      REQUIRE(static_cast<size_t>(byte - KW_FIRST) < order.size());
+      CHECK_EQ(order[static_cast<size_t>(byte - KW_FIRST)], word);
+    }
+  }
+
+  namespace {
+
+  // Every keyword, four to a line in code position. Then each place a
+  // keyword stays text: a string, the rest of a REM line, a DATA line and
+  // a bang's text. Last, words run into a number or a name. Each line fits
+  // one screen row, so LIST shows it on a row of its own.
+  std::vector<std::string> everyKeywordLines() {
+    std::vector<std::string> words;
+    const std::string all = BASIC_KEYWORDS;
+    for (size_t at = all.find_first_not_of(' '); at != std::string::npos; at = all.find_first_not_of(' ', at)) {
+      const size_t end = all.find(' ', at);
+      const std::string w = all.substr(at, end - at);
+      if (w != "REM") words.push_back(w);
+      at = end;
+    }
+    std::vector<std::string> lines;
+    int n = 10;
+    for (size_t i = 0; i < words.size(); i += 4) {
+      // DATA first would make a DATA line, so every line opens with A=.
+      std::string line = std::to_string(n) + " A=";
+      for (size_t k = i; k < i + 4 && k < words.size(); k++) line += " " + words[k];
+      lines.push_back(line);
+      n += 10;
+    }
+    for (const std::string& l : {std::string("PRINT \"GOTO PRINT\";A$:REM GOTO print"), std::string("DATA 1,\"PRINT\",$FF,print"),
+                                 std::string("! SAVE print"), std::string("FOR I=1TO 3:forx=PRINT_:NEXT"),
+                                 std::string("A=CHR$(1)+STR$(2)+X$:GOTO10"), std::string("REM")}) {
+      lines.push_back(std::to_string(n) + " " + l);
+      n += 10;
+    }
+    return lines;
+  }
+
+  // The program's bytes in the interpreter's memory.
+  std::vector<uint8_t> storedProgram(const Session& s) {
+    const auto& ram = s.m->ram;
+    const size_t at = static_cast<size_t>(sysWord(s, basic::SYS_PROG));
+    const size_t len = static_cast<size_t>(sysWord(s, basic::SYS_PROG_LEN));
+    return std::vector<uint8_t>(ram.begin() + static_cast<std::ptrdiff_t>(at),
+                                ram.begin() + static_cast<std::ptrdiff_t>(at + len));
+  }
+
+  // The rows LIST printed, from the row under its echo to READY.
+  std::vector<std::string> listed(Session& s) {
+    type(s, "CLS");
+    type(s, "LIST", 20000000);
+    std::vector<std::string> rows;
+    bool on = false;
+    for (const std::string& row : screen(s)) {
+      if (on && row == "READY") break;
+      if (on) rows.push_back(row);
+      if (row == ">LIST") on = true;
+    }
+    return rows;
+  }
+
+  }  // namespace
+
+  TEST_CASE("LIST, SAVE and LOAD give back every keyword as it was typed") {
+    const std::vector<std::string> lines = everyKeywordLines();
+    std::string program;
+    for (const std::string& l : lines) program += l + "\n";
+    auto s = boot();
+    settle(*s);
+    for (const std::string& l : lines) type(*s, l);
+    // Stored as bytes: the program is shorter than its text.
+    CHECK(storedProgram(*s).size() < program.size());
+    // The listing shows a keyword typed in small letters in capitals.
+    std::vector<std::string> want = lines;
+    for (std::string& l : want) {
+      const size_t sp = l.find(' ');
+      l = l.substr(0, sp + 1) + basic::canonicalLine(l.substr(sp + 1));
+    }
+    CHECK(listed(*s) == want);
+    type(*s, "!SAVE \"KW\"");
+    REQUIRE(s->slots.size() == 1);
+    std::string saved;
+    for (const std::string& l : want) saved += l + "\n";
+    CHECK_EQ(s->slots[0].second, saved);
+    type(*s, "NEW");
+    type(*s, "!LOAD \"KW\"", 40000000);
+    CHECK(listed(*s) == want);
+    CHECK(storedProgram(*s) == basic::encodeProgram(program));
+  }
+
+  TEST_CASE("the machine and the IDE store a line to the same bytes") {
+    // edit.c's crunch and program.cpp's crunchLine, over every keyword in
+    // capitals and in small letters.
+    std::string program;
+    auto s = boot();
+    settle(*s);
+    for (const std::string& l : everyKeywordLines()) {
+      std::string lower = l;
+      for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      // The small letter copy goes 5 past each line's own number.
+      const size_t sp = lower.find(' ');
+      lower = std::to_string(std::stoi(lower.substr(0, sp)) + 5) + lower.substr(sp);
+      for (const std::string& line : {l, lower}) {
+        type(*s, line);
+        program += line + "\n";
+      }
+    }
+    CHECK(storedProgram(*s) == basic::encodeProgram(program));
+    CHECK_EQ(basic::decodeProgram(storedProgram(*s)), basic::decodeProgram(basic::encodeProgram(program)));
+    for (const std::string& l : everyKeywordLines()) {
+      const std::string body = l.substr(l.find(' ') + 1);
+      CAPTURE(body);
+      CHECK_EQ(basic::expandLine(basic::crunchLine(body)), basic::canonicalLine(body));
+    }
+  }
+
+  TEST_CASE("RENUM over stored keywords changes the targets and nothing else") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s,
+               "5 REM GOTO 10 STAYS\n"
+               "10 FOR I=1 TO 2:GOSUB 40\n"
+               "20 NEXT I:IF I>2 THEN 30\n"
+               "30 RESTORE 50:A=DATA(50):GOTO 60\n"
+               "40 PRINT \"GOTO 10\";I;:RETURN\n"
+               "50 DATA 1,2\n"
+               "60 READ B:PRINT B\n");
+    type(*s, "RENUM 100, 5");
+    CHECK(listed(*s) == std::vector<std::string>{"100 REM GOTO 10 STAYS", "105 FOR I=1 TO 2:GOSUB 120",
+                                                 "110 NEXT I:IF I>2 THEN 115",
+                                                 "115 RESTORE 125:A=DATA(125):GOTO 130",
+                                                 "120 PRINT \"GOTO 10\";I;:RETURN", "125 DATA 1,2", "130 READ B:PRINT B"});
+    type(*s, "RUN", 40000000);
+    CHECK(has(text(*s), ">RUN\nGOTO 101GOTO 1021\nREADY"));
+  }
+
+  TEST_CASE("a keyword written out still runs as the keyword") {
+    // 1TO is one word to the store, and 1 then TO to the lexer. So TO
+    // stays text in the line, and the lexer looks it up.
+    CHECK(has(runOutput("10 FOR I=1TO 3:PRINT I;:NEXT\n"), "123"));
+    auto s = boot();
+    settle(*s);
+    type(*s, "for i=1 to 2:print i*3;:next");
+    CHECK(has(text(*s), "36"));
+  }
+
+  TEST_CASE("a keyword where a name stands gets the message it got as a name") {
+    // The screens after RUN, recorded from the interpreter before keywords
+    // were stored as bytes, with each line typed in.
+    const std::vector<std::pair<std::string, std::string>> before = {
+        {"10 TO = 5",
+         "? TO IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 LOAD \"X\"",
+         "? UNKNOWN WORD LOAD IN LINE 10 READY >"},
+        {"10 PRINT 1 THEN",
+         "1? THEN IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 INPUT PRINT",
+         "?"},
+        {"10 CALL PEEK(5)",
+         "? PEEK IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: USE ITS NUMBER HERE IN LINE 10 READY >"},
+        {"10 LET PRINT 5",
+         "? UNKNOWN WORD PRINT IN LINE 10 READY >"},
+        {"10 FOR TO=1 TO 5",
+         "? TO IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 IF 1 THEN THEN",
+         "? UNKNOWN WORD THEN IN LINE 10 READY >"},
+        {"10 A = 5 MOD",
+         "? SYNTAX ERROR IN LINE 10: EXPECTED A NUMBER, A VARIABLE OR ( BUT FOUND THE END OF THE LINE READY >"},
+        {"10 A = CHR$(5)",
+         "? STRINGS ARE COMPARED WITH = <> < > <= OR >= IN LINE 10 READY >"},
+        {"10 A$ = 5 + ABS",
+         "? A NUMBER CANNOT BE USED AS A STRING IN LINE 10 READY >"},
+        {"10 NEXT PRINT",
+         "? NEXT WITHOUT A FOR IN LINE 10 READY >"},
+        {"10 READ STEP",
+         "? STEP IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 LOADFONT PRINT",
+         "? NO FONT CALLED PRINT ON THE CARTRIDGE IN LINE 10 READY >"},
+        {"10 USR(1, RUN)",
+         "? UNKNOWN WORD USR IN LINE 10 READY >"},
+        {"10 A = STEP",
+         "? STEP IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 POKE 1 STEP 2",
+         "? STEP IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 A = 1: DATA 5",
+         "? SYNTAX ERROR IN LINE 10: EXPECTED A STATEMENT BUT FOUND DATA READY >"},
+        {"10 PRINT CHR$",
+         "? SYNTAX ERROR IN LINE 10: EXPECTED A NUMBER, A VARIABLE OR ( BUT FOUND THE END OF THE LINE READY >"},
+        {"10 X = NOT NOT",
+         "? SYNTAX ERROR IN LINE 10: EXPECTED A NUMBER, A VARIABLE OR ( BUT FOUND THE END OF THE LINE READY >"},
+    };
+    for (const auto& [program, screenAfter] : before) {
+      CAPTURE(program);
+      auto s = boot();
+      settle(*s);
+      type(*s, program);
+      type(*s, "RUN", 20000000);
+      std::string got = after(flat(*s), ">RUN ");
+      while (!got.empty() && got.back() == ' ') got.pop_back();
+      CHECK_EQ(got, screenAfter);
+    }
+  }
+
 }

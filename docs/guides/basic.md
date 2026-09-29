@@ -402,7 +402,9 @@ to 65535 fits. `DOKE 40000,1000` puts 3 in box 40000 and 232 in box
 as 1000. You will not need them for a long while.
 
 The program sits in boxes too, and `DEEK(8)` is the number of its first
-box. Do not `POKE` into the program while it runs. `RUN` remembers the
+box. A keyword such as `PRINT` takes one box there, a number from 128
+up, and `LIST` spells it out again. Do not `POKE` into the program while
+it runs. `RUN` remembers the
 line each `GOTO`, `GOSUB` and `THEN` found, and a jump keeps going where
 the old text sent it.
 

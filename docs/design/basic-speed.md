@@ -260,13 +260,16 @@ against the first form of this proposal is the word read and the lookup,
 from the tables above: `IF` 579 and 349, `THEN` 886 and 515, `NEXT` 849
 and 576, `POKE` 849 and 1,012.
 
-| Row | Now | Estimate |
-|---|---|---|
-| `A = A + 1` | 7,138 | about 3,500 |
-| `A = B * 3 + C` | 8,760 | about 4,750 |
-| `A = PEEK(61440)` | 10,006 | about 4,100 |
-| IF, true | 11,620 | about 4,600 |
-| `FOR`/`NEXT` on two lines, one pass | 4,405 | about 2,200 |
+| Row | Now | Estimate | Measured |
+|---|---|---|---|
+| `A = A + 1` | 7,138 | about 3,500 | 3,721 |
+| `A = B * 3 + C` | 8,760 | about 4,750 | 5,007 |
+| `A = PEEK(61440)` | 10,006 | about 4,100 | 4,350 |
+| IF, true | 11,620 | about 4,600 | 5,188 |
+| `FOR`/`NEXT` on two lines, one pass | 4,405 | about 2,200 | 2,293 |
+
+Measured with proposals 1 and 2 in. A keyword token costs `lx_next` 107
+cycles.
 
 An assignment has no keyword and gains nothing here beyond the first
 form. The program shrinks too: `PRINT` is one byte in place of five.

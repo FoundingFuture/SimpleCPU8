@@ -5,8 +5,18 @@
 /* A line is two bytes of number, one of record length, then the text. A line
  * number of zero ends the program, and BASIC has no line zero, so nothing is
  * lost by using it as the terminator.
+ *
+ * The text holds each keyword as one byte, KW_ in keywords.h, so the lexer
+ * reads a keyword in one load. LIST, SAVE and RENUM read the words back
+ * with ed_expand. Strings, the rest of a line after REM or a bang, and a
+ * DATA line stay as typed. docs/design/basic-speed.md, proposal 2.
  */
 unsigned char prog[PROGMAX];
+
+/* One line as text, or as the stored bytes on their way in. */
+char ed_line[256];
+
+static unsigned int crunch(unsigned char *t, unsigned char *o);
 
 void ed_new(void)
 {
@@ -66,6 +76,7 @@ void ed_store(int line, char *text)
      */
     if (n == 0) return;
     if (n > 250) { rt_error(E_LINELONG); return; }
+    n = crunch((unsigned char *)text, (unsigned char *)ed_line);
     rec = n + 4;
     if (prog_len + rec >= PROGMAX) { rt_error(E_MEMORY); return; }
 
@@ -73,9 +84,7 @@ void ed_store(int line, char *text)
     prog[p] = line >> 8;
     prog[p + 1] = line;
     prog[p + 2] = rec;
-    for (i = 0; i < n; i++) prog[p + 3 + i] = text[i];
-    prog[p + 3 + n] = 0;
-    keywords_up(&prog[p + 3]);
+    for (i = 0; i <= n; i++) prog[p + 3 + i] = ed_line[i];
     prog_len = prog_len + rec;
     dt_restore();
 }
@@ -92,8 +101,9 @@ void ed_list(unsigned int first, unsigned int last)
     while (lineno_at(p) && lineno_at(p) <= last) {
         term_putn(lineno_at(p));
         term_putc(32);
+        ed_expand(&prog[p + 3], ed_line);
         i = 0;
-        while (prog[p + 3 + i]) { term_putc(prog[p + 3 + i]); i = i + 1; }
+        while (ed_line[i]) { term_putc(ed_line[i]); i = i + 1; }
         term_nl();
         p = p + prog[p + 2];
     }
@@ -143,24 +153,6 @@ static unsigned char is_name(unsigned char c)
     return is_letter(c) || is_digit(c) || c == 95;
 }
 
-/* True when the n characters at w spell a word of BASIC_KEYWORDS, case
- * ignored. The string holds each word between two spaces.
- */
-static unsigned char is_keyword(unsigned char *w, unsigned int n)
-{
-    char *k;
-    unsigned int i;
-    k = BASIC_KEYWORDS;
-    while (k[1]) {
-        k = k + 1;
-        i = 0;
-        while (i < n && k[i] == upper_of(w[i])) i = i + 1;
-        if (i == n && k[n] == 32) return 1;
-        while (*k != 32) k = k + 1;
-    }
-    return 0;
-}
-
 /* The reserved words of a stored line in capitals, so a line typed in
  * small letters is kept the way the IDE sends one. canonicalLine in
  * program.cpp is the IDE's copy of the rule. Strings, the rest of a line
@@ -188,7 +180,7 @@ static void keywords_up(unsigned char *t)
             j = i;
             while (is_name(t[j])) j = j + 1;
             if (t[j] == 36) j = j + 1;
-            if (is_keyword(&t[i], j - i)) {
+            if (j - i <= 8 && kw_find((char *)&t[i], j - i)) {
                 rem = word_is(&t[i], j - i, "REM");
                 for (k = i; k < j; k++) t[k] = upper_of(t[k]);
                 if (rem) return;
@@ -200,6 +192,105 @@ static void keywords_up(unsigned char *t)
             i = i + 1;
         }
     }
+}
+
+/* True when the text at t is a DATA line: its first word, read the way the
+ * lexer reads a name, is DATA. data.c finds DATA lines by the same test.
+ */
+static unsigned char data_line(unsigned char *t)
+{
+    unsigned int n;
+    while (*t == 32) t = t + 1;
+    n = 0;
+    while (is_letter(t[n]) || is_digit(t[n])) n = n + 1;
+    if (t[n] == 36) n = n + 1;
+    return word_is(t, n, "DATA");
+}
+
+/* The typed text t as a stored line at o, with its length returned. The
+ * walk is keywords_up's, and a keyword it would put in capitals becomes
+ * its byte. A DATA line stays text, which data.c reads as it always has.
+ * crunchLine in program.cpp is the IDE's copy of this rule, and a test
+ * holds the two to one result.
+ */
+static unsigned int crunch(unsigned char *t, unsigned char *o)
+{
+    unsigned int i;
+    unsigned int j;
+    unsigned int n;
+    unsigned char k;
+    i = 0;
+    n = 0;
+    if (data_line(t)) {
+        while (t[i]) { o[n] = t[i]; n = n + 1; i = i + 1; }
+        o[n] = 0;
+        keywords_up(o);
+        return n;
+    }
+    while (t[i]) {
+        j = i + 1;
+        if (t[i] == 34) {
+            while (t[j] && t[j] != 34) j = j + 1;
+            if (t[j]) j = j + 1;
+        } else if (t[i] == 36 && is_hex(t[i + 1])) {
+            while (is_hex(t[j])) j = j + 1;
+        } else if (is_digit(t[i])) {
+            /* A number runs over letters, as the IDE's does: 1TO stays. */
+            while (is_name(t[j]) || t[j] == 46) j = j + 1;
+        } else if (is_letter(t[i]) || t[i] == 95) {
+            while (is_name(t[j])) j = j + 1;
+            if (t[j] == 36) j = j + 1;
+            k = 0;
+            if (j - i <= 8) k = kw_find((char *)&t[i], j - i);
+            if (k) {
+                o[n] = k;
+                n = n + 1;
+                i = j;
+                /* The rest of a REM line is not BASIC. */
+                if (k == KW_REM) j = i + 250;
+            }
+        } else if (t[i] == 33) {
+            j = i + 250;
+        }
+        while (i < j && t[i]) { o[n] = t[i]; n = n + 1; i = i + 1; }
+    }
+    o[n] = 0;
+    return n;
+}
+
+unsigned int ed_expand(unsigned char *t, char *o)
+{
+    unsigned int i;
+    unsigned int n;
+    unsigned char c;
+    char *w;
+    i = 0;
+    n = 0;
+    if (data_line(t)) {
+        while (t[i]) { o[n] = t[i]; n = n + 1; i = i + 1; }
+        o[n] = 0;
+        return n;
+    }
+    while (t[i]) {
+        c = t[i];
+        i = i + 1;
+        if (c >= KW_FIRST) {
+            w = kw_text(c);
+            while (*w != 32) { o[n] = *w; n = n + 1; w = w + 1; }
+            if (c == KW_REM) c = 33;
+        } else {
+            o[n] = c;
+            n = n + 1;
+        }
+        if (c == 34) {
+            while (t[i] && t[i] != 34) { o[n] = t[i]; n = n + 1; i = i + 1; }
+            if (t[i]) { o[n] = 34; n = n + 1; i = i + 1; }
+        } else if (c == 33) {
+            while (t[i]) { o[n] = t[i]; n = n + 1; i = i + 1; }
+        }
+    }
+    o[n] = 0;
+    return n;
 }
 
 /* The number line `old` gets, or 0 when there is no such line. */
@@ -238,7 +329,9 @@ static unsigned int renum_text(unsigned int p, unsigned int start, unsigned int 
     unsigned char big;
     unsigned char dp;
     unsigned int k;
-    src = &prog[p + 3];
+    /* The words as text, so the scan below reads what LIST shows. */
+    ed_expand(&prog[p + 3], ed_line);
+    src = (unsigned char *)ed_line;
     i = 0;
     o = 0;
     while (src[i]) {
@@ -328,16 +421,20 @@ void ed_renum(unsigned int start, unsigned int step)
     while (lineno_at(p)) {
         len = renum_text(p, start, step);
         if (len > 250) { rt_error(E_LINELONG); return; }
+        len = crunch((unsigned char *)renum_buf, (unsigned char *)ed_line);
         total = total + len + 4 - prog[p + 2];
         if (total >= PROGMAX) { rt_error(E_MEMORY); return; }
         p = p + prog[p + 2];
     }
-    /* The references, while the lines still have their old numbers. */
+    /* The references, while the lines still have their old numbers. The
+     * text is stored again as a typed line is.
+     */
     p = 0;
     while (lineno_at(p)) {
-        len = renum_text(p, start, step);
+        renum_text(p, start, step);
+        len = crunch((unsigned char *)renum_buf, (unsigned char *)ed_line);
         if (len + 4 != prog[p + 2]) ed_store(lineno_at(p), renum_buf);
-        else memcpy(&prog[p + 3], renum_buf, len);
+        else memcpy(&prog[p + 3], ed_line, len);
         p = p + prog[p + 2];
     }
     /* Then the numbers themselves. */
