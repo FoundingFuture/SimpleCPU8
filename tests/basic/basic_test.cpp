@@ -2884,4 +2884,24 @@ TEST_SUITE("basic speed") {
     CHECK(has(runOutput("10 A=3:PRINT HEX$(A,2);CHR$(65)\n"), "03A"));
     CHECK(has(runOutput("10 A=3:IF A THEN PRINT \"T\"\n"), "T"));
   }
+
+  TEST_CASE("GOTO typed at the prompt after an edit sets pc to the moved line and runs nothing") {
+    // GOTO at the prompt sets pc and stops: the prompt's line is all that
+    // runs, and RUN starts from the first line. So no stored line runs
+    // with the cache the last RUN left. The line it names is found by the
+    // walk, where the edit moved it.
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 GOTO 100\n20 PRINT \"NO\"\n100 PRINT \"L100\"\n110 END\n");
+    runToEnd(*s);
+    REQUIRE(has(after(text(*s), ">RUN\n"), "L100"));
+    type(*s, "50 REM A LINE THAT MOVES LINE 100 FURTHER ON");
+    type(*s, "CLS");
+    type(*s, "GOTO 100");
+    // SYS_PC, $16 on the system page: the offset of the line to run next.
+    CHECK_EQ(sysWord(*s, 0x16), lineOffset(*s, 100));
+    CHECK_EQ(s->m->ram[basic::SYS_RUNNING], 0);
+    CHECK_FALSE(has(text(*s), "L100"));
+    CHECK_FALSE(has(text(*s), "?"));
+  }
 }
