@@ -2,8 +2,10 @@
 
 Where the BASIC interpreter spends its cycles, measured before any change.
 Five proposals follow. Proposals 1 and 2 are in their second form, after
-Eddie's review of the first. Nothing is implemented. The decisions are at
-the end.
+Eddie's review of the first. All five are implemented, each with its
+measured cost beside the estimate. The decisions come after the
+proposals, and [the last section](#measured-after-the-change) measures
+every row again.
 
 ## Contents
 
@@ -22,8 +24,9 @@ the end.
 
 ## How it was measured
 
-A scratch C++ program in the session's scratch folder did every measurement.
-It is not in the tree.
+tests/support/basic_profile.cpp did every measurement, and the
+basic_profile target builds it. `basic_profile` prints the statement table
+below, and `basic_profile --detail` each row by function.
 
 - It boots basic.rom on the tests' headless machine,
   tests/support/basic_session.h, with the optimal microcode.

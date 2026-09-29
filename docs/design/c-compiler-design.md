@@ -182,7 +182,11 @@ A peephole pass in src/cc/peephole.cpp then tidies what the generator
 wrote. It drops a jump to the next line. It drops a load of a value A or
 D2 already holds, and a load nothing reads. It drops a store to a temp nobody
 reads. It follows where the flags stop mattering, so a load goes only when
-no jump reads the flags it set.
+no jump reads the flags it set. An inlined test's answer, built as 0 or 1
+only for a jump to test it, goes. Its compares jump where the test would
+have sent them. A jump to a JMP goes where the JMP goes. A
+conditional jump over a JMP turns round. Code after a JMP, a RET or a HLT
+that no jump reaches goes. None of these crosses a `;@barrier`.
 Codegen marks every statement boundary with `;@stmt` and fences inline
 assembly with `;@barrier`. Nothing moves across a barrier, and no temp
 is live across a statement mark. A static function of up to 40 nodes is

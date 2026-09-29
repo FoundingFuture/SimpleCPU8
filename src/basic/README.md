@@ -23,6 +23,8 @@ the GPU into SYS_COLS and SYS_ROWS on the system page.
 run.c keeps the line each GOTO, GOSUB and `THEN n` found while a program
 runs, docs/design/basic-speed.md. A POKE into the program text while it
 runs is not supported.
+The program memory holds 16384 bytes, PROGMAX in basic.h, where the
+browser's held 6144. TEXTMAX, the text block SAVE and LOAD use, is 22528.
 A stored line holds each keyword as one byte, 128 plus its place in
 keywords.h. edit.c turns the words into bytes when a line is stored and
 back into text for LIST, SAVE and RENUM. A DATA line, a string, the rest
