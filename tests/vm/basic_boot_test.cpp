@@ -152,7 +152,7 @@ TEST_CASE("a slot named AUTORUN runs at power on") {
 #endif
 
 #if SC8_HAVE_BASIC && defined(SC8_ROM_DIR)
-// examples/basic-c: BASIC, C and assembly in one ROM. AUTORUN sets A to
+// examples/basic/basic-c: BASIC, C and assembly in one ROM. AUTORUN sets A to
 // 21, CALL DOUBLE doubles it in C, CALL ANSWER leaves 42 in A for
 // PEEK(4), and USR(2, TRIPLE, 14) has C answer 42. All three land on the
 // screen.

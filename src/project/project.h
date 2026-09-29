@@ -124,6 +124,18 @@ struct Options {
 
 enum class Kind { C, Basic, Assembly, Microcode };
 
+// The folders under examples/, one for each kind of project, in the order
+// the IDE's Open example menu lists them. Each has its folder and label.
+// An example sits in the folder of its kind. examples/CMakeLists.txt
+// builds every folder one level down, and a test holds the tree to this
+// list.
+struct ExampleKind {
+  const char* folder;
+  const char* label;
+};
+constexpr ExampleKind EXAMPLE_KINDS[] = {
+    {"assembly", "Assembly"}, {"basic", "BASIC"}, {"c", "C"}, {"microcode", "Microcode"}};
+
 // Lay out a new project of a kind at dir, which must not exist yet or be
 // empty: the folders, a README, a .gitignore for build/ and a first
 // source that builds and runs. Microcode is an assembly project with the

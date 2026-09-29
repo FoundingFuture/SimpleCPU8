@@ -1,6 +1,6 @@
 # Centipede design
 
-A Centipede game in BASIC for SimpleCPU-8, in examples/centipede. It runs in
+A Centipede game in BASIC for SimpleCPU-8, in examples/basic/centipede. It runs in
 text mode, and everything on screen is a character of its own font. Objects
 move on a grid of half cells. The font holds a glyph for every pair of halves
 the rules can put in one cell.
@@ -462,7 +462,7 @@ copies the built-in glyphs at $20 to $7F. Every code from $80 is drawn in the
 font editor:
 
 ```bash
-simplecpu-ide examples/centipede/assets/centipede.font
+simplecpu-ide examples/basic/centipede/assets/centipede.font
 ```
 
 ### What to draw first
@@ -832,7 +832,7 @@ every list lives in RAM behind PEEK and DEEK.
 
 ## Program structure
 
-examples/pacman is assembly, so this layout is new. One file,
+examples/assembly/pacman is assembly, so this layout is new. One file,
 src/autorun.bas.
 
 Two measured costs order it. A jump walks from the first line, 280 cycles a
@@ -881,7 +881,7 @@ above does.
 
 ## Testing
 
-In tests/project, beside the examples/font test. simplecpu-make builds the
+In tests/project, beside the examples/basic/font test. simplecpu-make builds the
 example, and `testing::Session` boots the ROM headless at the fixed seed. A
 test sets PAD through `Session::input.buttons`. It reads the screen at $F000
 and the variables through SYS_VARS. T9 says where the game is.
@@ -979,11 +979,11 @@ Tests:
 ### Phase 5, polish
 
 The title with the big letters, the game over screen, the ring of screens,
-examples/centipede/README.md, and the full wave test.
+examples/basic/centipede/README.md, and the full wave test.
 
 ## Documents this changes
 
-None. The README in examples/centipede, its line in examples/README.md and
+None. The README in examples/basic/centipede, its line in examples/README.md and
 the CLAUDE.md repository map arrive with the code.
 
 ## Open questions
@@ -1036,7 +1036,7 @@ src/ide/sprite_editor.cpp. A paste of the left or the right four columns
 alone would make each pair two pastes.
 
 The other route is a script that writes the pairs from the six drawings, as
-examples/pacman/gensprites.py writes Pac-Man's sprites. The brief asks for
+examples/assembly/pacman/gensprites.py writes Pac-Man's sprites. The brief asks for
 the editor, so either route needs Eddie's word.
 
 ### Reading the frame counter

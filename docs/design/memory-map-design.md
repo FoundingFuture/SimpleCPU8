@@ -88,7 +88,7 @@ demos and the manual say so. A program that maps it elsewhere is doing
 something deliberate rather than following the only example it saw. The
 address is `$F000`, room for the 64 by 64 grid of a 4 by 4 cell. It was
 `$FAC0` for the 42 by 32 grid alone, and `$FC00` under the 8 by 8 font.
-examples/matrix and examples/textmode keep 6 by 8 and map theirs at
+examples/assembly/matrix and examples/assembly/textmode keep 6 by 8 and map theirs at
 `$FAC0`.
 
 Room to move it is what makes double buffering possible. Show `$FAC0`, build

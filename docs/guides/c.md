@@ -811,7 +811,7 @@ Twice 200 is 400, which is `$0190`. Width 1 keeps the low byte, `$90`,
 The C files in a mixed project must not define `main`. That belongs to
 the interpreter. BASIC calls a function by name, and the build writes the
 function's address into the program. A name BASIC calls that no file
-defines is a build error naming the line. `examples/basic-c` is the
+defines is a build error naming the line. `examples/basic/basic-c` is the
 worked example, with an assembly routine beside the C one.
 
 ### Which functions are kept
@@ -1024,7 +1024,7 @@ between the two layers. `graphics.h` splits the ints for you.
 `out(GPU_CMD, CMD_CLEAR)` and `in(GPU_FRAME)`. Every port and command
 name the assembler knows is a C constant. The generated assembly from
 `--asm-out` shows what each layer becomes. The assembly guide covers the
-ports themselves, and `examples/hello-c` draws with `gpu.h` alone.
+ports themselves, and `examples/c/hello-c` draws with `gpu.h` alone.
 
 ## Errors you will meet
 
@@ -1340,6 +1340,6 @@ switch shows what a multiply costs without the coprocessor.
 
 Every friendly header opens with its own reference. The text is in
 src/cc/libs.cpp, and the IDE's manual pane shows the device tables.
-`examples/bounce` is a bat and ball game on the same libraries as Rocks.
-`examples/pacman` and `examples/cube` show what the chips can do from
+`examples/c/bounce` is a bat and ball game on the same libraries as Rocks.
+`examples/assembly/pacman` and `examples/assembly/cube` show what the chips can do from
 assembly.

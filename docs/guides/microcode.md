@@ -567,8 +567,8 @@ A parse error stops the build and names the line:
 mine/src/microcode.txt:345: unknown signal: PC_INK
 ```
 
-examples/cycles is the same project, kept in the repository, so
-`simplecpu-make examples/cycles` builds it without a `new`.
+examples/microcode/cycles is the same project, kept in the repository, so
+`simplecpu-make examples/microcode/cycles` builds it without a `new`.
 
 ## The Microcode level
 
@@ -824,8 +824,8 @@ The first run uses the set in the ROM. The second overrides it with
 naive. Everything after the `cycles:` figure must match: the
 registers, the flags and every byte of RAM you dump. Write the program
 so that it exercises the instruction you changed. Use values that
-matter, such as a carry out and a zero result. The 25 example programs
-in examples/ are larger tests. A game that plays the same under both
+matter, such as a carry out and a zero result. The example programs in
+examples/ are larger tests. A game that plays the same under both
 sets is strong evidence. A game that drifts is a set with a bug.
 
 ## The sequencer's crashes

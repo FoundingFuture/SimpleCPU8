@@ -460,7 +460,7 @@ hill:   db 32, 16
 
 PNG, JPEG, BMP and GIF pictures are read, and WAV, FLAC and MP3 sounds. A picture in other colours is moved onto the machine's palette,
 and the build says so. Transparent pixels become colour 0, which the
-graphics chip skips. `examples/bounce` is a C project with two sprites in
+graphics chip skips. `examples/c/bounce` is a C project with two sprites in
 `assets/`.
 
 Each directive also lists what it placed in the ROM's asset table, under

@@ -1022,7 +1022,7 @@ guide and the assembly guide pick it up there.
 
 The system page at docs/basic-system-page.md lists every box BASIC keeps
 its own state in, from 0 to 31. Box 5 and box 6 came from there.
-examples/basic-c and examples/basic-driver show BASIC calling C and
+examples/basic/basic-c and examples/basic/basic-driver show BASIC calling C and
 assembly.
 
 ## Every word

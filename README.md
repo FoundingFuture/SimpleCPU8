@@ -46,15 +46,15 @@ projects.
 ## Run
 
 ```bash
-build/src/tools/simplecpu-asm examples/hello/hello.asm --title "List sum"
-build/src/vm/simplecpu --rom examples/hello/hello.rom --fps 60
-build/src/ide/simplecpu-ide examples/hello/hello.asm
-build/src/tools/simplecpu-run examples/hello/hello.rom --ram 0 4
+build/src/tools/simplecpu-asm examples/assembly/hello/hello.asm --title "List sum"
+build/src/vm/simplecpu --rom examples/assembly/hello/hello.rom --fps 60
+build/src/ide/simplecpu-ide examples/assembly/hello/hello.asm
+build/src/tools/simplecpu-run examples/assembly/hello/hello.rom --ram 0 4
 build/src/vm/simplecpu --basic
 build/src/vm/simplecpu --basic hello.bas --run
 build/src/vm/simplecpu --rom build/roms/basic.rom
 build/src/vm/simplecpu --rom build/roms/pacman.rom --fps 60
-build/src/tools/simplecpu-make examples/hello-c
+build/src/tools/simplecpu-make examples/c/hello-c
 ```
 
 The build burns every example into build/roms. examples/README.md lists

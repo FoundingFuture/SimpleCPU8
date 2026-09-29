@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <string>
 
 #include "asm/asm.h"
@@ -567,7 +568,7 @@ TEST_SUITE("assets on the cartridge by name") {
   }
 }
 
-// examples/font as simplecpu-make builds it, booted headless. The program
+// examples/basic/font as simplecpu-make builds it, booted headless. The program
 // waits for a key between its three steps, so each one is checked on
 // screen before the next.
 namespace {
@@ -607,9 +608,9 @@ void pressKey(testing::Session& s) {
 
 }  // namespace
 
-TEST_SUITE("examples/font") {
+TEST_SUITE("examples/basic/font") {
   TEST_CASE("simplecpu-make builds it, and it runs its font, the built-in font, then 8 by 8 cells") {
-    const fs::path example = fs::path(SC8_EXAMPLES_DIR) / "font";
+    const fs::path example = fs::path(SC8_EXAMPLES_DIR) / project::EXAMPLE_KINDS[1].folder / "font";
     TempDir t;
     fs::create_directories(t.path);
     const fs::path rom = t.path / "font.rom";
@@ -663,3 +664,47 @@ TEST_SUITE("examples/font") {
   }
 }
 #endif
+
+// The Open example menu lists examples/ by these folders. So examples/
+// holds exactly the folders EXAMPLE_KINDS names, and each example sits in
+// the folder of its kind.
+TEST_SUITE("the examples folder") {
+  TEST_CASE("examples/ holds one folder for each kind, and nothing else as a folder") {
+    std::set<std::string> folders;
+    for (const auto& e : fs::directory_iterator(SC8_EXAMPLES_DIR)) {
+      if (e.is_directory()) folders.insert(e.path().filename().string());
+    }
+    std::set<std::string> kinds;
+    for (const project::ExampleKind& k : project::EXAMPLE_KINDS) kinds.insert(k.folder);
+    CHECK(folders == kinds);
+  }
+
+  TEST_CASE("each example sits in the folder of its kind") {
+    auto has = [](const fs::path& dir, const std::string& ext) {
+      for (const auto& e : fs::directory_iterator(dir)) {
+        if (e.path().extension() == ext) return true;
+      }
+      return false;
+    };
+    size_t count = 0;
+    for (const project::ExampleKind& k : project::EXAMPLE_KINDS) {
+      for (const auto& e : fs::directory_iterator(fs::path(SC8_EXAMPLES_DIR) / k.folder)) {
+        if (!e.is_directory()) continue;
+        count++;
+        const fs::path src = project::layoutOf(e.path()).sources;
+        const bool micro = fs::exists(src / "microcode.txt");
+        const bool bas = has(src, ".bas");
+        const bool c = has(src, ".c");
+        const bool assembly = has(src, ".asm");
+        const std::string folder = k.folder;
+        CAPTURE(e.path().string());
+        if (folder == "microcode") CHECK(micro);
+        if (folder == "basic") CHECK((bas && !micro));
+        if (folder == "c") CHECK((c && !bas && !micro));
+        if (folder == "assembly") CHECK((assembly && !c && !bas && !micro));
+      }
+    }
+    CHECK(count > 0);
+  }
+}
+

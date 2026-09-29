@@ -294,13 +294,13 @@ These use $FAC0, 64192 or a 42 column row for BASIC's screen, and move with
 it:
 
 - tests/basic/basic_test.cpp, which reads the screen at $FAC0, 42 wide.
-- examples/basic-driver/driver.asm, which writes row 20 of BASIC's screen.
+- examples/basic/basic-driver/driver.asm, which writes row 20 of BASIC's screen.
 - docs/guides/basic.md, "Memory as numbered boxes", which POKEs 64192.
 - docs/guides/assembly.md, which names BASIC's `POKE 64192,65`.
 - src/ide/run_panes.cpp, the memory pane's "text screen" button at $FAC0.
 - src/ide/datapath.cpp, whose text names $FAC0 and 1344 bytes.
 
-examples/matrix and examples/textmode map their own screen at $FAC0. They
+examples/assembly/matrix and examples/assembly/textmode map their own screen at $FAC0. They
 are programs of their own, keep 6 by 8, and keep working.
 
 ## The font editor
