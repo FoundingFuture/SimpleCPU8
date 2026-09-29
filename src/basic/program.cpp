@@ -190,6 +190,37 @@ std::string crunchPass(std::string_view body, size_t marks, size_t& numbers) {
 
 }  // namespace
 
+namespace {
+
+// The walk of crunchPass, looking for a byte of 128 or more where the
+// lexer reads the line. A DATA line is read whole, outside its quotes.
+bool readsHighByte(std::string_view body) {
+  const bool data = isDataLine(body);
+  size_t i = 0;
+  while (i < body.size()) {
+    const char c = body[i];
+    size_t end = i + 1;
+    if (c == '"') {
+      end = body.find('"', i + 1);
+      end = end == std::string_view::npos ? body.size() : end + 1;
+    } else if (!data && isNameStart(c)) {
+      while (end < body.size() && isNameChar(body[end])) end++;
+      if (end < body.size() && body[end] == '$') end++;
+      std::string w(body.substr(i, end - i));
+      for (char& ch : w) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+      if (w == "REM") return false;
+    } else if (!data && c == '!') {
+      return false;
+    } else if (static_cast<uint8_t>(c) >= KW_FIRST) {
+      return true;
+    }
+    i = end;
+  }
+  return false;
+}
+
+}  // namespace
+
 // crunch in edit.c is the machine's copy of this rule. A number's value
 // costs 3 bytes, and a stored line holds 250. So the first numbers get
 // their value while the line fits, and the rest stay digits.
@@ -268,6 +299,41 @@ void storeProgram(std::span<uint8_t> ram, std::span<const uint8_t> bytes) {
   ram[SYS_READ + 1] = 0;
 }
 
+namespace {
+
+// A line's number and body the way encodeProgram reads them, or -1 for a
+// line without a number. The body keeps its spaces after the number.
+std::pair<int, std::string_view> numberedBody(std::string_view line) {
+  size_t i = 0;
+  while (i < line.size() && line[i] == ' ') i++;
+  if (i >= line.size() || line[i] < '0' || line[i] > '9') return {-1, {}};
+  int n = 0;
+  while (i < line.size() && line[i] >= '0' && line[i] <= '9' && n <= 65535) n = n * 10 + (line[i++] - '0');
+  return {n, line.substr(i)};
+}
+
+}  // namespace
+
+int refusedLine(std::string_view text) {
+  size_t at = 0;
+  while (at < text.size()) {
+    size_t end = text.find('\n', at);
+    if (end == std::string_view::npos) end = text.size();
+    const auto [n, body] = numberedBody(text.substr(at, end - at));
+    if (n > 0 && readsHighByte(body)) return n;
+    at = end + 1;
+  }
+  return -1;
+}
+
+std::string refusal(std::string_view text) {
+  const int n = refusedLine(text);
+  if (n < 0) return "";
+  return "Line " + std::to_string(n) +
+         " holds a byte of 128 or more outside a string. BASIC would read it as a keyword, so the program "
+         "goes to the computer once the line is changed.";
+}
+
 std::vector<uint8_t> encodeProgram(const std::string& text) {
   // The map keeps the lines sorted and makes a repeated number a
   // replacement, which is what the interpreter does on entry.
@@ -291,6 +357,7 @@ std::vector<uint8_t> encodeProgram(const std::string& text) {
     std::string body = line.substr(i);
     if (body.size() > 250) body.resize(250);
     if (n <= 0 || n > 65535) continue;
+    if (readsHighByte(body)) continue;
     if (body.empty()) lines.erase(n);
     else lines[n] = canonicalLine(body);
   }

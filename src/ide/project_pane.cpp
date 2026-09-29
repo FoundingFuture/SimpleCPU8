@@ -676,6 +676,17 @@ Doc* Ide::basicPartner() {
 void Ide::syncBasic() {
   if (!basicAtReady()) return;
   Doc* d = basicPartner();
+  // A line BASIC would misread stops the exchange both ways until it is
+  // changed, and a Run in BASIC waiting on it is dropped. Syncing the rest
+  // would take the line out of the document at the next merge.
+  const std::string why = d ? basic::refusal(d->text) : "";
+  if (!why.empty()) {
+    if (why != refusalNoted_) note(d->name + ": " + why);
+    refusalNoted_ = why;
+    pushPending_ = false;
+    return;
+  }
+  refusalNoted_.clear();
   if (pushPending_) {
     if (d && syncDoc_.empty()) syncDoc_ = d->name;
     if (!pushProgram()) return;

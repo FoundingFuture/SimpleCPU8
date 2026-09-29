@@ -2667,6 +2667,24 @@ TEST_SUITE("basic speed") {
       CAPTURE(body);
       CHECK_EQ(basic::expandLine(basic::crunchLine(body)), basic::canonicalLine(body));
     }
+    // A byte of 128 or more, here the two of an e with an accent in UTF-8.
+    // Where the lexer never reads it, inside quotes, after REM and in a
+    // bang's text, it passes through unchanged.
+    const std::string e = "\xC3\xA9";
+    const std::string kept = "10 PRINT \"" + e + "\"\n20 REM " + e + "\n30 ! " + e + "\n40 DATA \"" + e + "\"\n";
+    CHECK_EQ(basic::refusedLine(kept), -1);
+    CHECK_EQ(basic::refusal(kept), "");
+    CHECK_EQ(basic::decodeProgram(basic::encodeProgram(kept)), kept);
+    CHECK_EQ(basic::expandLine(basic::crunchLine("PRINT \"" + e + "\"")), "PRINT \"" + e + "\"");
+    // Where the lexer reads it, it would be taken for a keyword. The IDE
+    // refuses the line and names it, and encodeProgram leaves it out.
+    for (const std::string& bad : {"A=1" + e, "PRINT " + e, "DATA 1," + e}) {
+      CAPTURE(bad);
+      const std::string text = "10 PRINT 1\n20 " + bad + "\n";
+      CHECK_EQ(basic::refusedLine(text), 20);
+      CHECK(has(basic::refusal(text), "Line 20 holds a byte of 128 or more outside a string"));
+      CHECK_EQ(basic::decodeProgram(basic::encodeProgram(text)), "10 PRINT 1\n");
+    }
   }
 
   TEST_CASE("RENUM over stored keywords changes the targets and nothing else") {

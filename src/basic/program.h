@@ -68,13 +68,22 @@ std::string expandLine(std::string_view stored);
 // spaces around it and rows without a number stay. The size never changes.
 std::string canonicalText(std::string_view text, int skip = -1);
 
+// The number of the first line whose body holds a byte of 128 or more
+// where the interpreter reads BASIC, or -1. The lexer would take such a
+// byte for a keyword. Inside quotes, the rest of a REM line and a bang's
+// text it is never read, so it passes there.
+int refusedLine(std::string_view text);
+
+// The Messages pane's words for refusedLine, naming the line, or empty.
+std::string refusal(std::string_view text);
+
 // Text to stored bytes, the way typing the lines in would go. Lines are
 // sorted by number. A later line with the same number replaces an earlier
 // one. A numbered line with no text deletes. A line with no number is
 // skipped. Leading spaces after the number are dropped, as ed_store
 // receives them. Text past 250 characters is cut. A program that does not
-// fit is cut at the last line that does. Each stored line is
-// crunchLine of its body.
+// fit is cut at the last line that does. A line refusedLine names is
+// left out. Each stored line is crunchLine of its body.
 std::vector<uint8_t> encodeProgram(const std::string& text);
 
 // The program into the interpreter's memory, where SYS_PROG says it sits,
