@@ -1,8 +1,9 @@
 # BASIC interpreter speed
 
 Where the BASIC interpreter spends its cycles, measured before any change.
-Three proposals follow, in Eddie's order of preference. Nothing is
-implemented. Eddie decides which proposals go ahead.
+Five proposals follow. Proposals 1 and 2 are in their second form, after
+Eddie's review of the first. Nothing is implemented. The decisions are at
+the end.
 
 ## Contents
 
@@ -10,10 +11,13 @@ implemented. Eddie decides which proposals go ahead.
 - [Statement costs](#statement-costs)
 - [Where the cycles go](#where-the-cycles-go)
 - [What a token costs](#what-a-token-costs)
-- [Proposal 1: a line index built at RUN](#proposal-1-a-line-index-built-at-run)
-- [Proposal 2: the lexer names each keyword once](#proposal-2-the-lexer-names-each-keyword-once)
+- [Proposal 1: a cache of jump targets](#proposal-1-a-cache-of-jump-targets)
+- [Proposal 2: keywords stored as tokens](#proposal-2-keywords-stored-as-tokens)
 - [Proposal 3: what lx_next costs as compiled](#proposal-3-what-lx_next-costs-as-compiled)
+- [Proposal 4: number literals stored with their value](#proposal-4-number-literals-stored-with-their-value)
+- [Proposal 5: an operand without an operator skips the descent](#proposal-5-an-operand-without-an-operator-skips-the-descent)
 - [The ceiling](#the-ceiling)
+- [Decisions](#decisions)
 
 ## How it was measured
 
@@ -30,7 +34,7 @@ It is not in the tree.
 - Each instruction's cycles go to the C function whose code holds its slot.
   That is the function's own cycles.
 - A shadow call stack, pushed on JSR and popped on RET, gives each function's
-  cycles with its callees, and splits a callee's cycles by caller.
+  cycles with its callees. It also splits a callee's cycles by caller.
 
 Every statement ran on its own line in this loop:
 
@@ -43,8 +47,8 @@ Every statement ran on its own line in this loop:
 ```
 
 The same program without line 3 is the baseline. A statement's cost is the
-difference divided by 1000. So a cost includes the statement's line: the
-break check, the step to the next record and the lexer's start on the line.
+difference divided by 1000. So a cost includes the statement's line. That is
+the break check, the step to the next record and the lexer's start.
 The baseline in docs/design/centipede-design.md held a REM line, and its
 figures leave that out.
 
@@ -159,92 +163,121 @@ LEN, ASC, VAL, KEY, PAD, USR and DATA before PEEK.
 Two patterns in the compiled `lx_next` take 45 percent of its cycles.
 [Proposal 3](#proposal-3-what-lx_next-costs-as-compiled) has them.
 
-## Proposal 1: a line index built at RUN
+## Proposal 1: a cache of jump targets
 
-`dt_pack` already walks every line at RUN. It would also write each line's
-offset into an index. GOTO, GOSUB, `THEN n`, `RESTORE n` and `DATA(n)` then
-find a line by binary search in place of `ed_find`'s walk.
+A line number after GOTO, GOSUB or THEN is a constant. The program text
+cannot change while the program runs. LOAD stops it, store.c line 114, and
+no statement adds or removes a line. So the target a jump found once holds
+until the program stops. The proposal: keep it.
 
-FOR, NEXT and RETURN need nothing. They already keep offsets, and the
-measurement shows no `ed_find` call in them.
+The cache is 256 slots of 4 bytes, 1,024 bytes of RAM. A slot
+holds a site and a target. The site is `lx_tokpos` at the line number.
+That is the number's offset in the program text. The target is the offset
+`ed_find` returned for it. A site maps to a slot through a hash of its two
+bytes, direct mapped. Two sites that share a slot take turns in it. They
+stay correct, because the site is compared on every read.
 
-A binary search over 300 lines, compiled by simplecpu-cc, cost 1,368 to
-1,388 cycles, whatever the target. The walk costs about 250 cycles plus 280
-a line. The two meet near the fifth line.
+A jump reads the slot for its site first. When the site matches, pc takes
+the target, and the digits after the keyword are not parsed again. When it
+does not, the jump walks with `ed_find` as it does now, then writes the
+slot. `UNDEFINED LINE` is raised where it is raised today, when the jump
+runs. Nothing is resolved before the program starts.
 
-| Row | Now | With the index |
-|---|---|---|
-| GOTO line 3 to 202 | 60,326 | about 5,400 |
-| GOTO line 297 to 298 | 87,063 | about 5,350 |
-| GOSUB to line 300 | 91,422 | about 9,150 |
-| GOSUB to line 2 | 7,935 | about 8,780 |
+GOTO, GOSUB and `THEN n` use the cache. `RESTORE n` and `DATA(n)` keep the
+walk. They run once in the usual program. FOR, NEXT and RETURN need
+nothing, as before.
 
-The last row is slower by 843 cycles. A search that first compares the
-target with the fifth line's number, and walks below it, keeps the walk
-where it wins.
+`dt_pack` zeroes the table at RUN, in the walk RUN makes anyway. Every
+edit.c path that changes the program clears it too: insert, replace,
+delete, NEW, RENUM and LOAD. So an immediate mode GOTO after an edit never
+reads a stale slot. A POKE into the program text while it runs is not
+supported, and docs/guides/basic.md says so.
 
-The cost:
+A hit costs a hash, one word compare and one word load, in compiled C.
+Estimated at 100 to 150 cycles. Every jump then costs what the nearest
+jump costs today, less its one line walk and its digits. GOTO to the next
+line costs 4,693 today and GOSUB to line 2 costs 7,935.
 
-- RAM: 2 bytes a line. A stored line is at least 5 bytes, so 6,144 bytes
-  hold at most 1,228 lines. The index is 2,456 bytes at most.
-- RUN: one store a line, in a walk RUN makes anyway.
-- Staleness: LOAD stops the running program, store.c line 114. A running
-  program adds or removes no line any other way. A POKE into the program
-  text, or the IDE writing the program while it runs, would leave the index
-  stale. Eddie decides whether either must keep working.
+| Row | Now | Estimate | Measured |
+|---|---|---|---|
+| GOTO line 3 to 202 | 60,326 | about 3,700 | 2,789 |
+| GOTO line 297 to 298 | 87,063 | about 3,700 | 2,769 |
+| GOSUB to line 300 | 91,422 | about 7,000 | 6,590 |
+| GOSUB to line 2 | 7,935 | about 7,000 | 6,553 |
 
-## Proposal 2: the lexer names each keyword once
+Measured with the cache in, by tests/support/basic_profile.cpp. The
+lookup before a THEN costs a true IF 169 cycles when no number follows:
+`IF A > 5 THEN B = 1` went from 11,620 to 11,789.
 
-`lx_next` has read the whole word before `statement` compares it with 31
-keywords. The proposal: `lx_next` looks a name up once and sets a keyword
-number, `lx_kw`, 0 for a variable. `statement` tests `lx_kw == 0` first and
-takes the assignment. Otherwise a switch on `lx_kw` picks the statement.
-The expression parser tests `lx_word[0]` for operators and `lx_kw` for MOD,
-AND, OR, NOT and the functions.
+What is left in a jump is dispatch and lexing, which proposal 2 cuts.
 
-A name is a variable when it is one letter, or a letter and a digit. No
-keyword has that form, so a variable skips the table. A scratch lookup with
-keywords grouped by first letter cost:
+This proposal replaces the line index. A binary search over 300 lines
+cost 1,368 to 1,388 cycles a jump. The index took 2 bytes a line and a
+pass at RUN. The cache costs about 150 cycles a jump after the first, 1,024 bytes
+whatever the program's size, and keeps `ed_find` as the resolver. The
+index is dropped.
 
-| Name | Cycles |
-|---|---|
-| `A` | 23 |
-| `A1` | 58 |
-| `IF` | 349 |
-| `THEN` | 515 |
-| `NEXT` | 576 |
-| `PEEK` | 637 |
-| `POKE` | 1,012 |
+Open: the number of slots. A site takes at least 11 bytes of program, so
+6,144 bytes hold at most 558 sites. A program with more sites than slots
+shares some. 256 slots is the first guess, and the profile of a real
+program corrects it.
 
-A keyword costs more the further it sits in its letter's group. A hash on
-the length and two letters would cut that. It was not measured.
+## Proposal 2: keywords stored as tokens
 
-simplecpu-cc compiles a switch as CMP and JZ, 5 cycles a case.
+Every keyword becomes one byte when a line is stored, the way the Oric-1
+and the C64 stored them. The byte is 128 plus the keyword's index in
+src/basic/keywords.h. Program text is ASCII, so no other byte reaches 128.
 
-Expected saving: every `lx_is` cycle and 18 cycles a call site, less 5
-cycles a test put back, less the lookups.
+edit.c has one crunch routine. It runs on a line entered at the prompt and
+on a line LOAD stores. It skips text inside quotes. It also skips everything
+after REM, DATA and the bang statement. data.c reads a DATA line in raw mode
+today and is unchanged. A variable is one letter, or a letter and a
+digit. No keyword has that form, so a keyword is never part of a variable
+name. The C64's `PRINTA` problem does not arise.
+
+The lexer reads a token byte as a keyword in one load and sets `lx_kw` to
+the index. A letter starts a variable and never reaches a table.
+`statement` tests `lx_kw` first: 0 is an assignment, and otherwise a
+switch on `lx_kw` picks the statement. The expression parser tests
+`lx_kw` for MOD, AND, OR, NOT and the functions, and `lx_word[0]` for the
+operators. simplecpu-cc compiles a switch as CMP and JZ, 5 cycles a case.
+
+LIST, SAVE and the IDE's bridge translate tokens back to text. LIST prints
+the keyword from keywords.h. SAVE writes text, so a BAS slot and the ROM's
+SRC chunk hold what a person can read. LOAD crunches on the way in.
+src/basic/program.cpp expands a stored line when the IDE reads the program
+and crunches when it writes one. That is one rule in two places, in the
+machine's C and on the host, over the one keywords.h table. keywords_up
+and canonicalLine already have that shape, and a test holds them to one
+result. The same test covers crunch and expand.
+
+RENUM rewrites line numbers after GOTO, GOSUB and THEN. The digits stay
+text, so it works as it does. Its rule that skips text after REM tests
+for the REM token.
+
+A keyword then costs one load, about 50 cycles with the call. The saving
+against the first form of this proposal is the word read and the lookup,
+from the tables above: `IF` 579 and 349, `THEN` 886 and 515, `NEXT` 849
+and 576, `POKE` 849 and 1,012.
 
 | Row | Now | Estimate |
 |---|---|---|
-| `A = A + 1` | 7,138 | about 3,530 |
+| `A = A + 1` | 7,138 | about 3,500 |
 | `A = B * 3 + C` | 8,760 | about 4,750 |
-| `A = PEEK(61440)` | 10,006 | about 5,560 |
-| IF, true | 11,620 | about 6,810 |
-| `FOR`/`NEXT` on two lines, one pass | 4,405 | about 3,600 |
+| `A = PEEK(61440)` | 10,006 | about 4,100 |
+| IF, true | 11,620 | about 4,600 |
+| `FOR`/`NEXT` on two lines, one pass | 4,405 | about 2,200 |
 
-The FOR/NEXT loop gains least, because NEXT's lookup costs 576 cycles every
-pass.
-
-The stored program keeps its text. LIST, SAVE and the IDE's bridge in
-src/basic/program.cpp stay as they are. Storing keywords as numbers when a
-line is stored would also remove most of the lexing. It changes the stored
-format, and every one of those readers with it.
+An assignment has no keyword and gains nothing here beyond the first
+form. The program shrinks too: `PRINT` is one byte in place of five.
 
 ## Proposal 3: what lx_next costs as compiled
 
 `lx_next` runs for every token of every statement, and neither proposal
 above touches its own cycles. Its assembly in the build's basic.asm has two
-patterns that cost more than the machine needs.
+patterns that cost more than the machine needs. The first is lex.c's to
+fix. The second is the compiler's, and the fix belongs in
+src/cc/peephole.cpp, where every C program gains from it.
 
 ### Every read of lx_text[lx_pos] is a 16 bit sum
 
@@ -324,6 +357,57 @@ its compare.
 The second column is an upper bound. A test whose target does not follow
 it still needs one jump.
 
+## Proposal 4: number literals stored with their value
+
+The ZX Spectrum stored a number's binary value behind its digits, so a
+line never converted the digits again. `61440` costs 1,170 cycles a read
+here, and a one digit number 386. Most of that is the conversion, ten
+times a digit through the 16 bit multiply.
+
+The crunch routine of proposal 2 stores a literal in three parts. A
+marker byte, the value as a big-endian word, then the digits as typed. The marker is one
+more byte above 128, after the keywords. The digits keep their spelling,
+so LIST shows `$F000` where `$F000` was typed. The lexer reads the marker,
+loads the word in one instruction and skips the digits. A read then
+costs about the same as an operator, 240 cycles or less.
+
+The value's two bytes can hold any value, a zero or a colon among them.
+So every reader of a stored line skips them by the marker, never by
+looking at them. The readers are the lexer, LIST, SAVE, the crunch
+routine's own scan for quotes, and program.cpp on the host. RENUM expands
+a line, rewrites its targets and crunches the result. So the hidden value
+behind a line number follows the digits.
+
+DATA lines are not crunched and read raw, as before. A literal costs 3
+bytes more than its digits. The tokens of proposal 2 save about 30
+percent of a typical line, so a program still shrinks.
+
+| Row | Now | With proposals 2 and 4 |
+|---|---|---|
+| `A = B * 3 + C` | 8,760 | about 4,400 |
+| `A = PEEK(61440)` | 10,006 | about 3,000 |
+| `POKE 61440, A` | 8,078 | about 3,300 |
+
+## Proposal 5: an operand without an operator skips the descent
+
+`POKE 61440, A` stores one byte. The store is 16 cycles of its 8,078.
+Each of its two operands goes down the whole expression parser to find
+there is no operator after it. The descent is `ex_int`, `ex_or`, `ex_and`,
+`ex_cmp`, `ex_add`, `ex_mul` and `primary`. Every level is a C call that
+saves and restores its live temps. The two descents cost about 1,400
+cycles.
+
+The proposal: `ex_int` looks at the token after a literal or a variable
+first. When that token ends the operand, `ex_int` returns the value and never
+enters the descent. A comma, a colon, a closing bracket or the end of the
+line ends it. Any
+other token takes the descent as before, so precedence is unchanged.
+
+Most operands in a game's hot lines are a bare variable or a literal.
+A POKE's address and value, PEEK's argument and FOR's limit are the
+usual ones. Each saves about 600 cycles. `POKE 61440, A` drops from about
+3,300 after proposals 2 and 4 to about 1,500.
+
 ## The ceiling
 
 The best hand-written code for `A = A + 1` on this CPU is 9 cycles, with A
@@ -363,10 +447,25 @@ walk:   LD D1 <- [D2]
 ```
 
 `t` and `n` are zero page words, `n` the target line. Proposal 1 removes
-the walk from every jump, so this gap then matters only for the index's
-search. A search probe as compiled costs about 150 cycles.
+the walk from every jump after its first, so this gap then costs once a
+site.
 
-A hand-written interpreter that ran stored keyword numbers would dispatch a
-token through a jump table in about 20 cycles, by hand count. `A = A + 1`
+A hand-written interpreter that ran stored keyword numbers would dispatch
+through a jump table. That is about 20 cycles a token, by hand count. `A = A + 1`
 is five tokens. That puts the floor for an interpreted `A = A + 1` at a few
 hundred cycles. The 7,138 measured are 20 or more times that floor.
+
+## Decisions
+
+Eddie decided, after the profile, that every proposal goes in:
+
+- The jump targets are cached. The line index is dropped.
+- Keywords are stored as tokens. SAVE, LOAD and LIST translate them back
+  to text, and so does the IDE's bridge.
+- Number literals are stored with their value, behind a marker.
+- Both patterns of proposal 3 are fixed. `lx_pos` becomes a byte in lex.c,
+  after the audit of its readers. The stored test is fixed in
+  src/cc/peephole.cpp, where every C program gains from it.
+- The operand fast path of proposal 5 goes in with the tokens.
+- The order of work is the cache, then the tokens, the literals and the
+  fast path, then proposal 3.

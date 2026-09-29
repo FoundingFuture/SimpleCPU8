@@ -401,6 +401,11 @@ to 65535 fits. `DOKE 40000,1000` puts 3 in box 40000 and 232 in box
 40001, because 3 times 256 plus 232 is 1000. `DEEK(40000)` reads it back
 as 1000. You will not need them for a long while.
 
+The program sits in boxes too, and `DEEK(8)` is the number of its first
+box. Do not `POKE` into the program while it runs. `RUN` remembers the
+line each `GOTO`, `GOSUB` and `THEN` found, and a jump keeps going where
+the old text sent it.
+
 ## Fonts
 
 A font is the shape of every character. BASIC starts with one of its own,

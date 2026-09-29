@@ -7,7 +7,7 @@ packages/ui/src/basic/ with extract.mjs. The script writes each TypeScript
 string constant to a file with its exact value. bang.c, store.c and data.c
 are new in this tree.
 This BASIC differs from the browser's in its drawing words, in RENUM, in
-DATA, in HEX$ and in its fonts. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
+DATA, in HEX$, in its fonts and in its jump cache. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
 expr.c. `PLOT` draws in the INK colour, where it drew white. `CIRCLE rx,
 ry, fill` draws a ring in INK with an optional fill, where `CIRCLE r`
 filled a disc. main.c sets INK to white at boot. `RENUM start, step` is
@@ -19,6 +19,9 @@ has a raw mode for strings, `lx_raw`, that data.c reads DATA lines with.
 `LOADFONT name`, `LOADFONT` and `SETTEXT w, h` are new in run.c. The
 screen moved to 4 KB at $F000 in basic.h, and term.c reads the grid from
 the GPU into SYS_COLS and SYS_ROWS on the system page.
+run.c keeps the line each GOTO, GOSUB and `THEN n` found while a program
+runs, docs/design/basic-speed.md. A POKE into the program text while it
+runs is not supported.
 A refresh from upstream undoes all of this, so redo it after one.
 
 ## Files

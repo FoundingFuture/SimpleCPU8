@@ -2191,6 +2191,35 @@ TEST_SUITE("basic speed") {
   const std::string SAVE_VEC = "S=DEEK(0):DOKE 0,4660";
   const std::string RESTORE_VEC = "DOKE 0,S";
 
+  // The cycles from the Enter after RUN until the program stops.
+  uint64_t runCycles(const std::string& program) {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, program);
+    for (char ch : std::string("RUN")) {
+      s->pushKey(ch, false);
+      s->runBudget(120000);
+    }
+    s->pushKey(13, false);
+    const uint64_t from = s->m->cycles;
+    bool started = false;
+    for (int i = 0; i < 100000; i++) {
+      s->runBudget(2000);
+      const bool running = s->m->ram[basic::SYS_RUNNING] != 0;
+      if (running) started = true;
+      if (started && !running) break;
+    }
+    return s->m->cycles - from;
+  }
+
+  // Lines numbered from 1, padded with REM lines to n.
+  std::string numberedTo(std::vector<std::string> bodies, size_t n) {
+    while (bodies.size() < n) bodies.push_back("REM FILLER");
+    std::string t;
+    for (size_t i = 0; i < bodies.size(); i++) t += std::to_string(i + 1) + " " + bodies[i] + "\n";
+    return t;
+  }
+
   }  // namespace
 
   TEST_CASE("an operand without an operator: every operator reads as it did before the fast path") {
@@ -2283,5 +2312,134 @@ TEST_SUITE("basic speed") {
       CAPTURE(name);
       CHECK_EQ(runOutput(program), before.at(name));
     }
+  }
+
+  // Proposal 1: the jump cache.
+
+  TEST_CASE("a jump 300 lines down finds its line, and costs what a jump to the next line costs") {
+    // 300 lines. The FOR is on line 2, its NEXT on line 299, and line 3
+    // jumps there over 295 lines of REM.
+    auto far = [](int passes) {
+      std::vector<std::string> b = {"C=0", "FOR I=1 TO " + std::to_string(passes), "GOTO 299"};
+      while (b.size() < 298) b.push_back("REM FILLER");
+      b.push_back("C=C+1:NEXT I");
+      b.push_back("PRINT \"DONE\";C");
+      return numberedTo(b, 300);
+    };
+    auto near = [](int passes) {
+      return numberedTo({"C=0", "FOR I=1 TO " + std::to_string(passes), "GOTO 4", "C=C+1:NEXT I", "PRINT C"}, 5);
+    };
+    CHECK(has(runOutput(far(100)), "DONE100"));
+    // A pass's cost is the difference between 200 passes and 100, so RUN's
+    // own walk over the program drops out.
+    const uint64_t farPass = (runCycles(far(200)) - runCycles(far(100))) / 100;
+    const uint64_t nearPass = (runCycles(near(200)) - runCycles(near(100))) / 100;
+    CAPTURE(farPass);
+    CAPTURE(nearPass);
+    // A walk of 295 lines costs 83,000 cycles a pass. The first pass
+    // walks, and every later one reads the cache.
+    CHECK(farPass < nearPass + nearPass / 5);
+  }
+
+  TEST_CASE("two jump sites on one line keep their own targets") {
+    // A false IF skips the rest of its line and a jump leaves it, so one
+    // pass takes one site. X picks which: 1 takes THEN 60, 2 takes the
+    // GOTO inside the second IF's THEN, 3 takes neither.
+    const std::string program =
+        "10 FOR X=1 TO 3\n"
+        "20 IF X=1 THEN 60:REM\n"
+        "30 IF X>1 THEN IF X=2 THEN GOTO 70\n"
+        "40 PRINT \"N\";X;\n"
+        "50 GOTO 80\n"
+        "60 PRINT \"A\";X;:GOTO 80\n"
+        "70 PRINT \"B\";X;\n"
+        "80 NEXT X\n"
+        "90 FOR X=1 TO 3:IF X=2 THEN 110\n"
+        "100 PRINT \"C\";X;:NEXT X:GOTO 120\n"
+        "110 PRINT \"D\";X;:NEXT X\n"
+        "120 PRINT\n";
+    // Twice, so the second pass of each line reads what the first kept.
+    const std::string twice = "5 FOR K=1 TO 2\n" + program + "130 NEXT K\n";
+    const std::string out = runOutput(twice);
+    CHECK_EQ(countOf(out, "A1B2N3C1D2C3"), 2);
+  }
+
+  TEST_CASE("a computed GOTO is worked out on every pass") {
+    const std::string program =
+        "10 FOR I=1 TO 3\n"
+        "20 GOTO 100+I*10\n"
+        "110 PRINT \"X\";:GOTO 200\n"
+        "120 PRINT \"Y\";:GOTO 200\n"
+        "130 PRINT \"Z\";\n"
+        "200 NEXT I:GOSUB 290+I\n"
+        "210 END\n"
+        "293 PRINT \"!\":RETURN\n"
+        "294 PRINT \"?\":RETURN\n";
+    CHECK(has(runOutput(program), "XYZ?"));
+  }
+
+  TEST_CASE("THERE IS NO LINE is raised when the jump runs, not before") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 FOR I=1 TO 3\n20 PRINT \"P\";I;\n30 IF I=3 THEN 999\n40 GOTO 50\n50 NEXT I\n");
+    type(*s, "RUN", 20000000);
+    CHECK(has(flat(*s), "P1P2P3? THERE IS NO LINE 999 IN LINE 30"));
+    type(*s, "CLS");
+    setProgram(*s, "10 FOR I=1 TO 3\n20 PRINT \"Q\";I;\n30 IF I=3 THEN GOSUB 998\n40 GOTO 50\n50 NEXT I\n");
+    type(*s, "RUN", 20000000);
+    CHECK(has(flat(*s), "Q1Q2Q3? THERE IS NO LINE 998 IN LINE 30"));
+  }
+
+  TEST_CASE("RUN after an edit finds the lines where they moved to") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 FOR I=1 TO 2\n15 GOSUB 100\n18 NEXT I\n20 END\n100 PRINT \"R\";I;:RETURN\n");
+    type(*s, "RUN", 20000000);
+    // Lines typed in above the routine move it and its offset.
+    type(*s, "50 REM A LINE THAT MOVES LINE 100 FURTHER DOWN THE PROGRAM");
+    type(*s, "60 REM AND ANOTHER");
+    type(*s, "100 PRINT \"S\";I;:RETURN");
+    type(*s, "RUN", 20000000);
+    type(*s, "RENUM 100, 5");
+    type(*s, "RUN", 20000000);
+    type(*s, "NEW");
+    type(*s, "10 GOTO 20");
+    type(*s, "20 PRINT \"T\"");
+    type(*s, "RUN", 20000000);
+    const std::string t = flat(*s);
+    CHECK(inOrder(t, {"R1R2", "S1S2", "S1S2", "T"}));
+    CHECK_FALSE(has(t, "?"));
+  }
+
+  TEST_CASE("more jump sites than the cache has slots all keep their targets") {
+    // 280 lines of one GOTO each, visited in a scrambled order, twice. A
+    // site that read another site's target would skip lines or loop.
+    const int n = 280;
+    std::string program = "1 FOR P=1 TO 2:GOTO 1000\n";
+    for (int i = 0; i < n; i++) {
+      const int next = i + 1 < n ? 1000 + ((i + 1) * 97) % n : 9000;
+      program += std::to_string(1000 + (i * 97) % n) + " C=C+1:GOTO " + std::to_string(next) + "\n";
+    }
+    program += "9000 NEXT P:PRINT \"VISITS\";C\n";
+    CHECK(has(runOutput(program), "VISITS560"));
+  }
+
+  TEST_CASE("a jump to a line written in hex keeps its own target") {
+    // GOSUB 100 notes its site, then THEN $32 and GOTO $3C jump. Each must
+    // keep its target at its own site, never at the one noted before.
+    const std::string program =
+        "10 FOR I=1 TO 3\n"
+        "20 GOSUB 100\n"
+        "30 IF I>0 THEN $32\n"
+        "40 PRINT \"BAD\";\n"
+        "50 GOSUB 100:REM\n"
+        "55 GOTO $3C\n"
+        "58 PRINT \"BAD\";\n"
+        "60 NEXT I\n"
+        "70 END\n"
+        "100 PRINT I;:RETURN\n";
+    const std::string out = runOutput(program);
+    CHECK(has(out, "112233"));
+    CHECK_FALSE(has(out, "BAD"));
   }
 }

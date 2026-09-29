@@ -26,6 +26,77 @@ static unsigned int resume_pos;
 
 static char line_buf[LINEMAX];
 
+/* The jump cache. A line number after GOTO, GOSUB or THEN is a constant,
+ * and no statement adds or removes a line while a program runs. So the
+ * record a jump found once stays its target until the program stops.
+ * docs/design/basic-speed.md, proposal 1.
+ *
+ * A slot holds a site and a target. The site is the offset in prog where
+ * the jump's line number starts, the target the offset line_at found. A
+ * site picks its slot by the XOR of its two bytes. Two sites that share a
+ * slot take turns in it and stay correct, since the site is compared on
+ * every read. A line's text starts at offset 3, so no site is 0, and 0
+ * marks an empty slot.
+ *
+ * DESIGN: the cache lives only while rt_run runs, and rt_run empties it on
+ * the way in. A line typed at the prompt never reads or writes it: its
+ * number sits in the input buffer, where an offset names no place in the
+ * program. So an edit, NEW, RENUM or LOAD needs no step of its own to
+ * empty it. The next RUN does. A POKE into the program text while it runs
+ * is not supported, docs/guides/basic.md.
+ */
+#define JCMAX 256
+static unsigned int jc_site[JCMAX];
+static unsigned int jc_target[JCMAX];
+static unsigned char jc_on;
+static unsigned char jc_slot;
+static unsigned int jc_at;
+static unsigned int jc_found;
+
+/* The site of the number after the lexer's token, into jc_at and jc_slot.
+ * 1 when the slot holds its target, which jc_found then holds, and the
+ * digits are never read. jc_at is 0 when there is no site to keep.
+ */
+static unsigned char jc_hit(void)
+{
+    char *t;
+    jc_at = 0;
+    if (jc_on == 0) return 0;
+    /* A pointer that walks reads a byte in two instructions, where
+     * lx_text[i] adds two words first.
+     */
+    t = lx_text + lx_pos;
+    while (*t == 32) t = t + 1;
+    /* THEN B = 1 has no number to look up. A $ starts a hex one. */
+    if ((*t < 48 || *t > 57) && *t != 36) return 0;
+    jc_at = (unsigned int)t - (unsigned int)prog;
+    jc_slot = jc_at ^ (jc_at >> 8);
+    if (jc_site[jc_slot] != jc_at) return 0;
+    jc_found = jc_target[jc_slot];
+    return 1;
+}
+
+/* Keep the target a jump found, at the site jc_hit noted. */
+static void jc_put(unsigned int target)
+{
+    if (jc_at == 0) return;
+    jc_site[jc_slot] = jc_at;
+    jc_target[jc_slot] = target;
+}
+
+/* True when the lexer stands on a number that is the whole operand: the
+ * end of the line or a colon follows it. GOTO N or GOTO 10 * N is worked
+ * out on every run and never kept.
+ */
+static unsigned char lone_number(void)
+{
+    unsigned int q;
+    if (lx_tok != T_NUM) return 0;
+    q = lx_pos;
+    while (lx_text[q] == 32) q = q + 1;
+    return lx_text[q] == 0 || lx_text[q] == 58;
+}
+
 /* What the first error of a command was about, for the message. err_what
  * is what a syntax error expected, err_found what stood there instead.
  */
@@ -340,23 +411,35 @@ static unsigned char statement(void)
     }
 
     if (lx_is("GOTO")) {
+        if (jc_hit()) { pc = jc_found; return 0; }
         lx_next();
         {
             unsigned int p;
+            unsigned char lone;
+            lone = lone_number();
             p = line_at(ex_int());
             if (err) return 0;
+            if (lone) jc_put(p);
             pc = p;
             return 0;
         }
     }
 
     if (lx_is("GOSUB")) {
-        lx_next();
         {
             unsigned int p;
-            p = line_at(ex_int());
-            if (err) return 0;
+            unsigned char lone;
+            if (jc_hit()) {
+                p = jc_found;
+                lone = 0;
+            } else {
+                lx_next();
+                lone = lone_number();
+                p = line_at(ex_int());
+                if (err) return 0;
+            }
             if (ngosub >= GOSUBMAX) { rt_error(E_GOSUBS); return 0; }
+            if (lone) jc_put(p);
             /* The return is the NEXT line: a GOSUB is always the last thing
              * on its line, which is what every small BASIC has assumed.
              */
@@ -383,15 +466,25 @@ static unsigned char statement(void)
         lx_next();
         {
             int cond;
+            unsigned char then;
             cond = ex_int();
             if (err) return 0;
-            if (lx_is("THEN")) lx_next();
+            then = 0;
+            if (lx_is("THEN")) {
+                /* THEN 100 takes the number alone, so its target is kept
+                 * whatever follows it.
+                 */
+                if (cond != 0 && jc_hit()) { pc = jc_found; return 0; }
+                then = cond != 0;
+                lx_next();
+            }
             if (cond == 0) { lx_tok = T_END; return 1; }
             /* THEN 100 is a GOTO, which is how BASIC has always read. */
             if (lx_tok == T_NUM) {
                 unsigned int p;
                 p = line_at(lx_num);
                 if (err) return 0;
+                if (then) jc_put(p);
                 pc = p;
                 return 0;
             }
@@ -726,6 +819,10 @@ void rt_run(void)
     from_for = 0;
     loop_back = 0;
 
+    /* The jump cache starts empty on every RUN. */
+    memset(jc_site, 0, sizeof(jc_site));
+    jc_on = 1;
+
     /* The DATA lines' bytes go where they belong before line 1 runs. */
     dt_pack();
     if (err) { say_error(); running = 0; return; }
@@ -816,6 +913,7 @@ void rt_line(char *text)
     pc = 0;
     cur_line = 0;
     nfor = 0;
+    jc_on = 0;
     run_line(&text[i], 0);
     running = 0;
     if (err) say_error();
