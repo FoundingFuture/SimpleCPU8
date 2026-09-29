@@ -87,86 +87,111 @@ second. The C++ program is not in the tree.
 
 ### Statement costs
 
+Measured again after docs/design/basic-speed.md changed the interpreter,
+with tests/support/basic_profile.cpp on the same programs. They are in
+tests/support/centipede now:
+
+```bash
+build-headless/tests/basic/basic_profile --marks tests/support/centipede/statements.bas --per 500
+```
+
 Each statement stood alone on a line inside a FOR loop of 500 passes. The
-loop's own cost, 5,463 cycles a pass for the FOR, a REM line and the NEXT,
-is taken off. The first row is the exception: it is a whole pass of a loop
-written on one line.
+cost of the same loop on a REM line is taken off. A line numbered below
+256 costs `rt_run` 47 cycles more each time it runs, since its test for
+the end of the program then reads a second byte. So each row is taken
+against a REM loop in its own range. `A=5` and `A=X` are taken against
+the loop at line 120, 2,342 cycles a pass, and the rest against the loop
+at line 1200, 2,201. The first row is a whole pass of a loop written on
+one line.
 
 | Statement | Cycles | In one frame |
 |---|---|---|
-| `FOR I=0 TO 999:NEXT`, one pass of an empty loop | 2,917 | 22 |
-| `A=5` | 3,742 | 17.5 |
-| `A=X` | 4,439 | 14.8 |
-| `LET A=X` | 5,175 | 12.7 |
-| `A=PAD` | 5,200 | 12.6 |
-| `A=X+Y` | 6,019 | 10.9 |
-| `A=X*Y` | 5,846 | 11.2 |
-| `A=X/Y` | 5,954 | 11.0 |
-| `A=X MOD Y` | 6,704 | 9.8 |
-| `A=RND(64)` | 6,852 | 9.6 |
-| `A=S+Y*32+X` | 8,795 | 7.5 |
-| `A=PEEK(S+X)` | 9,906 | 6.6 |
-| `A=DEEK(S+X)` | 10,035 | 6.5 |
-| `POKE S+X,C` | 8,010 | 8.2 |
-| `POKE S+X,C,C` | 10,260 | 6.4 |
-| `POKE S+X,C,C,C,C` | 14,760 | 4.4 |
-| `DOKE S+X,C` | 8,293 | 7.9 |
-| `POKE S+X,PEEK(S+Y)` | 13,618 | 4.8 |
-| `IF X=Y THEN A=1`, false | 6,180 | 10.6 |
-| `IF X<>Y THEN A=1`, true | 10,549 | 6.2 |
-| `IF X=5 AND Y=7 THEN A=1` | 13,579 | 4.8 |
-| `GOSUB` to the second line, and its `RETURN` | 6,271 | 10.5 |
-| `GOSUB` to a line 221 lines down, and its `RETURN` | 68,192 | 1.0 |
+| `FOR I=0 TO 999:NEXT`, one pass of an empty loop | 691 | 94.8 |
+| `A=5` | 1,151 | 56.9 |
+| `A=X` | 1,529 | 42.9 |
+| `LET A=X` | 1,746 | 37.5 |
+| `A=PAD` | 1,415 | 46.3 |
+| `A=X+Y` | 2,868 | 22.9 |
+| `A=X*Y` | 2,932 | 22.4 |
+| `A=X/Y` | 2,960 | 22.1 |
+| `A=X MOD Y` | 2,948 | 22.2 |
+| `A=RND(64)` | 2,222 | 29.5 |
+| `A=S+Y*32+X` | 4,385 | 14.9 |
+| `A=PEEK(S+X)` | 3,827 | 17.1 |
+| `A=DEEK(S+X)` | 3,878 | 16.9 |
+| `POKE S+X,C` | 3,168 | 20.7 |
+| `POKE S+X,C,C` | 4,057 | 16.2 |
+| `POKE S+X,C,C,C,C` | 5,835 | 11.2 |
+| `DOKE S+X,C` | 3,217 | 20.4 |
+| `POKE S+X,PEEK(S+Y)` | 5,466 | 12.0 |
+| `IF X=Y THEN A=1`, false | 2,692 | 24.3 |
+| `IF X<>Y THEN A=1`, true | 3,937 | 16.6 |
+| `IF X=5 AND Y=7 THEN A=1` | 4,978 | 13.2 |
+| `GOSUB` to the second line, and its `RETURN` | 1,122 | 58.4 |
+| `GOSUB` to a line 221 lines down, and its `RETURN` | 1,198 | 54.7 |
 
 What decides the design:
 
-- A statement costs 3,700 to 14,000 cycles. A frame holds 5 to 17 of them.
-- The first value of a POKE costs about 8,000 cycles and each further value
-  2,250. One POKE with a list writes 26 cells in a frame.
-- GOTO, GOSUB and `IF ... THEN` with a line number walk the program from its
-  first line. Each line walked costs about 280 cycles. NEXT goes back to its
-  FOR without a walk.
-- Spaces cost 2 to 6 percent. `A = X + Y` took 6,162 cycles and `A=X+Y`
-  6,019.
+- A statement costs 1,100 to 5,900 cycles. A frame holds 11 to 58 of them.
+- The first value of a POKE costs about 3,200 cycles and each further value
+  890. One POKE with a list writes about 71 cells in a frame.
+- GOTO, GOSUB and `IF ... THEN` with a line number walk the program from
+  its first line once in a RUN. After that they read the line from the
+  jump cache. A GOSUB 221 lines down costs 76 cycles more than one to the
+  second line. NEXT goes back to its FOR without a walk.
+- A line numbered below 256 costs 47 cycles more each time it runs.
+- Spaces cost 4 percent. `A = X + Y` took 2,976 cycles and `A=X+Y`
+  2,868.
 
 ### The numbers the brief asks for
 
+From tests/support/centipede/loops.bas and redraw.bas.
+
 | Measure | Cycles | Result |
 |---|---|---|
-| One POKE a pass, `FOR I=0 TO 999:POKE $F000+I,65:NEXT` | 12,399 a pass | 5.3 POKEs a frame |
-| The same with the address in a variable, `POKE S+I,C` | 12,717 a pass | 5.2 POKEs a frame |
-| A FOR loop over 12 segments, each read, checked and redrawn by the pair rule | 1,208,910 to 1,313,118 | 18.4 to 20.0 frames |
-| One full centipede step with that loop | the same | 18.4 to 20.0 frames |
+| One POKE a pass, `FOR I=0 TO 999:POKE $F000+I,65:NEXT` | 3,605 a pass | 18.2 POKEs a frame |
+| The same with the address in a variable, `POKE S+I,C` | 4,171 a pass | 15.7 POKEs a frame |
+| A FOR loop over 12 segments, each read, checked and redrawn by the pair rule | 422,021 to 447,448 | 6.4 to 6.8 frames |
+| One full centipede step with that loop | the same | 6.4 to 6.8 frames |
 
 And the model this note uses, measured the same way:
 
 | Measure | Cycles | Frames |
 |---|---|---|
-| One step of a 12 segment chain, head and tail only, chain held in variables | 199,443 to 202,822 | 3.04 to 3.09 |
-| The same, with the chain loaded from a RAM record and stored back | 278,853 to 283,501 | 4.26 to 4.33 |
-| The player taking a half step and a shot climbing 2 rows | 197,974 to 217,105 | 3.0 to 3.3 |
-| 40 mushrooms placed with RND | 965,104 | 14.7 |
+| One step of a 12 segment chain, head and tail only, chain held in variables | 65,375 to 75,697 | 1.00 to 1.16 |
+| The same, with the chain loaded from a RAM record and stored back | 94,888 to 106,500 | 1.45 to 1.63 |
+| The player taking a half step and a shot climbing 2 rows | 62,363 to 71,643 | 0.95 to 1.09 |
+| A spider step, half a cell sideways and a row | 50,691 to 71,208 | 0.77 to 1.09 |
+| 40 mushrooms placed with RND | 316,944 | 4.8 |
+| The tick's own lines, each part a bare RETURN, one chain alive | 25,283 | 0.39 |
+| The same with two chains or more | 27,969 | 0.43 |
+| The status line's POKE of six digits, less the loop below | 17,554 | 0.27 |
+| The step prototypes' own loop around a bare RETURN | 6,523 | 0.10 |
 
 Each step alternates between two costs, because a half step alternates
-between an aligned object and a straddling one.
+between an aligned object and a straddling one. The first two chain steps
+cost the most: they fill the jump cache. Every step row includes the
+prototypes' own loop. spider.bas, tick.bas, status.bas and loop.bas are
+new, so the whole tick is measured. spider.bas follows the rules of
+[the spider](#the-spider).
 
 ### The verdict
 
-A full-screen redraw is out of reach. 31 rows of 32 cells, at 26 cells a
-frame, is 38 frames. The game updates only the cells that change.
+A full-screen redraw is still out of reach of a frame. 31 rows of 32
+cells, at 71 cells a frame, is 14 frames. The game updates only the cells
+that change.
 
-A centipede that redraws every segment costs 19 frames a step. That is 3
-steps a second, and the player would wait a third of a second between moves.
-That design cannot carry the game.
+A centipede that redraws every segment costs 6.4 to 6.8 frames a step,
+8.8 to 9.3 steps a second before anything else moves. A centipede whose
+straight body looks the same after a half step costs 1.00 to 1.16 frames
+a step, whatever its length, 5.5 to 6.8 times less. That design stays.
 
-A centipede whose straight body looks the same after a half step costs 3.0
-frames a step, whatever its length. With the player, the shot and the
-spider, one tick takes about 8 frames. The game runs 7 to 8 ticks a second.
-The centipede crosses the 30 columns in about 8 seconds. A shot climbs the
-playfield in 2 seconds.
+With the player, the shot and the spider, one tick takes 2.5 to 2.9
+frames. The game runs 20 to 24 ticks a second. The centipede crosses the
+30 columns in 2.5 to 2.9 seconds. A shot climbs the playfield in 0.6 to
+0.7 seconds.
 
-BASIC carries a slow Centipede. It does not carry the arcade's pace. The
-first open question asks whether this pace is the game Eddie wants.
+The first open question asks whether this pace is the game Eddie wants.
 
 ## The frame budget
 
@@ -185,28 +210,31 @@ Every other tick:
 
 On an event only:
 
-- a hit, up to about 5 frames once, to find the segment and cut the chain
-- the status line, about half a frame, when the score or the lives change
+- a hit, to find the segment and cut the chain
+- the status line, 0.27 frames, when the score or the lives change
 
 | Chains alive | Chain steps a tick | Frames a tick | Ticks a second | Steps a second for each chain |
 |---|---|---|---|---|
-| 1 | 1, held in variables | about 8 | 7.6 | 7.6 |
-| 2 | 1, from a record | about 9 | 6.6 | 3.3 |
-| 4 | 1, from a record | about 9 | 6.6 | 1.7 |
-| 12 | 1, from a record | about 9 | 6.6 | 0.55 |
+| 1 | 1, held in variables | 2.47 to 2.93 | 20.5 to 24.3 | 20.5 to 24.3 |
+| 2 | 1, from a record | 2.96 to 3.44 | 17.4 to 20.3 | 8.7 to 10.1 |
+| 4 | 1, from a record | 2.96 to 3.44 | 17.4 to 20.3 | 4.4 to 5.1 |
+| 12 | 1, from a record | 2.96 to 3.44 | 17.4 to 20.3 | 1.5 to 1.7 |
 
-The player, shot and chain figures are the measurements above. The rest are
-estimates from the statement table. A spider step is 2.2 frames and a hit 5.
-The loop and its checks take half a frame, and so does the status line.
+Every figure in the table is measured. A tick is the tick's own lines,
+one chain step, the player and the shot, and half a spider step. The
+spider steps every other tick. The parts have the prototypes' loop,
+6,523 cycles, taken off. A hit has no prototype, and it is not in the
+table.
 
 The game has no clock to fall behind. BASIC cannot read the frame counter,
 since GPU_FRAME is a port and BASIC has no IN. A tick takes as long as its
 work, and play never waits.
 
 What falls behind is the centipede. One chain step a tick keeps the player
-moving 6 to 8 times a second. After cuts, each chain waits its turn, so the
-pieces slow down. Two chain steps a tick would halve that slowdown at 13
-frames a tick, and the player would move 4.5 times a second.
+moving 17 to 24 times a second. After cuts, each chain waits its turn, so
+the pieces slow down. A second chain step from a record adds 1.35 to 1.53
+frames to a tick, 4.3 to 5.0 frames in all. The player would then move 12
+to 14 times a second. That tick's own extra lines are not measured.
 
 ## The screen
 
@@ -749,15 +777,18 @@ seeds from the clock, so a player sees a new field each time.
 | $E230 | 3 | the field: count, first row, rows |
 | $F000 | 1024 | the screen, BASIC's own |
 
-BASIC's C stack grows down from $F000. Across the prototypes the lowest byte
-it wrote was $EE0D, 499 bytes down. The tables end at $E232, 3,035 bytes
-below that.
+BASIC's C stack grows down from $F000. Across the prototypes, measured
+with basic_profile, the lowest byte it wrote was $EE96, 362 bytes down.
+The tables end at $E232, 3,172 bytes below that.
 
-The program text holds 6144 bytes, `PROGMAX` in src/basic/basic.h, DATA
-lines included. The prototypes measured about 842 bytes for 22 lines of
-chain step, and about 508 bytes for 9 lines of player and shot. The whole game estimates
-at 5.5 to 6 KB. So the hot lines carry no spaces and no REM, and the fit is
-not certain. See the open questions.
+The program holds 16,384 bytes, `PROGMAX` in src/basic/basic.h, DATA
+lines included. It stores each keyword as one byte and each number with
+its value. The chain step's 21 lines in chain.bas store in 804 bytes, and
+the step from a record, 19 lines, in 891. The player and the shot, 8
+lines, store in 506 bytes, and the spider, 12 lines, in 524. A prototype
+stores in 0.89 to 1.08 of its listing. The whole game was estimated at
+5.5 to 6 KB of listing, so it fits with room to spare. Spaces in a hot
+line cost 4 percent, so the hot lines still carry none.
 
 ### Variables
 
@@ -953,32 +984,35 @@ the CLAUDE.md repository map arrive with the code.
 
 ### The pace
 
-One chain steps 7.6 times a second. The centipede crosses the playfield in
-about 8 seconds, and a shot takes 2 seconds to climb it. After cuts, each
-chain moves once per turn round all of them. Four chains move 1.7 times a
-second each.
+One chain steps 20.5 to 24.3 times a second. The centipede crosses the
+playfield in 2.5 to 2.9 seconds, and a shot climbs it in 0.6 to 0.7
+seconds. After cuts, each chain moves once per turn round all of them.
+Four chains move 4.4 to 5.1 times a second each.
 
 The options, with their trade-offs:
 
-- Accept the pace, with one chain step a tick. The player keeps 6.6 ticks a
-  second or better. The pieces slow as they multiply.
+- Accept the pace, with one chain step a tick. The player keeps 17 ticks
+  a second or better. The pieces slow as they multiply.
 - Two chain steps a tick. The pieces keep twice the speed, and the player
-  drops to 4.5 ticks a second whenever two chains are alive.
-- Stop here. BASIC as it stands does not carry the arcade's pace, and the
-  brief rules out C.
+  drops to 12 to 14 ticks a second whenever two chains are alive.
+- Slow the tick on purpose with `WAIT`, so the pace no longer follows the
+  work. The waits are not measured.
 
 ### A faster interpreter
 
-Where the cycles go, read from src/basic. `statement()` in run.c finds a
-statement by comparing its word against 31 names in turn, with assignment
-after all of them. POKE is the 27th. Every token is lexed from text each
-time its line runs. GOTO and GOSUB find a line by walking from the first.
+Done. docs/design/basic-speed.md made the changes this question asked
+for. Stored keyword tokens replace the string compares, a switch on the
+token picks a statement, and a cache of jump targets replaces the walk.
+Numbers are stored with their value, and the lexer and the compiler's
+peephole pass were tightened. The note measures each change.
 
-A faster interpreter would take stored keyword tokens, a jump table for the
-statements, and a line index or cached jump targets. That reaches edit.c,
-lex.c and run.c, LIST and SAVE, and src/basic/program.cpp, the IDE's bridge
-to the stored program. Nothing here measures what it would buy. It is a
-design of its own.
+On the prototypes a chain step went from 3.04 to 3.09 frames to 1.00 to
+1.16. The player and the shot went from 3.0 to 3.3 frames to 0.95 to
+1.09.
+
+What is left: a line numbered below 256 costs 47 cycles more each time it
+runs. [The program structure](#program-structure) puts the tick and the
+chain step on such lines. The note's ceiling section has the rest.
 
 ### Program memory
 
