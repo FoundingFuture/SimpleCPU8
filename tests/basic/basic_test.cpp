@@ -17,6 +17,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -2146,3 +2148,140 @@ TEST_SUITE("fonts and the text grid") {
   }
 }
 
+
+// docs/design/basic-speed.md: the jump cache, keywords stored as tokens,
+// literals stored with their value, the operand fast path and the lexer's
+// byte wide position. Every test here passes on the interpreter before
+// those changes too, unless it says otherwise.
+TEST_SUITE("basic speed") {
+  namespace {
+
+  // The binary operators, loosest first.
+  const std::vector<std::string> OPERATORS = {"OR", "AND", "=", "<>", "<", ">", "<=", ">=", "+", "-", "*", "/", "MOD"};
+
+  // What RUN printed, from the row under its echo.
+  std::string runOutput(const std::string& program) {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, program);
+    type(*s, "RUN", 200000000);
+    return after(text(*s), ">RUN\n");
+  }
+
+  // One line per operator. `left` is the bare operand in front of it and
+  // `wrap` puts the expression in its place in a statement. Each operator
+  // stands alone, then before a * and then before a +, so a fast path that
+  // took the wrong precedence would print a different number.
+  std::string operatorLines(int first, const std::string& setup, const std::string& left, const std::string& right,
+                            const std::function<std::string(const std::string&)>& wrap) {
+    std::string p = std::to_string(first) + " " + setup + "\n";
+    int n = first + 1;
+    for (const std::string& op : OPERATORS) {
+      for (const std::string& tail : {std::string(), std::string(" * 2"), std::string(" + 2")}) {
+        p += std::to_string(n++) + " " + wrap(left + " " + op + " " + right + tail) + "\n";
+      }
+    }
+    return p;
+  }
+
+  // The addresses are around $6000, above the interpreter's globals and
+  // below its stack, where nothing else lives. The bang vector is the word at 0. A comparison's 0 or 1 as an address
+  // reaches it, so it holds a known word while the program runs and gets
+  // its own back at the end.
+  const std::string SAVE_VEC = "S=DEEK(0):DOKE 0,4660";
+  const std::string RESTORE_VEC = "DOKE 0,S";
+
+  }  // namespace
+
+  TEST_CASE("an operand without an operator: every operator reads as it did before the fast path") {
+    // POKE: the operator in the value, then in the address. Each address
+    // line writes its own number, and the bytes it could reach are shown
+    // at the end, so an address worked out wrong shows on the screen.
+    auto poke = [](const std::string& left, const std::string& addr) {
+      return operatorLines(10, SAVE_VEC + ":V=7:M=24576", left, "3", [&](const std::string& e) {
+               return "POKE " + addr + ", " + e + ":PRINT PEEK(" + addr + ");\" \";";
+             }) +
+             operatorLines(100, "M=24576:I=1", addr == "M" ? "M" : "24576", "1",
+                           [](const std::string& e) { return "POKE " + e + ", I:I=I+1"; }) +
+             "190 FOR J=24570 TO 24585:PRINT PEEK(J);\" \";:NEXT:PRINT PEEK(0);PEEK(1);PEEK(49152)\n" + "200 " +
+             RESTORE_VEC + "\n";
+    };
+    // PEEK: addresses around 24576 hold known bytes, and 0 and 1 the vector.
+    auto peek = [](const std::string& left) {
+      return "5 " + SAVE_VEC + "\n6 FOR I=24560 TO 24600:POKE I,I-24500:NEXT\n" +
+             operatorLines(10, "V=24576", left, "1", [](const std::string& e) { return "PRINT PEEK(" + e + ");\" \";"; }) +
+             "200 " + RESTORE_VEC + "\n";
+    };
+    // A FOR limit: how many passes the loop makes.
+    auto forLimit = [](const std::string& left) {
+      return operatorLines(10, "V=7", left, "3", [](const std::string& e) {
+        return "N=0:FOR I=1 TO " + e + ":N=N+1:NEXT:PRINT N;\" \";";
+      });
+    };
+    auto ifThen = [](const std::string& left) {
+      return operatorLines(10, "V=7", left, "3", [](const std::string& e) {
+        return "PRINT \"|\";:IF " + e + " THEN PRINT 1;";
+      });
+    };
+    const std::vector<std::pair<std::string, std::string>> programs = {
+        {"POKE after a variable", poke("V", "M")},
+        {"POKE after a literal", poke("7", "24576")},
+        {"PEEK after a variable", peek("V")},
+        {"PEEK after a literal", peek("24576")},
+        {"FOR limit after a variable", forLimit("V")},
+        {"FOR limit after a literal", forLimit("7")},
+        {"IF after a variable", ifThen("V")},
+        {"IF after a literal", ifThen("7")},
+    };
+    // The screens the interpreter printed before the fast path, recorded
+    // from the ROM at commit f185ac8.
+    const std::map<std::string, std::string> before = {
+        {"POKE after a variable",
+             "1 1 1 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0\n"
+             "1 1 1 10 13 12 4 1 6 21 42 23 2 4 4 1 2 3\n"
+             "0 0 0 0 29 28 34 30 36 27 0 0 0 0 0 0 3824\n"
+             "35\n"
+             "READY\n"
+             ">\x7f"},
+        {"POKE after a literal",
+             "1 1 1 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0\n"
+             "1 1 1 10 13 12 4 1 6 21 42 23 2 4 4 1 2 3\n"
+             "0 0 0 0 29 28 34 30 36 27 0 0 0 0 0 0 3824\n"
+             "35\n"
+             "READY\n"
+             ">\x7f"},
+        {"PEEK after a variable",
+             "52 52 52 52 52 52 18 18 18 52 52 52 18 18\n"
+             "18 52 52 52 18 18 18 52 52 52 77 78 79 75\n"
+             "74 77 76 0 78 76 0 78 18 18 0 READY\n"
+             ">\x7f"},
+        {"PEEK after a literal",
+             "52 52 52 52 52 52 18 18 18 52 52 52 18 18\n"
+             "18 52 52 52 18 18 18 52 52 52 77 78 79 75\n"
+             "74 77 76 0 78 76 0 78 18 18 0 READY\n"
+             ">\x7f"},
+        {"FOR limit after a variable",
+             "1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1\n"
+             "1 1 1 10 13 12 4 1 6 21 42 23 2 4 4 1 2 3\n"
+             "READY\n"
+             ">\x7f"},
+        {"FOR limit after a literal",
+             "1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1\n"
+             "1 1 1 10 13 12 4 1 6 21 42 23 2 4 4 1 2 3\n"
+             "READY\n"
+             ">\x7f"},
+        {"IF after a variable",
+             "|1|1|1|1|1|1||||1|1|1||||1|1|1||||1|1|1|1|\n"
+             "1|1|1|1|1|1|1|1|1|1|1|1|1|1READY\n"
+             ">\x7f"},
+        {"IF after a literal",
+             "|1|1|1|1|1|1||||1|1|1||||1|1|1||||1|1|1|1|\n"
+             "1|1|1|1|1|1|1|1|1|1|1|1|1|1READY\n"
+             ">\x7f"},
+    };
+    for (const auto& [name, program] : programs) {
+      CAPTURE(name);
+      CHECK_EQ(runOutput(program), before.at(name));
+    }
+  }
+}
