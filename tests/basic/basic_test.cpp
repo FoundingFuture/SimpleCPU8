@@ -1460,11 +1460,12 @@ TEST_SUITE("basic program codec") {
   }
   TEST_CASE("a program that does not fit is cut at a whole line") {
     std::string text;
-    for (int i = 1; i <= 100; i++) text += std::to_string(i) + " " + std::string(100, 'X') + "\n";
+    for (int i = 1; i <= 200; i++) text += std::to_string(i) + " " + std::string(100, 'X') + "\n";
     const std::vector<uint8_t> p = basic::encodeProgram(text);
     CHECK(p.size() < basic::PROGRAM_MAX);
     const std::string back = basic::decodeProgram(p);
     CHECK(back.find("1 XXX") == 0);
+    CHECK(back.find("\n200 XXX") == std::string::npos);
     CHECK(back.back() == '\n');
   }
   TEST_CASE("a merge keeps what each side changed") {
@@ -1636,17 +1637,18 @@ TEST_SUITE("DATA, READ and RESTORE") {
   TEST_CASE("DATA that does not fit after the program stops RUN") {
     auto s = boot();
     settle(*s);
-    // 23 remarks of 248 bytes, one of 145 and a DATA line of 248 leave 44
+    // 65 remarks of 246 bytes, one of 99 and a DATA line of 248 leave 44
     // bytes free, and the line holds 120 values.
     std::string program;
-    for (int n = 1; n <= 23; n++) program += std::to_string(n) + " REM " + std::string(240, 'X') + "\n";
-    program += "24 REM " + std::string(137, 'X') + "\n";
+    for (int n = 1; n <= 65; n++) program += std::to_string(n) + " REM " + std::string(240, 'X') + "\n";
+    program += "66 REM " + std::string(93, 'X') + "\n";
     program += "1000 DATA 1";
     for (int i = 1; i < 120; i++) program += ",1";
     program += "\n";
+    REQUIRE_EQ(basic::PROGRAM_MAX - basic::encodeProgram(program).size(), 44u);
     setProgram(*s, program);
     type(*s, "RUN");
-    CHECK(has(flat(*s), "THE PROGRAM MEMORY IS FULL: 6144 BYTES AT MOST IN LINE 1000"));
+    CHECK(has(flat(*s), "THE PROGRAM MEMORY IS FULL: 16384 BYTES AT MOST IN LINE 1000"));
   }
 
   TEST_CASE("DATA(n) gives the address, after an address too, and writes nothing") {
@@ -2212,8 +2214,10 @@ TEST_SUITE("basic speed") {
     return p;
   }
 
-  // The addresses are around $6000, above the interpreter's globals and
-  // below its stack, where nothing else lives. A comparison's 0 or 1 as an
+  // The addresses are around $6000, in the block store.c reads and writes
+  // for SAVE, LOAD and CATALOG, which these programs never run. Free RAM
+  // starts above $B000, where every address is negative as a number and
+  // the comparisons would read differently from the screens recorded. A comparison's 0 or 1 as an
   // address reaches the bang vector, the word at 0. So the vector holds a
   // known word while the program runs, and gets its own back at the end.
   const std::string SAVE_VEC = "S=DEEK(0):DOKE 0,4660";
@@ -2443,12 +2447,12 @@ TEST_SUITE("basic speed") {
     // 280 lines of one GOTO each, visited in a scrambled order, twice. A
     // site that read another site's target would skip lines or loop.
     const int n = 280;
-    std::string program = "1 FOR P=1 TO 2:GOTO 100\n";
+    std::string program = "1 FOR P=1 TO 2:GOTO 1000\n";
     for (int i = 0; i < n; i++) {
-      const int next = i + 1 < n ? 100 + ((i + 1) * 97) % n : 900;
-      program += std::to_string(100 + (i * 97) % n) + " C=C+1:GOTO " + std::to_string(next) + "\n";
+      const int next = i + 1 < n ? 1000 + ((i + 1) * 97) % n : 9000;
+      program += std::to_string(1000 + (i * 97) % n) + " C=C+1:GOTO " + std::to_string(next) + "\n";
     }
-    program += "900 NEXT P:PRINT \"VISITS\";C\n";
+    program += "9000 NEXT P:PRINT \"VISITS\";C\n";
     REQUIRE(basic::encodeProgram(program).size() < basic::PROGRAM_MAX - 3);
     CHECK(has(runOutput(program), "VISITS560"));
   }

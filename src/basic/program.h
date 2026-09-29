@@ -22,7 +22,7 @@
 namespace sc8::basic {
 
 // The largest program the interpreter keeps, PROGMAX in basic.h.
-constexpr size_t PROGRAM_MAX = 6144;
+constexpr size_t PROGRAM_MAX = 16384;
 
 // System page addresses the bridge reads, mirrored from basic.h.
 constexpr uint16_t SYS_PROG = 0x08;

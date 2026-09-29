@@ -214,7 +214,7 @@ static void say_error(void)
     term_puts("? ");
     if (err == E_SYNTAX) term_puts("SYNTAX ERROR");
     else if (err == E_NOLINE) { term_puts("THERE IS NO LINE "); term_putn(err_arg); }
-    else if (err == E_MEMORY) term_puts("THE PROGRAM MEMORY IS FULL: 6144 BYTES AT MOST");
+    else if (err == E_MEMORY) term_puts("THE PROGRAM MEMORY IS FULL: 16384 BYTES AT MOST");
     else if (err == E_TYPE) term_puts("A STRING CANNOT BE USED AS A NUMBER");
     else if (err == E_DIVZERO) term_puts("DIVISION BY ZERO");
     else if (err == E_RANGE) term_puts("NUMBER OUT OF RANGE");

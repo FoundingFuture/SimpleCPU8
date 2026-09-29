@@ -6,7 +6,11 @@
  */
 
 /* The text goes through one block, larger than PROGMAX. A listing spends
- * five digits and a space per line where a record spends three bytes.
+ * five digits and a space per line where a record spends three bytes. A
+ * keyword takes one byte stored and its word listed, and a number three
+ * more bytes stored than listed. The Centipede prototypes list at 0.89 to
+ * 1.20 times their stored size. TEXTMAX keeps the 4 to 3 over PROGMAX the
+ * block always had, rounded up to 22 KB.
  */
 static char textbuf[TEXTMAX];
 

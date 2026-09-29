@@ -24,7 +24,7 @@
 /* How much room the program text and the string heap get. Both are plain
  * global arrays: this machine has 64K of data RAM and no allocator.
  */
-#define PROGMAX  6144
+#define PROGMAX  16384
 #define HEAPMAX  3072
 #define LINEMAX  80
 
@@ -297,7 +297,7 @@ void bang_init(void);
 void bang_run(char *text);
 
 /* store.c: the storage driver, the chain's built-in link. */
-#define TEXTMAX  8192
+#define TEXTMAX  22528
 
 unsigned char sto_bang(char *text);
 void sto_autorun(void);
