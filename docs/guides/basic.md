@@ -370,7 +370,9 @@ puts a value in.
 ```
 
 Box 50000 now holds 77. A box holds one byte, which is a number from 0
-to 255.
+to 255. An address above 32767 prints as a negative number, so
+`PRINT 50000` shows -15536, and `POKE` and `PEEK` take it either way:
+`POKE -15536,7` fills box 50000.
 
 The screen is made of boxes too. Box 61440, which is `$F000`, is the top
 left cell of the text screen. The 42 boxes after it are the rest of the

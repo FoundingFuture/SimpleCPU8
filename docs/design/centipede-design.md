@@ -76,14 +76,20 @@ Measured before any rule was settled.
 
 ### How it was measured
 
-A scratch C++ program booted each BASIC test program on the machine tests/project runs
-BASIC on, tests/support/basic_session.h. It runs the optimal microcode, which
-simplecpu-make picks for a BASIC project. The program wrote a counter to $E7FF at each
-checkpoint, and the C++ program stamped the cycle count at every change.
+tests/support/basic_profile.cpp measures, built by the basic_profile
+target. Its `--marks` mode boots BASIC on the machine tests/project runs
+BASIC on, tests/support/basic_session.h, with the optimal microcode that
+simplecpu-make picks for a BASIC project. It stores a program, holds PAD
+with `--pad` and types RUN. The program writes a counter to $E7FF at each
+checkpoint, and basic_profile prints the cycles between the changes.
+`--per N` gives a loop's cost a pass, less the first loop's.
+
+The programs are the prototypes in tests/support/centipede, one for each
+measure below. Its README says which measures what.
 
 One frame is 65,536 cycles at every speed setting, `CYCLES_PER_FRAME` in
 src/vm/computer.h. The frame-locked speed runs one frame each 60th of a
-second. The C++ program is not in the tree.
+second.
 
 ### Statement costs
 
@@ -435,13 +441,13 @@ A mover changes a side by adding or subtracting. Putting kind k into the
 right side adds k, and taking it out subtracts k. The left side goes in
 steps of 16.
 
-An addition costs 1,580 cycles over a bare variable, `A=X+Y` against `A=X`.
-A PEEK costs 5,467, `A=PEEK(S+X)` against `A=X`. A table built from DATA
-would cost 3,900 cycles more per lookup than the arithmetic, so there is
+An addition costs 1,339 cycles over a bare variable, `A=X+Y` against `A=X`.
+A PEEK costs 2,298, `A=PEEK(S+X)` against `A=X`. A table built from DATA
+would cost 959 cycles more per lookup than the arithmetic, so there is
 none.
 
-Where both cells of a write are constants, DOKE writes the pair for 8,293
-cycles against 10,260 for a POKE with two values.
+Where both cells of a write are constants, DOKE writes the pair for 3,217
+cycles against 4,057 for a POKE with two values.
 
 A hit decodes a code once, by column:
 
@@ -1016,19 +1022,10 @@ chain step on such lines. The note's ceiling section has the rest.
 
 ### Program memory
 
-6144 bytes, against an estimate of 5.5 to 6 KB. Raising `PROGMAX` in
-src/basic/basic.h would take:
-
-- the message `THE PROGRAM MEMORY IS FULL: 6144 BYTES AT MOST` in run.c, and
-  the tests that pin it
-- `TEXTMAX`, 8192, in store.c, the buffer LOAD and AUTORUN read a
-  program's text through
-- docs/basic-system-page.md, docs/basic-data-design.md and
-  docs/guides/basic.md, which name 6144
-
-The RAM is there: BASIC's C stack has about 40,000 bytes below $F000 and the
-prototypes used 499. Without the change, the spider or the lone heads are
-what would go.
+Closed. `PROGMAX` in src/basic/basic.h is 16,384, and `TEXTMAX` in
+store.c 22,528. The whole game was estimated at 5.5 to 6 KB of listing,
+and a prototype stores in 0.89 to 1.08 of its listing, so the game fits
+with room. The spider and the lone heads stay.
 
 ### Copying glyphs in the font editor
 
