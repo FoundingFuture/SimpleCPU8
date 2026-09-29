@@ -415,6 +415,18 @@ A POKE's address and value, PEEK's argument and FOR's limit are the
 usual ones. Each saves about 600 cycles. `POKE 61440, A` drops from about
 3,300 after proposals 2 and 4 to about 1,500.
 
+| Row | After proposals 1, 2 and 4 | Estimate | Measured |
+|---|---|---|---|
+| `POKE 61440, A` | 3,079 | about 1,500 | 2,583 |
+| `A = PEEK(61440)` | 3,571 | | 3,383 |
+| `A = A + 1` | 3,605 | | 3,731 |
+| IF, false | 3,454 | | 3,580 |
+
+Measured with proposals 1, 2, 4 and 5 in. The compiler expands `ex_or`
+and `ex_and` into `ex_int`, so a bare operand's descent cost about 400
+cycles, not 600. The look past the operand costs 126 cycles where an
+operator follows it, as in `A = A + 1`.
+
 ## The ceiling
 
 The best hand-written code for `A = A + 1` on this CPU is 9 cycles, with A

@@ -342,8 +342,28 @@ static int ex_or(void)
     return a;
 }
 
+/* PERF DECISION: an operand that ends the expression skips the descent.
+ * A number or a variable with a comma, a colon, a closing bracket or the
+ * end of the line after it is its own value. ex_or down to primary would
+ * find no operator on the way and come back with the same one. Any other
+ * token after it takes the descent, so precedence is untouched.
+ * docs/design/basic-speed.md, proposal 5.
+ */
 int ex_int(void)
 {
+    unsigned char *t;
+    int v;
+    if (lx_tok == T_NUM || IS_INTVAR) {
+        t = (unsigned char *)lx_text + lx_pos;
+        while (*t == 32) t = t + 1;
+        if (*t == 0 || *t == 58 || *t == 44 || *t == 41) {
+            if (lx_tok == T_NUM) v = lx_num;
+            else v = vars[var_slot()];
+            lx_next();
+            return v;
+        }
+    }
+    /* One call, so the compiler expands ex_or here once. */
     return ex_or();
 }
 

@@ -34,6 +34,8 @@ byte first, then the digits as typed. lex.c loads the value and steps
 over the digits. A line keeps values for as many numbers as fit in 250
 bytes, and the rest stay digits. `0b1010` is new, a binary number, in
 lex.c, in the store and in data.c's byte check.
+ex_int in expr.c returns a bare number or variable at once when a comma,
+a colon, a closing bracket or the end of the line follows it.
 A refresh from upstream undoes all of this, so redo it after one.
 
 ## Files

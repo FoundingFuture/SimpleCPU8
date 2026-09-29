@@ -2161,12 +2161,38 @@ TEST_SUITE("basic speed") {
   // The binary operators, loosest first.
   const std::vector<std::string> OPERATORS = {"OR", "AND", "=", "<>", "<", ">", "<=", ">=", "+", "-", "*", "/", "MOD"};
 
+  // Type RUN and run until READY shows under its echo, in slices, so a
+  // short program costs a short run. A program still going after `slices`
+  // slices, one waiting at INPUT say, is left where it is.
+  void runToEnd(Session& s, int slices = 20000) {
+    for (char ch : std::string("RUN")) {
+      s.pushKey(ch, false);
+      s.runBudget(120000);
+    }
+    s.pushKey(13, false);
+    for (int i = 0; i < slices; i++) {
+      s.runBudget(20000);
+      if (s.m->ram[basic::SYS_RUNNING] == 0 && has(after(text(s), ">RUN\n"), "READY")) break;
+    }
+    s.runBudget(200000);
+  }
+
+  // A line typed in to be stored, with the short run a store needs.
+  void enter(Session& s, const std::string& line) {
+    for (char ch : line) {
+      s.pushKey(static_cast<unsigned char>(ch), false);
+      s.runBudget(20000);
+    }
+    s.pushKey(13, false);
+    s.runBudget(1000000);
+  }
+
   // What RUN printed, from the row under its echo.
   std::string runOutput(const std::string& program) {
     auto s = boot();
     settle(*s);
     setProgram(*s, program);
-    type(*s, "RUN", 200000000);
+    runToEnd(*s);
     return after(text(*s), ">RUN\n");
   }
 
@@ -2592,7 +2618,7 @@ TEST_SUITE("basic speed") {
     for (const std::string& l : lines) program += l + "\n";
     auto s = boot();
     settle(*s);
-    for (const std::string& l : lines) type(*s, l);
+    for (const std::string& l : lines) enter(*s, l);
     // Stored as bytes: the program is shorter than its text.
     CHECK(storedProgram(*s).size() < program.size());
     // The listing shows a keyword typed in small letters in capitals.
@@ -2626,7 +2652,7 @@ TEST_SUITE("basic speed") {
       const size_t sp = lower.find(' ');
       lower = std::to_string(std::stoi(lower.substr(0, sp)) + 5) + lower.substr(sp);
       for (const std::string& line : {l, lower}) {
-        type(*s, line);
+        enter(*s, line);
         program += line + "\n";
       }
     }
@@ -2718,8 +2744,8 @@ TEST_SUITE("basic speed") {
       CAPTURE(program);
       auto s = boot();
       settle(*s);
-      type(*s, program);
-      type(*s, "RUN", 20000000);
+      enter(*s, program);
+      runToEnd(*s, 400);
       std::string got = after(flat(*s), ">RUN ");
       while (!got.empty() && got.back() == ' ') got.pop_back();
       CHECK_EQ(got, screenAfter);
@@ -2758,7 +2784,7 @@ TEST_SUITE("basic speed") {
     for (const std::string& l : lines) program += l + "\n";
     auto s = boot();
     settle(*s);
-    for (const std::string& l : lines) type(*s, l);
+    for (const std::string& l : lines) enter(*s, l);
     CHECK(listed(*s) == lines);
     type(*s, "!SAVE \"NUM\"");
     REQUIRE(s->slots.size() == 1);
@@ -2782,7 +2808,7 @@ TEST_SUITE("basic speed") {
     auto s = boot();
     settle(*s);
     for (const std::string& l : everyLiteralLines()) {
-      type(*s, l);
+      enter(*s, l);
       program += l + "\n";
     }
     CHECK(storedProgram(*s) == basic::encodeProgram(program));
@@ -2807,7 +2833,7 @@ TEST_SUITE("basic speed") {
     auto s = boot();
     settle(*s);
     setProgram(*s, "10 DATA 0b111111111\n");
-    type(*s, "RUN", 20000000);
+    runToEnd(*s);
     CHECK(has(flat(*s), "A DATA VALUE IS ONE BYTE: -128 TO 255 IN LINE 10"));
   }
 
@@ -2834,5 +2860,28 @@ TEST_SUITE("basic speed") {
     CHECK(stored == basic::encodeProgram(line + "\n"));
     type(*s, "RUN", 40000000);
     CHECK(has(text(*s), ">RUN\n7\nREADY"));
+  }
+
+  // Proposal 5: an operand without an operator skips the descent.
+
+  TEST_CASE("a bare operand skips the expression parser's descent") {
+    // A pass of the loop with the statement, less a pass with a REM line
+    // in its place. With proposals 1, 2 and 4 in, POKE 24576, A cost 2,374
+    // cycles there, two descents through the parser included. With the
+    // fast path it measured 1,893.
+    auto loop = [](const std::string& st) {
+      return numberedTo({"A=7", "FOR I=1 TO 200", st, "NEXT I", "END"}, 5);
+    };
+    const uint64_t base = runCycles(loop("REM"));
+    const uint64_t poke = (runCycles(loop("POKE 24576, A")) - base) / 200;
+    CAPTURE(poke);
+    CHECK(poke < 2100);
+  }
+
+  TEST_CASE("an operand ends at a comma, a colon, a closing bracket or the end of the line") {
+    CHECK(has(runOutput("10 A=7:B=24576:POKE B,A:PRINT PEEK(B);:PRINT A\n"), "77"));
+    CHECK(has(runOutput("10 A=3:FOR I=1 TO A:PRINT I;:NEXT\n"), "123"));
+    CHECK(has(runOutput("10 A=3:PRINT HEX$(A,2);CHR$(65)\n"), "03A"));
+    CHECK(has(runOutput("10 A=3:IF A THEN PRINT \"T\"\n"), "T"));
   }
 }
