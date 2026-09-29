@@ -12,7 +12,7 @@ static unsigned char ngosub;
  * body shares the FOR's line or follows it.
  */
 static unsigned int for_line[FORMAX];
-static unsigned int for_pos[FORMAX];
+static unsigned char for_pos[FORMAX];
 static int for_var[FORMAX];
 static int for_to[FORMAX];
 static int for_step[FORMAX];
@@ -22,7 +22,7 @@ static unsigned char nfor;
  * the FOR's line to pick up again.
  */
 static unsigned int cur_line;
-static unsigned int resume_pos;
+static unsigned char resume_pos;
 
 static char line_buf[LINEMAX];
 
@@ -92,7 +92,7 @@ static void jc_put(unsigned int target)
  */
 static unsigned char lone_number(void)
 {
-    unsigned int q;
+    unsigned char q;
     if (lx_tok != T_NUM) return 0;
     q = lx_pos;
     while (lx_text[q] == 32) q = q + 1;
@@ -800,7 +800,7 @@ static unsigned char statement(void)
  * sent the program back to the line its FOR is on. The FOR itself is not
  * run again: re-running it would reset the counter for ever.
  */
-static void run_line(char *text, unsigned int pos)
+static void run_line(char *text, unsigned char pos)
 {
     unsigned char r;
     lx_seek(text, pos);

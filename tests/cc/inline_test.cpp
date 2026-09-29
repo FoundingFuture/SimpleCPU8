@@ -4,6 +4,7 @@
 #include <doctest.h>
 
 #include <string>
+#include <vector>
 
 #include "harness.h"
 
@@ -79,5 +80,43 @@ TEST_SUITE("inlining") {
         "static int h(int x) { return g(x) * 2; }\n"
         "int a; int main(void) { int k = 5; a = k * 3 + h(k) + k; return 0; }\n");
     CHECK_EQ(r.i16("a"), 15 + 210 + 5);
+  }
+
+  TEST_CASE("an inlined test that only decides a branch jumps from its compare") {
+    // docs/design/basic-speed.md, proposal 3. isdig's answer used to be
+    // stored as 0 or 1, loaded back and tested. The compares now jump.
+    const std::string src =
+        "static unsigned char isdig(unsigned char c) { return c >= 48 && c <= 57; }\n"
+        "static unsigned char ishex(unsigned char c) { return isdig(c) || (c >= 65 && c <= 70); }\n"
+        "unsigned char n; unsigned char h;\n"
+        "int main(void) {\n"
+        "  unsigned char *s; unsigned char i;\n"
+        "  s = \"12A3G/:0\";\n"
+        "  for (i = 0; s[i]; i++) { if (isdig(s[i])) n = n + 1; if (ishex(s[i])) h = h + 1; }\n"
+        "  return 0;\n"
+        "}\n";
+    const Ran r = ran(src);
+    CHECK_EQ(r.u8("n"), 4);
+    CHECK_EQ(r.u8("h"), 5);
+    // No byte is stored and loaded straight back for a JZ or a JNZ.
+    std::vector<std::string> ins;
+    size_t at = 0;
+    const std::string a = compile(src);
+    while (at < a.size()) {
+      size_t end = a.find('\n', at);
+      if (end == std::string::npos) end = a.size();
+      const std::string line = a.substr(at, end - at);
+      at = end + 1;
+      if (line.empty() || line[0] != ' ') continue;
+      ins.push_back(line.substr(line.find_first_not_of(' ')));
+    }
+    for (size_t i = 0; i + 2 < ins.size(); i++) {
+      if (ins[i].rfind("LD [__t", 0) != 0 || ins[i].find("] <- A") == std::string::npos) continue;
+      const std::string slot = ins[i].substr(3, ins[i].find(']') - 2);
+      const bool reload = ins[i + 1] == "LD A <- " + slot;
+      const bool tested = ins[i + 2].rfind("JZ ", 0) == 0 || ins[i + 2].rfind("JNZ ", 0) == 0;
+      CAPTURE(ins[i]);
+      CHECK_FALSE((reload && tested));
+    }
   }
 }

@@ -6,10 +6,11 @@
 // correct, and leaves patterns a person would never write: a byte stored
 // to a temp and loaded straight back, a temp written and then written
 // again before anything reads it, a jump to the very next line. The pass
-// removes those, and nothing else. It never moves a line, and every
-// removal is proven safe on straight-line code: at a label, a jump, a
-// call or anything it does not recognise, it assumes the worst and keeps
-// the line.
+// removes those. It also points a jump at where its target jumps on to,
+// turns a conditional jump over a JMP round, and lets an inlined test's
+// compare jump where its answer's test would have gone. It never moves a
+// line, and every change is proven safe: at a label, a jump, a call or
+// anything it does not recognise, it assumes the worst and keeps the line.
 #pragma once
 
 #include <string>

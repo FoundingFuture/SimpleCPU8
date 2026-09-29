@@ -74,13 +74,13 @@ void term_readline(char *buf);
 
 /* lex.c: one line of source, a token at a time. */
 extern char *lx_text;      /* the line being read */
-extern unsigned int lx_pos;  /* where the cursor is in it */
+extern unsigned char lx_pos;  /* where the cursor is in it, a line being 250 bytes at most */
 extern unsigned char lx_tok;  /* the token just read */
 extern int lx_num;         /* its value, when it is a number */
 extern char lx_word[12];   /* its text, when it is a name or a keyword */
 extern unsigned char lx_len;  /* how long that text is */
 extern unsigned int lx_str;  /* heap offset, when it is a string */
-extern unsigned int lx_tokpos;  /* where the token last read starts in lx_text */
+extern unsigned char lx_tokpos;  /* where the token last read starts in lx_text */
 /* 1 while data.c reads a DATA line. A string then stays in the text:
  * lx_str is the index of its first character and lx_len its length.
  * Nothing goes on the heap, so walking DATA lines leaves no garbage.
@@ -101,7 +101,7 @@ extern unsigned char lx_kw;
 /* Fill the keyword table. Once, before anything reads a line. */
 void lx_init(void);
 void lx_start(char *text);
-void lx_seek(char *text, unsigned int pos);
+void lx_seek(char *text, unsigned char pos);
 void lx_next(void);
 /* True when the token is the keyword, name or punctuation word spells. A
  * keyword's byte compares by its text. It is for the paths that run once.

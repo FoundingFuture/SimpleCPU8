@@ -2,6 +2,7 @@
 
 #include <doctest.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -102,5 +103,79 @@ TEST_SUITE("peephole") {
     CHECK_EQ(remap[2], 0);
     CHECK_EQ(remap[3], 1);
     CHECK_EQ(remap[4], 2);
+  }
+
+  // docs/design/basic-speed.md, proposal 3: an inlined test's answer, built
+  // as 0 or 1 in a temp only for a jump to test it.
+
+  TEST_CASE("an answer tested by JZ jumps from its compare") {
+    const auto in = lines({"LD A <- [c]", "CMP A, 48", "JC skip", "CMP A, 58", "JC yes", ":skip:", "LD A <- 0",
+                           "JMP done", ":yes:", "LD A <- 1", ":done:", "LD [__t0+1] <- A", ":inl_isdig:",
+                           "LD A <- [__t0+1]", "JZ else", "LD A <- 7", "LD [y] <- A", "RET", ":else:", "LD A <- 9",
+                           "LD [y] <- A", "RET"});
+    // The false arm reaches else, the true arm goes on in place. The
+    // compare's jump to the false arm goes straight to else.
+    CHECK(peephole(in) == lines({"LD A <- [c]", "CMP A, 48", "JC else", "CMP A, 58", "JNC else", ":skip:", ":yes:",
+                                 ":done:", ":inl_isdig:", "LD A <- 7", "LD [y] <- A", "RET", ":else:", "LD A <- 9",
+                                 "LD [y] <- A", "RET"}));
+  }
+
+  TEST_CASE("an answer tested by JNZ jumps from its compare") {
+    const auto in = lines({"LD A <- [c]", "CMP A, 65", "JC skip", "CMP A, 71", "JC yes", ":skip:", "LD A <- 0",
+                           "JMP done", ":yes:", "LD A <- 1", ":done:", "LD [__t0+1] <- A", "LD A <- [__t0+1]",
+                           "JNZ hit", "LD A <- 1", "LD [y] <- A", "RET", ":hit:", "LD A <- 2", "LD [y] <- A", "RET"});
+    CHECK(peephole(in) == lines({"LD A <- [c]", "CMP A, 65", "JC done", "CMP A, 71", "JC hit", ":skip:", ":yes:",
+                                 ":done:", "LD A <- 1", "LD [y] <- A", "RET", ":hit:", "LD A <- 2", "LD [y] <- A", "RET"}));
+  }
+
+  TEST_CASE("an answer read again keeps its byte and its test") {
+    // The byte is read after the test, so it must hold the answer there.
+    const auto in = lines({"CMP A, 48", "JC yes", "LD A <- 0", "JMP done", ":yes:", "LD A <- 1", ":done:",
+                           "LD [__t0+1] <- A", "LD A <- [__t0+1]", "JZ else", "LD A <- 5", "ADD A <- [__t0+1]",
+                           "LD [y] <- A", "RET", ":else:", "RET"});
+    CHECK(peephole(in) == in);
+  }
+
+  TEST_CASE("an answer another return also reaches keeps its test") {
+    // A second return of the inlined function jumps to its end label with
+    // its own answer in the temp.
+    const auto in = lines({"LD [__t0+1] <- A", "LD A <- [x]", "JNZ inl_f", "CMP A, 48", "JC yes", "LD A <- 0",
+                           "JMP done", ":yes:", "LD A <- 1", ":done:", "LD [__t0+1] <- A", ":inl_f:",
+                           "LD A <- [__t0+1]", "JZ else", "LD A <- 7", "LD [y] <- A", "RET", ":else:", "RET"});
+    const auto out = peephole(in);
+    CHECK(std::find(out.begin(), out.end(), "        JZ else") != out.end());
+  }
+
+  TEST_CASE("an answer whose A a path still reads keeps its test") {
+    const auto in = lines({"CMP A, 48", "JC yes", "LD A <- 0", "JMP done", ":yes:", "LD A <- 1", ":done:",
+                           "LD [__t0+1] <- A", "LD A <- [__t0+1]", "JZ else", "LD [y] <- A", "RET", ":else:",
+                           "LD [z] <- A", "RET"});
+    CHECK(peephole(in) == in);
+  }
+
+  TEST_CASE("a jump to a JMP goes where the JMP goes") {
+    // No jump reaches hop then, so what it held goes too.
+    CHECK(peephole(lines({"LD A <- [c]", "JZ hop", "OUTA 1", "RET", ":hop:", "JMP far", "RET", ":far:", "OUTA 2",
+                          "RET"})) == lines({"LD A <- [c]", "JZ far", "OUTA 1", "RET", ":hop:", ":far:", "OUTA 2", "RET"}));
+  }
+
+  TEST_CASE("a conditional jump over a JMP turns round") {
+    CHECK(peephole(lines({"LD A <- [c]", "JZ on", "JMP away", ":on:", "OUTA 1", "RET", ":away:", "OUTA 2", "RET"})) ==
+          lines({"LD A <- [c]", "JNZ away", ":on:", "OUTA 1", "RET", ":away:", "OUTA 2", "RET"}));
+  }
+
+  TEST_CASE("code after a RET that no jump reaches goes") {
+    CHECK(peephole(lines({"OUTA 1", "RET", ":lost:", "OUTA 2", "RET"})) == lines({"OUTA 1", "RET", ":lost:"}));
+  }
+
+  TEST_CASE("code after a RET stays where a jump reaches it or a barrier stands") {
+    const auto in = lines({"LD A <- [c]", "JZ found", "OUTA 1", "RET", ":found:", "OUTA 2", "RET"});
+    CHECK(peephole(in) == in);
+    std::vector<std::string> fenced = lines({"OUTA 1", "RET"});
+    fenced.emplace_back(BARRIER_MARK);
+    fenced.emplace_back("asm_entry: LD A <- 1");
+    fenced.emplace_back("        RET");
+    const auto out = peephole(fenced);
+    CHECK(std::find(out.begin(), out.end(), "asm_entry: LD A <- 1") != out.end());
   }
 }

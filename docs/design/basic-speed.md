@@ -350,15 +350,24 @@ its compare.
 
 ### Expected saving
 
-| Row | Byte wide lx_pos | Tests jump directly | Both |
-|---|---|---|---|
-| `A = A + 1` | 377 | 251 | 628 |
-| `A = B * 3 + C` | 520 | 354 | 874 |
-| `A = PEEK(61440)` | 559 | 376 | 935 |
-| IF, false | 637 | 423 | 1,060 |
+| Row | Byte wide lx_pos | Measured | Tests jump directly | Measured | Both | Measured |
+|---|---|---|---|---|---|---|
+| `A = A + 1` | 377 | 396 | 251 | 164 | 628 | 560 |
+| `A = B * 3 + C` | 520 | 553 | 354 | 246 | 874 | 799 |
+| `A = PEEK(61440)` | 559 | 335 | 376 | 130 | 935 | 465 |
+| IF, false | 637 | 404 | 423 | 138 | 1,060 | 542 |
 
 The second column is an upper bound. A test whose target does not follow
 it still needs one jump.
+
+Measured on top of proposals 1, 2, 4 and 5, so the rows had fewer
+tokens to read than the estimates assumed. The byte wide `lx_pos` was
+measured first, then the compiler's fix on top of it. The fix also
+threads a jump to a JMP, turns a conditional jump over a JMP round and
+drops code no jump reaches. The BASIC ROM went from 17,419 instructions
+to 16,980. In `A = A + 1` the stored tests in `lx_next` went from 303,629
+cycles to 55,095 over the run, and the address sums from 801,580 to
+18,072.
 
 ## Proposal 4: number literals stored with their value
 

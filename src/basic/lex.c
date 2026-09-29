@@ -3,13 +3,17 @@
 #include "keywords.h"
 
 char *lx_text;
-unsigned int lx_pos;
+/* PERF DECISION: a byte. A line is 250 bytes at most, and lx_text[lx_pos]
+ * then costs a load and an indexed load, where a word position cost a 16
+ * bit sum first. docs/design/basic-speed.md, proposal 3.
+ */
+unsigned char lx_pos;
 unsigned char lx_tok;
 int lx_num;
 char lx_word[12];
 unsigned int lx_str;
 unsigned char lx_len;
-unsigned int lx_tokpos;
+unsigned char lx_tokpos;
 unsigned char lx_raw;
 unsigned char lx_kw;
 
@@ -115,7 +119,7 @@ void lx_start(char *text)
 /* Start reading part way along a line. NEXT uses it to pick a FOR's body
  * up again without re-reading the FOR.
  */
-void lx_seek(char *text, unsigned int pos)
+void lx_seek(char *text, unsigned char pos)
 {
     lx_text = text;
     lx_pos = pos;
@@ -126,7 +130,7 @@ void lx_next(void)
 {
     unsigned char c;
     unsigned char i;
-    unsigned int start;
+    unsigned char start;
 
     /* lx_kw is 0 but for a keyword, and lx_word[0] 0 but for a name or
      * punctuation, so IS_PUNCT and a test of lx_kw need no lx_tok first.
