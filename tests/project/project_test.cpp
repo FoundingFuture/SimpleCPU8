@@ -42,6 +42,73 @@ void write(const fs::path& p, const std::string& text) {
 
 }  // namespace
 
+// Save as in the IDE writes the sources itself. The rest of a project,
+// its README and its assets, comes along through copyProjectFiles.
+TEST_SUITE("copying a project's other files") {
+  TEST_CASE("a flat project's assets go into assets/, and its README with them") {
+    TempDir from;
+    TempDir to;
+    write(from.path / "main.asm", "        HLT\n");
+    write(from.path / "ship.png", "PNG bytes");
+    write(from.path / "tune.wav", "WAV bytes");
+    write(from.path / "README.md", "# Flat\nThe readme.\n");
+    const project::Created c = project::copyProjectFiles(project::layoutOf(from.path), to.path);
+    REQUIRE_MESSAGE(c.error.empty(), c.error);
+    auto text = [](const fs::path& p) {
+      std::ifstream in(p);
+      return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    CHECK_EQ(text(to.path / "assets" / "ship.png"), "PNG bytes");
+    CHECK_EQ(text(to.path / "assets" / "tune.wav"), "WAV bytes");
+    CHECK_EQ(text(to.path / "README.md"), "# Flat\nThe readme.\n");
+    // The sources are Save as's to write, not this.
+    CHECK_FALSE(fs::exists(to.path / "main.asm"));
+    CHECK_FALSE(fs::exists(to.path / "assets" / "main.asm"));
+    CHECK_EQ(c.files.size(), 3u);
+  }
+
+  TEST_CASE("a project with src/ brings every file in its assets/") {
+    TempDir from;
+    TempDir to;
+    write(from.path / "src" / "main.c", "int main(void) { return 0; }\n");
+    write(from.path / "assets" / "ball.png", "ball");
+    write(from.path / "assets" / "wall.font", "font");
+    write(from.path / "README.md", "# Nested\n");
+    const project::Created c = project::copyProjectFiles(project::layoutOf(from.path), to.path);
+    REQUIRE_MESSAGE(c.error.empty(), c.error);
+    CHECK(fs::exists(to.path / "assets" / "ball.png"));
+    CHECK(fs::exists(to.path / "assets" / "wall.font"));
+    CHECK(fs::exists(to.path / "README.md"));
+    CHECK_FALSE(fs::exists(to.path / "src" / "main.c"));
+    // The copy builds with the assets where the larger layout looks.
+    write(to.path / "src" / "main.c", "int main(void) { return 0; }\n");
+    const project::Layout l = project::layoutOf(to.path);
+    CHECK_EQ(project::assetFiles(l).size(), 2u);
+  }
+
+  TEST_CASE("an asset of the same name in the target is replaced") {
+    TempDir from;
+    TempDir to;
+    write(from.path / "src" / "main.asm", "        HLT\n");
+    write(from.path / "assets" / "ship.png", "new");
+    write(to.path / "assets" / "ship.png", "old");
+    REQUIRE(project::copyProjectFiles(project::layoutOf(from.path), to.path).error.empty());
+    std::ifstream in(to.path / "assets" / "ship.png");
+    CHECK_EQ(std::string(std::istreambuf_iterator<char>(in), {}), "new");
+  }
+
+  TEST_CASE("a project saved as its own folder copies nothing") {
+    TempDir t;
+    write(t.path / "src" / "main.asm", "        HLT\n");
+    write(t.path / "assets" / "ship.png", "ship");
+    write(t.path / "README.md", "# Same\n");
+    const project::Created c = project::copyProjectFiles(project::layoutOf(t.path), t.path);
+    CHECK(c.error.empty());
+    CHECK(c.files.empty());
+    CHECK(fs::exists(t.path / "assets" / "ship.png"));
+  }
+}
+
 TEST_SUITE("project layouts") {
   TEST_CASE("an empty path is the working directory, as a bare file name's parent is") {
     const project::Layout l = project::layoutOf(fs::path("pong.asm").parent_path());

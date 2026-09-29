@@ -352,12 +352,21 @@ void Ide::createProject(const std::string& dir, project::Kind kind) {
 
 // Save every document into a folder, in the larger layout, and make that
 // folder the project. This is how a scratch project or an opened ROM
-// gets a home.
+// gets a home. A project that has a folder already brings its README and
+// its assets along: they are part of the project as much as the sources.
 void Ide::saveProjectAs(const std::string& dir) {
   const fs::path root = fs::absolute(dir);
   std::error_code ec;
   fs::create_directories(root / "src", ec);
   fs::create_directories(root / "assets", ec);
+  if (!projectDir_.empty()) {
+    const project::Created c = project::copyProjectFiles(layout(), root);
+    for (const fs::path& f : c.files) note("wrote " + f.string());
+    if (!c.error.empty()) {
+      note(c.error + ". The project stays where it was.");
+      return;
+    }
+  }
   if (!fs::exists(root / "README.md", ec)) std::ofstream(root / "README.md") << "# " << root.filename().string() << "\n";
   if (!fs::exists(root / ".gitignore", ec)) std::ofstream(root / ".gitignore") << "build/\n";
   projectDir_ = root.string();

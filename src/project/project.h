@@ -70,6 +70,14 @@ struct Layout {
 // Read a folder's shape. The build directory is not created here.
 Layout layoutOf(const std::filesystem::path& dir);
 
+// Copy a project's files other than its sources into the folder to, in
+// the larger layout. The README goes to to/README.md and every asset file
+// to to/assets/, replacing a file of the same name. These are the files a
+// ROM carries beside the sources. The IDE's Save as writes the sources
+// itself and calls this for the rest. A project saved as its own folder
+// copies nothing. The files written come back, or an error message.
+Created copyProjectFiles(const Layout& from, const std::filesystem::path& to);
+
 // The loaders a compiler or an assembler resolves an asset name with. A
 // conversion note, when one comes back, is appended to notes.
 Assets loaders(const Layout& layout, std::vector<std::string>* notes);
