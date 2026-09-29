@@ -158,6 +158,11 @@ struct Built {
 // Compile and assemble. Nothing is written to disk.
 Built build(const Layout& layout, const Options& opts);
 
+// The same with the sources given, where the folder would be read. The
+// title, the assets and the files the ROM carries still come from the
+// folder. The IDE builds an example this way, from its open documents.
+Built build(const Layout& layout, const std::vector<Source>& sources, const Options& opts);
+
 // The same from sources in memory. Errors name the sources by their names
 // under `where`, a folder shown in messages. `base` is a cartridge whose
 // program stands in when the sources hold no .c and no .asm: an opened

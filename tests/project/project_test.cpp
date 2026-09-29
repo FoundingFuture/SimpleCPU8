@@ -43,6 +43,46 @@ void write(const fs::path& p, const std::string& text) {
 
 }  // namespace
 
+// The IDE builds an example from its open documents, since it never writes
+// them into the example's folder. Everything else comes from the folder.
+TEST_SUITE("a build from sources in memory") {
+  TEST_CASE("the folder's own sources build what the folder builds") {
+    TempDir t;
+    write(t.path / "src" / "main.asm", "        HLT\n.data\nship: .file('ship.bin')\n");
+    write(t.path / "assets" / "ship.bin", "AB");
+    write(t.path / "README.md", "# Ships\n");
+    const project::Layout l = project::layoutOf(t.path);
+    const project::Built disk = project::build(l, {});
+    REQUIRE_MESSAGE(disk.cartridge, (disk.errors.empty() ? std::string() : disk.errors[0]));
+    const project::Built mem =
+        project::build(l, {{"main.asm", "        HLT\n.data\nship: .file('ship.bin')\n"}}, {});
+    REQUIRE(mem.cartridge);
+    CHECK(encodeCartridge(*mem.cartridge) == encodeCartridge(*disk.cartridge));
+  }
+
+  TEST_CASE("an edited source builds as edited, with the folder's title and assets") {
+    TempDir t;
+    write(t.path / "src" / "main.asm", "        HLT\n");
+    write(t.path / "assets" / "ship.bin", "AB");
+    write(t.path / "README.md", "# Ships\n");
+    const project::Layout l = project::layoutOf(t.path);
+    const project::Built mem = project::build(
+        l, {{"main.asm", "        LD A <- 7\n        LD [r] <- A\n        HLT\n.ram\nr: ds 1\n"}}, {});
+    REQUIRE_MESSAGE(mem.cartridge, (mem.errors.empty() ? std::string() : mem.errors[0]));
+    CHECK_EQ(mem.instructions, 3u);
+    bool titled = false;
+    for (const auto& [k, v] : mem.cartridge->meta) titled = titled || (k == "title" && v == "Ships");
+    CHECK(titled);
+    bool carried = false;
+    for (const auto& [name, bytes] : mem.cartridge->sources) carried = carried || name == "assets/ship.bin";
+    CHECK(carried);
+    // Nothing was written: the folder's source is as it was, and no ROM.
+    std::ifstream in(t.path / "src" / "main.asm");
+    CHECK_EQ(std::string(std::istreambuf_iterator<char>(in), {}), "        HLT\n");
+    CHECK_FALSE(fs::exists(t.path / "build"));
+  }
+}
+
 // Save as in the IDE writes the sources itself. The rest of a project,
 // its README and its assets, comes along through copyProjectFiles.
 TEST_SUITE("copying a project's other files") {

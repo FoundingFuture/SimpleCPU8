@@ -52,4 +52,7 @@ else()
 endif()
 
 target_include_directories(simplecpu-ide PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+# File, Open example lists the checkout's examples/, as the tests find it.
+# A distribution will look elsewhere.
+target_compile_definitions(simplecpu-ide PRIVATE SC8_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
 target_link_libraries(simplecpu-ide PRIVATE sc8::vm sc8::basic sc8::cc sc8::project rlimgui imgui sc8_warnings)

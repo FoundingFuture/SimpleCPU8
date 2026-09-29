@@ -834,6 +834,10 @@ Built build(const Layout& layout, const Options& opts) {
     }
   }
   if (auto t = readText(layout.sources / "microcode.txt")) sources.push_back({"microcode.txt", *t});
+  return build(layout, sources, opts);
+}
+
+Built build(const Layout& layout, const std::vector<Source>& sources, const Options& opts) {
   std::vector<std::string> notes;
   Assets assets = loaders(layout, &notes);
   const std::vector<fs::path> assetPaths = assetFiles(layout);

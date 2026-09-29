@@ -57,10 +57,63 @@ DocKind docKindOf(const std::string& name) {
 
 // ---- the project
 
+namespace {
+
+// The checkout's examples/, which the build names. A distribution will
+// name another folder.
+fs::path examplesRoot() { return fs::path(SC8_EXAMPLES_DIR); }
+
+// True when dir is inside examples/, or is it, however it is spelled.
+bool insideExamples(const fs::path& dir) {
+  std::error_code ec;
+  const fs::path root = fs::weakly_canonical(examplesRoot(), ec);
+  const fs::path at = fs::weakly_canonical(fs::absolute(dir, ec), ec);
+  if (root.empty() || at.empty()) return false;
+  auto r = root.begin();
+  auto a = at.begin();
+  for (; r != root.end(); ++r, ++a) {
+    if (a == at.end() || *a != *r) return false;
+  }
+  return true;
+}
+
+// The README's first line without its hashes, or empty.
+std::string readmeTitle(const fs::path& dir) {
+  std::ifstream in(dir / "README.md");
+  std::string first;
+  if (!std::getline(in, first)) return "";
+  while (!first.empty() && (first.front() == '#' || first.front() == ' ')) first.erase(first.begin());
+  return first;
+}
+
+}  // namespace
+
+void Ide::readExamples() {
+  examples_.clear();
+  std::error_code ec;
+  for (const project::ExampleKind& k : project::EXAMPLE_KINDS) {
+    ExampleGroup g{k.label, {}};
+    for (const auto& entry : fs::directory_iterator(examplesRoot() / k.folder, ec)) {
+      if (!entry.is_directory()) continue;
+      g.items.push_back({entry.path().filename().string(), readmeTitle(entry.path()), entry.path().string()});
+    }
+    std::sort(g.items.begin(), g.items.end(), [](const Example& a, const Example& b) { return a.name < b.name; });
+    if (!g.items.empty()) examples_.push_back(std::move(g));
+  }
+}
+
+bool Ide::refuseExample(const std::string& what) {
+  if (!example_) return false;
+  note("not " + what + ": " + projectTitle_ + " is an example and stays as it is. File, Save project as keeps a "
+       "copy of your own.");
+  return true;
+}
+
 void Ide::newScratchProject() {
   // A sprite belongs to the project it came from, so it closes with it.
   sprite_.close();
   projectDir_.clear();
+  example_ = false;
   projectTitle_ = "scratch";
   romBase_.reset();
   romFiles_.clear();
@@ -133,6 +186,7 @@ std::vector<Ide::AssetEntry> Ide::assetList() const {
 }
 
 void Ide::addAsset(const std::string& path) {
+  if (refuseExample("added")) return;
   const fs::path from(path);
   const std::string name = from.filename().string();
   for (const AssetEntry& a : assetList()) {
@@ -167,6 +221,7 @@ void Ide::addAsset(const std::string& path) {
 }
 
 void Ide::removeAsset(const std::string& name) {
+  if (refuseExample("removed")) return;
   if (sprite_.isOpen() && sprite_.name() == name) sprite_.close();
   if (!projectDir_.empty()) {
     const fs::path file = layout().assets / name;
@@ -189,6 +244,9 @@ void Ide::removeAsset(const std::string& name) {
 void Ide::removeDoc(const std::string& name) {
   const auto it = std::find_if(docs_.begin(), docs_.end(), [&](const Doc& d) { return d.name == name; });
   if (it == docs_.end()) return;
+  // A document added to an example lives only in memory, and goes freely.
+  std::error_code exists;
+  if (fs::exists(layout().sources / name, exists) && refuseExample("removed")) return;
   if (!projectDir_.empty()) {
     const fs::path file = layout().sources / name;
     std::error_code ec;
@@ -236,6 +294,7 @@ void Ide::openProject(const std::string& dir) {
   }
   sprite_.close();
   projectDir_ = fs::absolute(dir).string();
+  example_ = insideExamples(projectDir_);
   projectTitle_ = l.name;
   romBase_.reset();
   romFiles_.clear();
@@ -266,6 +325,7 @@ void Ide::openProject(const std::string& dir) {
   focusFiles_ = true;
   buildProject(false);
   note("opened project " + projectTitle_ + " in " + projectDir_);
+  if (example_) note(projectTitle_ + " is an example: it stays as it is. File, Save project as keeps your copy.");
   levelForProject();
 }
 
@@ -294,6 +354,7 @@ void Ide::openRomAsProject(const std::string& path) {
   }
   sprite_.close();
   projectDir_.clear();
+  example_ = false;
   romPath_ = fs::absolute(path).string();
   projectTitle_ = fs::path(path).stem().string();
   for (const auto& [k, v] : r.cartridge->meta) {
@@ -341,6 +402,10 @@ void Ide::openRomAsProject(const std::string& path) {
 }
 
 void Ide::createProject(const std::string& dir, project::Kind kind) {
+  if (insideExamples(dir)) {
+    note("not created: " + dir + " is inside the examples, which stay as they are");
+    return;
+  }
   project::Created c = project::create(dir, kind);
   if (!c.error.empty()) {
     note(c.error);
@@ -356,6 +421,10 @@ void Ide::createProject(const std::string& dir, project::Kind kind) {
 // its assets along: they are part of the project as much as the sources.
 void Ide::saveProjectAs(const std::string& dir) {
   const fs::path root = fs::absolute(dir);
+  if (insideExamples(root)) {
+    note("not saved: " + root.string() + " is inside the examples, which stay as they are. Pick a folder of your own");
+    return;
+  }
   std::error_code ec;
   fs::create_directories(root / "src", ec);
   fs::create_directories(root / "assets", ec);
@@ -370,6 +439,7 @@ void Ide::saveProjectAs(const std::string& dir) {
   if (!fs::exists(root / "README.md", ec)) std::ofstream(root / "README.md") << "# " << root.filename().string() << "\n";
   if (!fs::exists(root / ".gitignore", ec)) std::ofstream(root / ".gitignore") << "build/\n";
   projectDir_ = root.string();
+  example_ = false;
   projectTitle_ = root.filename().string();
   for (Doc& d : docs_) saveDoc(d);
   if (sprite_.dirty()) sprite_.save();
@@ -414,6 +484,7 @@ bool Ide::layOut(Doc& doc) {
 }
 
 void Ide::saveDoc(Doc& doc) {
+  if (refuseExample("saved")) return;
   if (projectDir_.empty()) {
     note("the project has no folder yet: use File, Save project as");
     return;
@@ -444,6 +515,7 @@ void Ide::saveAll() {
 // project with no folder yet asks for one first, and every document
 // goes there.
 std::string Ide::saveTarget() const {
+  if (example_) return "Save project as...";
   if (!projectDir_.empty()) return "Save project";
   if (!romPath_.empty()) return "Save into " + fs::path(romPath_).filename().string() + (romSaveConfirmed_ ? "" : "...");
   return "Save project...";
@@ -485,11 +557,14 @@ void Ide::saveProject() {
     else askRomSave_ = true;
     return;
   }
-  if (projectDir_.empty()) {
+  if (projectDir_.empty() || example_) {
     const fs::path startIn = !settings_.projectsDir.empty() && fs::is_directory(settings_.projectsDir)
                                  ? fs::path(settings_.projectsDir)
                                  : fs::current_path();
-    dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", startIn, {},
+    dialog_.open(FileDialog::Mode::OpenFolder,
+                 example_ ? "Save the example as your own project: pick or make its folder"
+                          : "Save the project: pick or make its folder",
+                 startIn, {},
                  [this](const fs::path& p) { saveProjectAs(p.string()); });
     return;
   }
@@ -515,7 +590,11 @@ void Ide::buildProject(bool run) {
   messages_.clear();
   project::Options o;
   project::Built built;
-  if (!projectDir_.empty()) {
+  if (example_) {
+    // The open documents, with the example's own assets and README. The
+    // ROM stays in memory, so nothing lands in the example's build/.
+    built = project::build(layout(), sources(), o);
+  } else if (!projectDir_.empty()) {
     saveAll();
     project::Written w = project::buildAndWrite(layout(), o);
     built = std::move(w.built);

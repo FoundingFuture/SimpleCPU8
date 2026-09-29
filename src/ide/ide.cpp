@@ -111,6 +111,7 @@ Ide::Ide()
   settings_.load();
   loadDisplay();
   audio_.start();
+  readExamples();
   newScratchProject();
 }
 
@@ -916,6 +917,20 @@ void Ide::menuBar() {
       dialog_.open(FileDialog::Mode::OpenFolder, "Open a project folder", startIn, {},
                    [this](const fs::path& p) { openProject(p.string()); });
     }
+    if (ImGui::BeginMenu("Open example")) {
+      if (examples_.empty()) {
+        ImGui::MenuItem((std::string("No examples in ") + SC8_EXAMPLES_DIR).c_str(), nullptr, false, false);
+      }
+      for (const ExampleGroup& g : examples_) {
+        if (!ImGui::BeginMenu(g.label.c_str())) continue;
+        for (const Example& e : g.items) {
+          if (ImGui::MenuItem(e.name.c_str())) openProject(e.dir);
+          if (!e.title.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", e.title.c_str());
+        }
+        ImGui::EndMenu();
+      }
+      ImGui::EndMenu();
+    }
     if (ImGui::MenuItem("Open ROM...")) {
       dialog_.open(FileDialog::Mode::OpenFile, "Open a ROM", startIn, {".rom"},
                    [this](const fs::path& p) { openRomAsProject(p.string()); });
@@ -1134,7 +1149,7 @@ void Ide::quitDialog() {
           askRomSave_ = true;
           romSaveQuits_ = true;
         }
-      } else if (projectDir_.empty()) {
+      } else if (projectDir_.empty() || example_) {
         askQuit_ = false;
         ImGui::CloseCurrentPopup();
         dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", fs::current_path(), {},
