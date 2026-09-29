@@ -17,6 +17,14 @@
 //   basic_profile --tokens STMT    lx_next per token, STMT in the loop.
 //   basic_profile --pair A B       Program file A over program file B.
 //                                  Each loops 1000 times. Cycles a pass.
+//   basic_profile --marks FILE     A program that writes a counter to $E7FF
+//                                  at each checkpoint. The cycles between
+//                                  changes, up to the value 255.
+//     [--pad N]                    PAD holds N while it runs.
+//     [--dump]                     Rows 26 to 31 of the screen at the end.
+//     [--per N]                    Each segment less the first, over N
+//                                  passes: a statement's cost when the
+//                                  first segment is the same loop on REM.
 //   basic_profile --asm PATH       Another basic.asm, before any of those.
 //
 // A statement's cost is the difference between the program with it and the
@@ -365,6 +373,69 @@ std::vector<Case> cases() {
   };
 }
 
+// The prototypes' checkpoint byte, and where BASIC's C stack runs down
+// from, as docs/design/centipede-design.md measured them.
+constexpr int MARK = 0xE7FF;
+constexpr int STACK_TOP = 0xF000;
+
+int runMarks(const std::string& text, int pad, int per, bool dump) {
+  testing::Session s;
+  s.load();
+  // The stack's range painted before the boot, so its deepest write shows
+  // after the run.
+  for (int a = 0xE800; a < STACK_TOP; a++) s.m->ram[static_cast<size_t>(a)] = 0xA5;
+  s.runBudget(4000000);
+  basic::storeProgram(std::span<uint8_t>(s.m->ram.data(), s.m->ram.size()), basic::encodeProgram(text));
+  s.input.buttons = static_cast<uint8_t>(pad);
+  for (char c : std::string("RUN")) {
+    s.pushKey(c, false);
+    s.runBudget(120000);
+  }
+  s.pushKey(13, false);
+  Machine& m = *s.m;
+  uint8_t last = m.ram[MARK];
+  uint64_t at = m.cycles;
+  std::vector<std::pair<int, uint64_t>> segments;
+  while (m.cycles < 4000000000ull && m.status == Status::Running) {
+    m.instructionStep();
+    const uint8_t v = m.ram[MARK];
+    if (v == last) continue;
+    std::printf("mark %3d  %12llu cycles since the last  %8.3f frames\n", v,
+                static_cast<unsigned long long>(m.cycles - at), static_cast<double>(m.cycles - at) / 65536.0);
+    if (last != 0) segments.push_back({last, m.cycles - at});
+    last = v;
+    at = m.cycles;
+    if (v == 255) break;
+  }
+  int low = STACK_TOP;
+  for (int a = 0xE800; a < STACK_TOP; a++) {
+    if (m.ram[static_cast<size_t>(a)] != 0xA5) {
+      low = a;
+      break;
+    }
+  }
+  std::printf("SYS_ERR %d, lowest C stack byte written $%04X, program %d bytes, %s after %llu cycles\n", m.ram[0x12],
+              low, (m.ram[0x0A] << 8) | m.ram[0x0B], std::string(statusName(m.status)).c_str(),
+              static_cast<unsigned long long>(m.cycles));
+  if (dump) {
+    // The playfield's player zone in cell codes, 32 to a row.
+    for (int row = 26; row < 32; row++) {
+      std::printf("row %2d:", row);
+      for (int x = 0; x < 16; x++) std::printf(" %02X", m.ram[static_cast<size_t>(STACK_TOP + row * 32 + x)]);
+      std::printf("\n");
+    }
+  }
+  if (per > 0 && !segments.empty()) {
+    const double base = static_cast<double>(segments[0].second) / per;
+    std::printf("segment 1, the base: %.1f cycles a pass\n", base);
+    for (size_t i = 1; i < segments.size(); i++) {
+      const double c = static_cast<double>(segments[i].second) / per - base;
+      std::printf("segment %zu from mark %d: %.1f cycles  %.1f in a frame\n", i + 1, segments[i].first, c, 65536.0 / c);
+    }
+  }
+  return m.ram[0x12] == 0 ? 0 : 1;
+}
+
 double perPass(uint64_t with, uint64_t without) {
   return (static_cast<double>(with) - static_cast<double>(without)) / 1000.0;
 }
@@ -436,6 +507,17 @@ int main(int argc, char** argv) {
                 static_cast<unsigned long long>(allTag[1]));
     return 0;
   }
+  if (args.size() >= 2 && args[0] == "--marks") {
+    int pad = 0;
+    int per = 0;
+    bool dump = false;
+    for (size_t i = 2; i < args.size(); i++) {
+      if (args[i] == "--dump") dump = true;
+      if (args[i] == "--pad" && i + 1 < args.size()) pad = std::stoi(args[++i]);
+      if (args[i] == "--per" && i + 1 < args.size()) per = std::stoi(args[++i]);
+    }
+    return runMarks(readFile(args[1]), pad, per, dump);
+  }
   if (args.size() >= 3 && args[0] == "--pair") {
     const Prof p = runProgram(readFile(args[1]));
     const Prof b = runProgram(readFile(args[2]));
@@ -445,7 +527,9 @@ int main(int argc, char** argv) {
   }
   const bool detail = !args.empty() && args[0] == "--detail";
   if (!args.empty() && !detail) {
-    std::printf("usage: basic_profile [--asm PATH] [--detail | --tokens STATEMENT | --pair WITH WITHOUT [--detail]]\n");
+    std::printf(
+        "usage: basic_profile [--asm PATH] [--detail | --tokens STATEMENT | --pair WITH WITHOUT [--detail] |\n"
+        "                     --marks FILE [--pad N] [--per N] [--dump]]\n");
     return 2;
   }
   for (const Case& c : cases()) {
