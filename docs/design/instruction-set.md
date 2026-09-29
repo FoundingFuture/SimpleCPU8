@@ -301,7 +301,8 @@ An array element with a byte index is the base in D2 and the index in A:
 
 A store steps D2 with LD D2 <- D2+A and then writes LD [D2] <- A. A is
 needed there for the value. A constant index is a displacement, LD A <- [D2+5].
-A word element steps D2 by A twice. An int index is a 16 bit add through
+A word element by a byte index steps D2 by A twice only on a store. A load
+is one LD D1 <- [D2+A], after one step. An int index is a 16 bit add through
 A into a temp, then LD D2 <- [temp].
 
 A condition compiles to a compare and one jump, never to a 0 or 1 first.
