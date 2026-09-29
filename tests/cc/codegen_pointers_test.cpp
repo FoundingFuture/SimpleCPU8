@@ -269,3 +269,102 @@ TEST_SUITE("what the compiler refuses, with the alternative named") {
     CHECK(has(refuses("long n; int main(void) { return 0; }"), "long"));
   }
 }
+
+// docs/design/basic-speed.md, after proposal 3. A 16 bit word through a
+// pointer is one load through D2 into D1, or one store of D1. It was two
+// bytes through A.
+TEST_SUITE("a word through a pointer") {
+  namespace {
+
+  // The lines of one function's body, from its label to its end label.
+  std::string body(const std::string& text, const std::string& fn) {
+    const size_t from = text.find("\n" + fn + ":\n");
+    REQUIRE(from != std::string::npos);
+    return text.substr(from, text.find(fn + "__end:", from) - from);
+  }
+
+  // No word is read or written as two bytes through D2.
+  bool noBytePairs(const std::string& text) {
+    return !has(text, "LD A <- [D2]+") && !has(text, "LD [D2]+ <- A") && !has(text, "LD A <- [D2+1]");
+  }
+
+  }  // namespace
+
+  TEST_CASE("through a global pointer") {
+    const std::string src =
+        "int a[4]; int *gp; int r;\n"
+        "int main(void) { gp = a; *gp = 1234; r = *gp + 1; return 0; }\n";
+    const std::string m = body(compile(src), "main");
+    CHECK(has(m, "LD [D2] <- D1"));
+    CHECK(has(m, "LD D1 <- [D2]"));
+    CHECK(noBytePairs(m));
+    const Ran r = ran(src);
+    CHECK_EQ(r.i16("r"), 1235);
+    CHECK_EQ(r.i16("a"), 1234);
+  }
+
+  TEST_CASE("through a local pointer in a frame") {
+    const std::string src =
+        "int a[8]; int r;\n"
+        "int through(int *p) { int *q; q = p; *q = 77; return *q + 1; }\n"
+        "int main(void) { r = through(a + 5); return 0; }\n";
+    const std::string f = body(compile(src), "through");
+    CHECK(has(f, "LD [D3+0] <- D2"));
+    CHECK(has(f, "LD [D2] <- D1"));
+    CHECK(has(f, "LD D1 <- [D2]"));
+    CHECK(noBytePairs(f));
+    const Ran r = ran(src);
+    CHECK_EQ(r.i16("r"), 78);
+    CHECK_EQ((r.m->ram[static_cast<size_t>(r.addr("a") + 10)] << 8) | r.m->ram[static_cast<size_t>(r.addr("a") + 11)], 77);
+  }
+
+  TEST_CASE("an int array by a byte index and by an int index") {
+    // A byte index steps D2 once and [D2+A] once more. No word store takes
+    // [D2+A], so a store steps D2 twice. An int index is a 16 bit sum.
+    const std::string src =
+        "int a[16]; int r1; int r2;\n"
+        "int main(void) { unsigned char i; int j; i = 7; j = 9;\n"
+        "  a[i] = 500; a[j] = 600; r1 = a[i]; r2 = a[j] + a[i]; return 0; }\n";
+    const std::string m = body(compile(src), "main");
+    CHECK(has(m, "LD D2 <- D2+A\n        LD D1 <- [D2+A]"));
+    CHECK(has(m, "LD D2 <- D2+A\n        LD D2 <- D2+A\n        LD D1 <- 500\n        LD [D2] <- D1"));
+    CHECK(has(m, "LD D1 <- 600\n        LD [D2] <- D1"));
+    CHECK(noBytePairs(m));
+    const Ran r = ran(src);
+    CHECK_EQ(r.i16("r1"), 500);
+    CHECK_EQ(r.i16("r2"), 1100);
+  }
+
+  TEST_CASE("a constant offset, which stands in for a struct field") {
+    // The dialect has no structs. *(p + 3) and a[3] are what a field at
+    // byte 6 would compile to: a displacement in the instruction.
+    const std::string src =
+        "int a[8]; int *p; int r1; int r2;\n"
+        "int main(void) { p = a; *(p + 3) = 33; a[3] = a[3] + 1; r1 = *(p + 3); r2 = a[3]; return 0; }\n";
+    const std::string m = body(compile(src), "main");
+    CHECK(has(m, "LD [D2+6] <- D1"));
+    CHECK(has(m, "LD D1 <- [D2+6]"));
+    CHECK(noBytePairs(m));
+    const Ran r = ran(src);
+    CHECK_EQ(r.i16("r1"), 34);
+    CHECK_EQ(r.i16("r2"), 34);
+  }
+
+  TEST_CASE("an offset past the displacement byte adds to D2 first") {
+    // *(p + 200) is 400 bytes on. The displacement is one byte, so the
+    // address is summed into D2 and the word moves through a plain [D2].
+    const std::string src =
+        "int a[210]; int *p; int r;\n"
+        "int main(void) { p = a; *(p + 200) = 2000; r = *(p + 200) + 1; return 0; }\n";
+    const std::string m = body(compile(src), "main");
+    CHECK(has(m, "LD D2 <- D2+400\n        LD D1 <- 2000\n        LD [D2] <- D1"));
+    CHECK(has(m, "LD D2 <- D2+400\n        LD D1 <- [D2]"));
+    CHECK_FALSE(has(m, "[D2+400]"));
+    CHECK_FALSE(has(m, "[D2+144]"));
+    CHECK(noBytePairs(m));
+    const Ran r = ran(src);
+    CHECK_EQ(r.i16("r"), 2001);
+    const size_t at = static_cast<size_t>(r.addr("a") + 400);
+    CHECK_EQ((r.m->ram[at] << 8) | r.m->ram[at + 1], 2000);
+  }
+}

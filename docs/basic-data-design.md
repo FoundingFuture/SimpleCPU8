@@ -230,8 +230,10 @@ first:
   some swaps of two values.
 - DATA(n) returns an address, asked for by Eddie on 2026-09-27. The GPU and
   C routines read RAM, and a table read in place needs no copy loop.
-- The program stays text. Placement at RUN writes the bytes. LIST, SAVE
-  and the IDE bridge stay as they are.
+- The program is stored crunched, each keyword as one byte and each number
+  with its value, docs/design/basic-speed.md. A DATA line is the
+  exception: it stays text, so data.c reads it as it always has.
+  Placement at RUN writes the bytes.
 - A first value written as a three or four digit hex number is an
   address. Eddie's rule. Later lines continue from it.
 - READ never returns an address. The address says where the bytes go.

@@ -45,11 +45,33 @@ The integer variables sit in 11 word slots per letter: the bare name first,
 then the digit forms 0 to 9. So `B` is slot 11 and `B7` is slot 19, and
 `DEEK(DEEK(12) + 22)` reads `B`.
 
+## Where BASIC's memory lies
+
+The interpreter's globals start after the zero page and end at $B694,
+46,741 bytes. SYS_PROG, SYS_VARS and SYS_HEAP give a program the three a
+program reads, so it never needs the addresses below, which are this
+build's.
+
+| From | To | Bytes | Holds |
+|---|---|---|---|
+| $0456 | $1055 | 3,072 | the string heap, SYS_HEAP |
+| $1076 | $6875 | 22,528 | the text block SAVE, LOAD and CATALOG go through |
+| $6876 | $6AB1 | 572 | the integer variables, SYS_VARS |
+| $6AB2 | $AAB1 | 16,384 | the program, SYS_PROG, and its DATA bytes after it |
+| $AAB2 | $AEB1 | 1,024 | the jump cache |
+| $B695 | the C stack | | free for a program's tables |
+| $F000 | $FFFF | 4,096 | the text screen |
+
+The C stack starts at $F000 and grows down. The Centipede prototypes took
+it down to $EE96, 362 bytes. The program keeps each keyword as one byte
+and each number with its value, docs/design/basic-speed.md.
+
 ## What a program can do with it
 
 Read the cursor to draw at the prompt's position. Read the last key without
-consuming one. Find its own text to write a self modifying program, which
-the machine allows. Reach a variable by number rather than by name, which
+consuming one. Find its own text, stored crunched. A POKE into the text
+while the program runs is not supported, since RUN keeps the line each
+jump found. Reach a variable by number rather than by name, which
 is how a driver hands a result back to BASIC. Read the error a `!` handler
 left. `DOKE 32, 0` is RESTORE from a driver: READ starts again at the first
 value.
@@ -67,7 +89,7 @@ SYS_BANG_VEC. Install it from BASIC with DOKE, keeping the old vector as the
 driver's next:
 
 ```basic
-10 DOKE 40000, DEEK(0)
+10 DOKE $C000, DEEK(0)
 20 DOKE 0, 61440
 ```
 
@@ -148,7 +170,7 @@ they always had. Code 3 is no longer raised: codes 15 to 18 split it.
 | 1 | E_SYNTAX | `SYNTAX ERROR: EXPECTED what BUT FOUND token` |
 | 2 | E_NOLINE | `THERE IS NO LINE n` |
 | 3 | E_STACK | not raised |
-| 4 | E_MEMORY | `THE PROGRAM MEMORY IS FULL: 6144 BYTES AT MOST` |
+| 4 | E_MEMORY | `THE PROGRAM MEMORY IS FULL: 16384 BYTES AT MOST` |
 | 5 | E_TYPE | `A STRING CANNOT BE USED AS A NUMBER` |
 | 6 | E_DIVZERO | `DIVISION BY ZERO` |
 | 7 | E_RANGE | `NUMBER OUT OF RANGE` |

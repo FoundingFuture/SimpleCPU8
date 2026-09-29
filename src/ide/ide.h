@@ -463,6 +463,9 @@ class Ide {
   // is the command to type after it.
   bool pushPending_ = false;
   std::string afterPush_;
+  // The refusal last put in Messages, so a document that stays refused
+  // is named once rather than every frame.
+  std::string refusalNoted_;
 
   // The Microcode pane's execution view (micro_panes.cpp). Off, the pane
   // walks the current instruction's rows, fetch first. On, it browses

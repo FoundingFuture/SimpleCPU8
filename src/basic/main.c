@@ -7,6 +7,7 @@ static char input[LINEMAX];
 
 int main(void)
 {
+    lx_init();
     term_init();
     str_init();
     ed_new();

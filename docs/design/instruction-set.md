@@ -266,7 +266,11 @@ The compiler keeps expression values in zero page temps and works through
 A. D3 is the heap stack pointer and the frame base. D2 is the scratch
 register for addresses, and D1 carries word arguments.
 A peephole pass removes a store and reload of the same byte and a store
-nobody reads. The sequences below are what it emits, with optimal cycles.
+nobody reads. An inlined test's answer, built as 0 or 1 only to be tested,
+goes, and its compares jump where the test would have. A jump to a JMP
+takes the JMP's target, a conditional jump over a JMP turns round, and
+code no jump reaches goes. The sequences below are what it emits, with
+optimal cycles.
 
 A local variable lives in the frame at [D3+n]. A byte local is read with
 LD A <- [D3+n], 3 cycles, and written with LD [D3+n] <- A, 2 cycles. The

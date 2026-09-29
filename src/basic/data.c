@@ -118,6 +118,7 @@ static unsigned char value(void)
     unsigned int at;
     unsigned int end;
     unsigned char hex;
+    unsigned char bin;
     unsigned char neg;
     neg = 0;
     if (lx_is("-")) { neg = 1; lx_next(); }
@@ -137,9 +138,12 @@ static unsigned char value(void)
     at = lx_tokpos;
     end = lx_pos;
     hex = lx_text[at] == 36;
+    /* 0b and eight binary digits at most, since the lexer read 0b01. */
+    bin = !hex && end > at + 1 && (lx_text[at + 1] == 98 || lx_text[at + 1] == 66);
     if (hex) at = at + 1;
+    if (bin) at = at + 2;
     while (at + 1 < end && lx_text[at] == 48) at = at + 1;
-    if (end - at > (hex ? 2 : 3)) dv_byte = 0;
+    if (end - at > (hex ? 2 : bin ? 8 : 3)) dv_byte = 0;
     else if (neg) dv_byte = lx_num <= 128;
     else dv_byte = lx_num <= 255;
     lx_next();

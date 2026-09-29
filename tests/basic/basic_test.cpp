@@ -17,6 +17,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -24,6 +26,7 @@
 
 #include "assets/font.h"
 #include "basic/basic_rom.h"
+#include "basic/keywords.h"
 #include "basic/program.h"
 #include "core/cartridge.h"
 #include "core/machine.h"
@@ -1457,11 +1460,12 @@ TEST_SUITE("basic program codec") {
   }
   TEST_CASE("a program that does not fit is cut at a whole line") {
     std::string text;
-    for (int i = 1; i <= 100; i++) text += std::to_string(i) + " " + std::string(100, 'X') + "\n";
+    for (int i = 1; i <= 200; i++) text += std::to_string(i) + " " + std::string(100, 'X') + "\n";
     const std::vector<uint8_t> p = basic::encodeProgram(text);
     CHECK(p.size() < basic::PROGRAM_MAX);
     const std::string back = basic::decodeProgram(p);
     CHECK(back.find("1 XXX") == 0);
+    CHECK(back.find("\n200 XXX") == std::string::npos);
     CHECK(back.back() == '\n');
   }
   TEST_CASE("a merge keeps what each side changed") {
@@ -1506,7 +1510,8 @@ TEST_SUITE("basic program codec") {
   }
   TEST_CASE("a line already in capitals encodes to the same bytes") {
     const std::vector<uint8_t> p = basic::encodeProgram("10 PRINT \"x\"\n");
-    CHECK(p == std::vector<uint8_t>{0, 10, 13, 'P', 'R', 'I', 'N', 'T', ' ', '"', 'x', '"', 0, 0, 0, 3});
+    CHECK(p == std::vector<uint8_t>{0, 10, 9, KW_PRINT, ' ', '"', 'x', '"', 0, 0, 0, 3});
+    CHECK(basic::encodeProgram("10 print \"x\"\n") == p);
   }
   TEST_CASE("a lowercase document keeps its spelling where the machine did not change it") {
     const std::string text = "10 for i = 1 to 3\n20   print i\n30 next i\n";
@@ -1632,17 +1637,18 @@ TEST_SUITE("DATA, READ and RESTORE") {
   TEST_CASE("DATA that does not fit after the program stops RUN") {
     auto s = boot();
     settle(*s);
-    // 23 remarks of 248 bytes, one of 145 and a DATA line of 248 leave 44
+    // 65 remarks of 246 bytes, one of 99 and a DATA line of 248 leave 44
     // bytes free, and the line holds 120 values.
     std::string program;
-    for (int n = 1; n <= 23; n++) program += std::to_string(n) + " REM " + std::string(240, 'X') + "\n";
-    program += "24 REM " + std::string(137, 'X') + "\n";
+    for (int n = 1; n <= 65; n++) program += std::to_string(n) + " REM " + std::string(240, 'X') + "\n";
+    program += "66 REM " + std::string(93, 'X') + "\n";
     program += "1000 DATA 1";
     for (int i = 1; i < 120; i++) program += ",1";
     program += "\n";
+    REQUIRE_EQ(basic::PROGRAM_MAX - basic::encodeProgram(program).size(), 44u);
     setProgram(*s, program);
     type(*s, "RUN");
-    CHECK(has(flat(*s), "THE PROGRAM MEMORY IS FULL: 6144 BYTES AT MOST IN LINE 1000"));
+    CHECK(has(flat(*s), "THE PROGRAM MEMORY IS FULL: 16384 BYTES AT MOST IN LINE 1000"));
   }
 
   TEST_CASE("DATA(n) gives the address, after an address too, and writes nothing") {
@@ -2146,3 +2152,778 @@ TEST_SUITE("fonts and the text grid") {
   }
 }
 
+
+// docs/design/basic-speed.md: the jump cache, keywords stored as tokens,
+// literals stored with their value, the operand fast path and the lexer's
+// byte wide position. Every test here passes on the interpreter before
+// those changes too, unless it says otherwise.
+TEST_SUITE("basic speed") {
+  namespace {
+
+  // The binary operators, loosest first.
+  const std::vector<std::string> OPERATORS = {"OR", "AND", "=", "<>", "<", ">", "<=", ">=", "+", "-", "*", "/", "MOD"};
+
+  // Type RUN and run until READY shows under its echo, in slices, so a
+  // short program costs a short run. A program still going after `slices`
+  // slices, one waiting at INPUT say, is left where it is.
+  void runToEnd(Session& s, int slices = 20000) {
+    for (char ch : std::string("RUN")) {
+      s.pushKey(ch, false);
+      s.runBudget(120000);
+    }
+    s.pushKey(13, false);
+    for (int i = 0; i < slices; i++) {
+      s.runBudget(20000);
+      if (s.m->ram[basic::SYS_RUNNING] == 0 && has(after(text(s), ">RUN\n"), "READY")) break;
+    }
+    s.runBudget(200000);
+  }
+
+  // A line typed in to be stored, with the short run a store needs.
+  void enter(Session& s, const std::string& line) {
+    for (char ch : line) {
+      s.pushKey(static_cast<unsigned char>(ch), false);
+      s.runBudget(20000);
+    }
+    s.pushKey(13, false);
+    s.runBudget(1000000);
+  }
+
+  // What RUN printed, from the row under its echo.
+  std::string runOutput(const std::string& program) {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, program);
+    runToEnd(*s);
+    return after(text(*s), ">RUN\n");
+  }
+
+  // One line per operator. `left` is the bare operand in front of it and
+  // `wrap` puts the expression in its place in a statement. Each operator
+  // stands alone, then before a * and then before a +, so a fast path that
+  // took the wrong precedence would print a different number.
+  std::string operatorLines(int first, const std::string& setup, const std::string& left, const std::string& right,
+                            const std::function<std::string(const std::string&)>& wrap) {
+    std::string p = std::to_string(first) + " " + setup + "\n";
+    int n = first + 1;
+    for (const std::string& op : OPERATORS) {
+      for (const std::string& tail : {std::string(), std::string(" * 2"), std::string(" + 2")}) {
+        p += std::to_string(n++) + " " + wrap(left + " " + op + " " + right + tail) + "\n";
+      }
+    }
+    return p;
+  }
+
+  // The addresses are around $6000, in the block store.c reads and writes
+  // for SAVE, LOAD and CATALOG, which these programs never run. Free RAM
+  // starts above $B000, where every address is negative as a number and
+  // the comparisons would read differently from the screens recorded. A comparison's 0 or 1 as an
+  // address reaches the bang vector, the word at 0. So the vector holds a
+  // known word while the program runs, and gets its own back at the end.
+  const std::string SAVE_VEC = "S=DEEK(0):DOKE 0,4660";
+  const std::string RESTORE_VEC = "DOKE 0,S";
+
+  // The cycles from the Enter after RUN until the program stops.
+  uint64_t runCycles(const std::string& program) {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, program);
+    for (char ch : std::string("RUN")) {
+      s->pushKey(ch, false);
+      s->runBudget(120000);
+    }
+    s->pushKey(13, false);
+    const uint64_t from = s->m->cycles;
+    bool started = false;
+    for (int i = 0; i < 100000; i++) {
+      s->runBudget(2000);
+      const bool running = s->m->ram[basic::SYS_RUNNING] != 0;
+      if (running) started = true;
+      if (started && !running) break;
+    }
+    return s->m->cycles - from;
+  }
+
+  // Lines numbered from 1, padded with REM lines to n.
+  std::string numberedTo(std::vector<std::string> bodies, size_t n) {
+    while (bodies.size() < n) bodies.push_back("REM FILLER");
+    std::string t;
+    for (size_t i = 0; i < bodies.size(); i++) t += std::to_string(i + 1) + " " + bodies[i] + "\n";
+    return t;
+  }
+
+  }  // namespace
+
+  TEST_CASE("an operand without an operator: every operator reads as it did before the fast path") {
+    // POKE: the operator in the value, then in the address. Each address
+    // line writes its own number. The bytes it could reach are shown at the
+    // end, so an address worked out wrong shows on the screen.
+    auto poke = [](const std::string& left, const std::string& addr) {
+      return operatorLines(10, SAVE_VEC + ":V=7:M=24576", left, "3", [&](const std::string& e) {
+               return "POKE " + addr + ", " + e + ":PRINT PEEK(" + addr + ");\" \";";
+             }) +
+             operatorLines(100, "M=24576:I=1", addr == "M" ? "M" : "24576", "1",
+                           [](const std::string& e) { return "POKE " + e + ", I:I=I+1"; }) +
+             "190 FOR J=24570 TO 24585:PRINT PEEK(J);\" \";:NEXT:PRINT PEEK(0);PEEK(1);PEEK(49152)\n" + "200 " +
+             RESTORE_VEC + "\n";
+    };
+    // PEEK: addresses around 24576 hold known bytes, and 0 and 1 the vector.
+    auto peek = [](const std::string& left) {
+      return "5 " + SAVE_VEC + "\n6 FOR I=24560 TO 24600:POKE I,I-24500:NEXT\n" +
+             operatorLines(10, "V=24576", left, "1", [](const std::string& e) { return "PRINT PEEK(" + e + ");\" \";"; }) +
+             "200 " + RESTORE_VEC + "\n";
+    };
+    // A FOR limit: how many passes the loop makes.
+    auto forLimit = [](const std::string& left) {
+      return operatorLines(10, "V=7", left, "3", [](const std::string& e) {
+        return "N=0:FOR I=1 TO " + e + ":N=N+1:NEXT:PRINT N;\" \";";
+      });
+    };
+    auto ifThen = [](const std::string& left) {
+      return operatorLines(10, "V=7", left, "3", [](const std::string& e) {
+        return "PRINT \"|\";:IF " + e + " THEN PRINT 1;";
+      });
+    };
+    const std::vector<std::pair<std::string, std::string>> programs = {
+        {"POKE after a variable", poke("V", "M")},
+        {"POKE after a literal", poke("7", "24576")},
+        {"PEEK after a variable", peek("V")},
+        {"PEEK after a literal", peek("24576")},
+        {"FOR limit after a variable", forLimit("V")},
+        {"FOR limit after a literal", forLimit("7")},
+        {"IF after a variable", ifThen("V")},
+        {"IF after a literal", ifThen("7")},
+    };
+    // The screens the interpreter printed before the fast path, recorded
+    // from the ROM at commit f185ac8.
+    const std::map<std::string, std::string> before = {
+        {"POKE after a variable",
+             "1 1 1 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0\n"
+             "1 1 1 10 13 12 4 1 6 21 42 23 2 4 4 1 2 3\n"
+             "0 0 0 0 29 28 34 30 36 27 0 0 0 0 0 0 3824\n"
+             "35\n"
+             "READY\n"
+             ">\x7f"},
+        {"POKE after a literal",
+             "1 1 1 1 1 1 0 0 0 1 1 1 0 0 0 1 1 1 0 0 0\n"
+             "1 1 1 10 13 12 4 1 6 21 42 23 2 4 4 1 2 3\n"
+             "0 0 0 0 29 28 34 30 36 27 0 0 0 0 0 0 3824\n"
+             "35\n"
+             "READY\n"
+             ">\x7f"},
+        {"PEEK after a variable",
+             "52 52 52 52 52 52 18 18 18 52 52 52 18 18\n"
+             "18 52 52 52 18 18 18 52 52 52 77 78 79 75\n"
+             "74 77 76 0 78 76 0 78 18 18 0 READY\n"
+             ">\x7f"},
+        {"PEEK after a literal",
+             "52 52 52 52 52 52 18 18 18 52 52 52 18 18\n"
+             "18 52 52 52 18 18 18 52 52 52 77 78 79 75\n"
+             "74 77 76 0 78 76 0 78 18 18 0 READY\n"
+             ">\x7f"},
+        {"FOR limit after a variable",
+             "1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1\n"
+             "1 1 1 10 13 12 4 1 6 21 42 23 2 4 4 1 2 3\n"
+             "READY\n"
+             ">\x7f"},
+        {"FOR limit after a literal",
+             "1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1\n"
+             "1 1 1 10 13 12 4 1 6 21 42 23 2 4 4 1 2 3\n"
+             "READY\n"
+             ">\x7f"},
+        {"IF after a variable",
+             "|1|1|1|1|1|1||||1|1|1||||1|1|1||||1|1|1|1|\n"
+             "1|1|1|1|1|1|1|1|1|1|1|1|1|1READY\n"
+             ">\x7f"},
+        {"IF after a literal",
+             "|1|1|1|1|1|1||||1|1|1||||1|1|1||||1|1|1|1|\n"
+             "1|1|1|1|1|1|1|1|1|1|1|1|1|1READY\n"
+             ">\x7f"},
+    };
+    for (const auto& [name, program] : programs) {
+      CAPTURE(name);
+      CHECK_EQ(runOutput(program), before.at(name));
+    }
+  }
+
+  // Proposal 1: the jump cache.
+
+  TEST_CASE("a jump 300 lines down finds its line, and costs what a jump to the next line costs") {
+    // 300 lines. The FOR is on line 2, its NEXT on line 299, and line 3
+    // jumps there over 295 lines of REM.
+    auto far = [](int passes) {
+      std::vector<std::string> b = {"C=0", "FOR I=1 TO " + std::to_string(passes), "GOTO 299"};
+      while (b.size() < 298) b.push_back("REM FILLER");
+      b.push_back("C=C+1:NEXT I");
+      b.push_back("PRINT \"DONE\";C");
+      return numberedTo(b, 300);
+    };
+    auto near = [](int passes) {
+      return numberedTo({"C=0", "FOR I=1 TO " + std::to_string(passes), "GOTO 4", "C=C+1:NEXT I", "PRINT C"}, 5);
+    };
+    CHECK(has(runOutput(far(100)), "DONE100"));
+    // A pass's cost is the difference between 200 passes and 100, so RUN's
+    // own walk over the program drops out.
+    const uint64_t farPass = (runCycles(far(200)) - runCycles(far(100))) / 100;
+    const uint64_t nearPass = (runCycles(near(200)) - runCycles(near(100))) / 100;
+    CAPTURE(farPass);
+    CAPTURE(nearPass);
+    // A walk of 295 lines costs 83,000 cycles a pass. The first pass
+    // walks, and every later one reads the cache.
+    CHECK(farPass < nearPass + nearPass / 5);
+  }
+
+  TEST_CASE("two jump sites on one line keep their own targets") {
+    // A false IF skips the rest of its line and a jump leaves it, so one
+    // pass takes one site. X picks which: 1 takes THEN 60, 2 takes the
+    // GOTO inside the second IF's THEN, 3 takes neither.
+    const std::string program =
+        "10 FOR X=1 TO 3\n"
+        "20 IF X=1 THEN 60:REM\n"
+        "30 IF X>1 THEN IF X=2 THEN GOTO 70\n"
+        "40 PRINT \"N\";X;\n"
+        "50 GOTO 80\n"
+        "60 PRINT \"A\";X;:GOTO 80\n"
+        "70 PRINT \"B\";X;\n"
+        "80 NEXT X\n"
+        "90 FOR X=1 TO 3:IF X=2 THEN 110\n"
+        "100 PRINT \"C\";X;:NEXT X:GOTO 120\n"
+        "110 PRINT \"D\";X;:NEXT X\n"
+        "120 PRINT\n";
+    // Twice, so the second pass of each line reads what the first kept.
+    const std::string twice = "5 FOR K=1 TO 2\n" + program + "130 NEXT K\n";
+    const std::string out = runOutput(twice);
+    CHECK_EQ(countOf(out, "A1B2N3C1D2C3"), 2);
+  }
+
+  TEST_CASE("a computed GOTO is worked out on every pass") {
+    const std::string program =
+        "10 FOR I=1 TO 3\n"
+        "20 GOTO 100+I*10\n"
+        "110 PRINT \"X\";:GOTO 200\n"
+        "120 PRINT \"Y\";:GOTO 200\n"
+        "130 PRINT \"Z\";\n"
+        "200 NEXT I:GOSUB 290+I\n"
+        "210 END\n"
+        "293 PRINT \"!\":RETURN\n"
+        "294 PRINT \"?\":RETURN\n";
+    CHECK(has(runOutput(program), "XYZ?"));
+  }
+
+  TEST_CASE("THERE IS NO LINE is raised when the jump runs, not before") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 FOR I=1 TO 3\n20 PRINT \"P\";I;\n30 IF I=3 THEN 999\n40 GOTO 50\n50 NEXT I\n");
+    type(*s, "RUN", 20000000);
+    CHECK(has(flat(*s), "P1P2P3? THERE IS NO LINE 999 IN LINE 30"));
+    type(*s, "CLS");
+    setProgram(*s, "10 FOR I=1 TO 3\n20 PRINT \"Q\";I;\n30 IF I=3 THEN GOSUB 998\n40 GOTO 50\n50 NEXT I\n");
+    type(*s, "RUN", 20000000);
+    CHECK(has(flat(*s), "Q1Q2Q3? THERE IS NO LINE 998 IN LINE 30"));
+  }
+
+  TEST_CASE("RUN after an edit finds the lines where they moved to") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 FOR I=1 TO 2\n15 GOSUB 100\n18 NEXT I\n20 END\n100 PRINT \"R\";I;:RETURN\n");
+    type(*s, "RUN", 20000000);
+    // Lines typed in above the routine move it and its offset.
+    type(*s, "50 REM A LINE THAT MOVES LINE 100 FURTHER DOWN THE PROGRAM");
+    type(*s, "60 REM AND ANOTHER");
+    type(*s, "100 PRINT \"S\";I;:RETURN");
+    type(*s, "RUN", 20000000);
+    type(*s, "RENUM 100, 5");
+    type(*s, "RUN", 20000000);
+    type(*s, "NEW");
+    type(*s, "10 GOTO 20");
+    type(*s, "20 PRINT \"T\"");
+    type(*s, "RUN", 20000000);
+    const std::string t = flat(*s);
+    CHECK(inOrder(t, {"R1R2", "S1S2", "S1S2", "T"}));
+    CHECK_FALSE(has(t, "?"));
+  }
+
+  TEST_CASE("more jump sites than the cache has slots all keep their targets") {
+    // 280 lines of one GOTO each, visited in a scrambled order, twice. A
+    // site that read another site's target would skip lines or loop.
+    const int n = 280;
+    std::string program = "1 FOR P=1 TO 2:GOTO 1000\n";
+    for (int i = 0; i < n; i++) {
+      const int next = i + 1 < n ? 1000 + ((i + 1) * 97) % n : 9000;
+      program += std::to_string(1000 + (i * 97) % n) + " C=C+1:GOTO " + std::to_string(next) + "\n";
+    }
+    program += "9000 NEXT P:PRINT \"VISITS\";C\n";
+    REQUIRE(basic::encodeProgram(program).size() < basic::PROGRAM_MAX - 3);
+    CHECK(has(runOutput(program), "VISITS560"));
+  }
+
+  TEST_CASE("a jump to a line written in hex keeps its own target") {
+    // GOSUB 100 notes its site, then THEN $32 and GOTO $3C jump. Each must
+    // keep its target at its own site, never at the one noted before.
+    const std::string program =
+        "10 FOR I=1 TO 3\n"
+        "20 GOSUB 100\n"
+        "30 IF I>0 THEN $32\n"
+        "40 PRINT \"BAD\";\n"
+        "50 GOSUB 100:REM\n"
+        "55 GOTO $3C\n"
+        "58 PRINT \"BAD\";\n"
+        "60 NEXT I\n"
+        "70 END\n"
+        "100 PRINT I;:RETURN\n";
+    const std::string out = runOutput(program);
+    CHECK(has(out, "112233"));
+    CHECK_FALSE(has(out, "BAD"));
+  }
+
+  // Proposal 2: keywords stored as their byte.
+
+  TEST_CASE("each KW_ constant is 128 plus its word's place in the keyword list") {
+    const std::vector<std::pair<int, std::string>> named = {
+        {KW_ABS, "ABS"},
+        {KW_AND, "AND"},
+        {KW_ASC, "ASC"},
+        {KW_CALL, "CALL"},
+        {KW_CATALOG, "CATALOG"},
+        {KW_CHRS, "CHR$"},
+        {KW_CIRCLE, "CIRCLE"},
+        {KW_CLS, "CLS"},
+        {KW_DATA, "DATA"},
+        {KW_DEEK, "DEEK"},
+        {KW_DELETE, "DELETE"},
+        {KW_DOKE, "DOKE"},
+        {KW_DRAW, "DRAW"},
+        {KW_END, "END"},
+        {KW_FOR, "FOR"},
+        {KW_GOSUB, "GOSUB"},
+        {KW_GOTO, "GOTO"},
+        {KW_HEXS, "HEX$"},
+        {KW_IF, "IF"},
+        {KW_INK, "INK"},
+        {KW_INKEYS, "INKEY$"},
+        {KW_INPUT, "INPUT"},
+        {KW_JMP, "JMP"},
+        {KW_JSR, "JSR"},
+        {KW_KEY, "KEY"},
+        {KW_LEN, "LEN"},
+        {KW_LET, "LET"},
+        {KW_LIST, "LIST"},
+        {KW_LOAD, "LOAD"},
+        {KW_LOADFONT, "LOADFONT"},
+        {KW_MIDS, "MID$"},
+        {KW_MOD, "MOD"},
+        {KW_MOVE, "MOVE"},
+        {KW_NEW, "NEW"},
+        {KW_NEXT, "NEXT"},
+        {KW_NOT, "NOT"},
+        {KW_OR, "OR"},
+        {KW_PAD, "PAD"},
+        {KW_PAPER, "PAPER"},
+        {KW_PEEK, "PEEK"},
+        {KW_PIXEL, "PIXEL"},
+        {KW_PLOT, "PLOT"},
+        {KW_POKE, "POKE"},
+        {KW_PRINT, "PRINT"},
+        {KW_READ, "READ"},
+        {KW_REM, "REM"},
+        {KW_RENUM, "RENUM"},
+        {KW_RESTORE, "RESTORE"},
+        {KW_RETURN, "RETURN"},
+        {KW_RND, "RND"},
+        {KW_RUN, "RUN"},
+        {KW_SAVE, "SAVE"},
+        {KW_SETTEXT, "SETTEXT"},
+        {KW_STEP, "STEP"},
+        {KW_STOP, "STOP"},
+        {KW_STRS, "STR$"},
+        {KW_THEN, "THEN"},
+        {KW_TO, "TO"},
+        {KW_USR, "USR"},
+        {KW_VAL, "VAL"},
+        {KW_WAIT, "WAIT"}};
+    std::vector<std::string> order;
+    const std::string all = BASIC_KEYWORDS;
+    for (size_t at = all.find_first_not_of(' '); at != std::string::npos; at = all.find_first_not_of(' ', at)) {
+      const size_t end = all.find(' ', at);
+      order.push_back(all.substr(at, end - at));
+      at = end;
+    }
+    CHECK_EQ(order.size(), static_cast<size_t>(KW_COUNT));
+    CHECK_EQ(named.size(), order.size());
+    for (const auto& [byte, word] : named) {
+      CAPTURE(word);
+      REQUIRE(byte >= KW_FIRST);
+      REQUIRE(static_cast<size_t>(byte - KW_FIRST) < order.size());
+      CHECK_EQ(order[static_cast<size_t>(byte - KW_FIRST)], word);
+    }
+  }
+
+  namespace {
+
+  // Every keyword, four to a line in code position. Then each place a
+  // keyword stays text: a string, the rest of a REM line, a DATA line and
+  // a bang's text. Last, words run into a number or a name. Each line fits
+  // one screen row, so LIST shows it on a row of its own.
+  std::vector<std::string> everyKeywordLines() {
+    std::vector<std::string> words;
+    const std::string all = BASIC_KEYWORDS;
+    for (size_t at = all.find_first_not_of(' '); at != std::string::npos; at = all.find_first_not_of(' ', at)) {
+      const size_t end = all.find(' ', at);
+      const std::string w = all.substr(at, end - at);
+      if (w != "REM") words.push_back(w);
+      at = end;
+    }
+    std::vector<std::string> lines;
+    int n = 10;
+    for (size_t i = 0; i < words.size(); i += 4) {
+      // DATA first would make a DATA line, so every line opens with A=.
+      std::string line = std::to_string(n) + " A=";
+      for (size_t k = i; k < i + 4 && k < words.size(); k++) line += " " + words[k];
+      lines.push_back(line);
+      n += 10;
+    }
+    for (const std::string& l : {std::string("PRINT \"GOTO PRINT\";A$:REM GOTO print"), std::string("DATA 1,\"PRINT\",$FF,print"),
+                                 std::string("! SAVE print"), std::string("FOR I=1TO 3:forx=PRINT_:NEXT"),
+                                 std::string("A=CHR$(1)+STR$(2)+X$:GOTO10"), std::string("REM")}) {
+      lines.push_back(std::to_string(n) + " " + l);
+      n += 10;
+    }
+    return lines;
+  }
+
+  // The program's bytes in the interpreter's memory.
+  std::vector<uint8_t> storedProgram(const Session& s) {
+    const auto& ram = s.m->ram;
+    const size_t at = static_cast<size_t>(sysWord(s, basic::SYS_PROG));
+    const size_t len = static_cast<size_t>(sysWord(s, basic::SYS_PROG_LEN));
+    return std::vector<uint8_t>(ram.begin() + static_cast<std::ptrdiff_t>(at),
+                                ram.begin() + static_cast<std::ptrdiff_t>(at + len));
+  }
+
+  // The rows LIST printed, from the row under its echo to READY.
+  std::vector<std::string> listed(Session& s) {
+    type(s, "CLS");
+    type(s, "LIST", 20000000);
+    std::vector<std::string> rows;
+    bool on = false;
+    for (const std::string& row : screen(s)) {
+      if (on && row == "READY") break;
+      if (on) rows.push_back(row);
+      if (row == ">LIST") on = true;
+    }
+    return rows;
+  }
+
+  }  // namespace
+
+  TEST_CASE("LIST, SAVE and LOAD give back every keyword as it was typed") {
+    const std::vector<std::string> lines = everyKeywordLines();
+    std::string program;
+    for (const std::string& l : lines) program += l + "\n";
+    auto s = boot();
+    settle(*s);
+    for (const std::string& l : lines) enter(*s, l);
+    // Stored as bytes: the program is shorter than its text.
+    CHECK(storedProgram(*s).size() < program.size());
+    // The listing shows a keyword typed in small letters in capitals.
+    std::vector<std::string> want = lines;
+    for (std::string& l : want) {
+      const size_t sp = l.find(' ');
+      l = l.substr(0, sp + 1) + basic::canonicalLine(l.substr(sp + 1));
+    }
+    CHECK(listed(*s) == want);
+    type(*s, "!SAVE \"KW\"");
+    REQUIRE(s->slots.size() == 1);
+    std::string saved;
+    for (const std::string& l : want) saved += l + "\n";
+    CHECK_EQ(s->slots[0].second, saved);
+    type(*s, "NEW");
+    type(*s, "!LOAD \"KW\"", 40000000);
+    CHECK(listed(*s) == want);
+    CHECK(storedProgram(*s) == basic::encodeProgram(program));
+  }
+
+  TEST_CASE("the machine and the IDE store a line to the same bytes") {
+    // edit.c's crunch and program.cpp's crunchLine, over every keyword in
+    // capitals and in small letters.
+    std::string program;
+    auto s = boot();
+    settle(*s);
+    for (const std::string& l : everyKeywordLines()) {
+      std::string lower = l;
+      for (char& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      // The small letter copy goes 5 past each line's own number.
+      const size_t sp = lower.find(' ');
+      lower = std::to_string(std::stoi(lower.substr(0, sp)) + 5) + lower.substr(sp);
+      for (const std::string& line : {l, lower}) {
+        enter(*s, line);
+        program += line + "\n";
+      }
+    }
+    CHECK(storedProgram(*s) == basic::encodeProgram(program));
+    CHECK_EQ(basic::decodeProgram(storedProgram(*s)), basic::decodeProgram(basic::encodeProgram(program)));
+    for (const std::string& l : everyKeywordLines()) {
+      const std::string body = l.substr(l.find(' ') + 1);
+      CAPTURE(body);
+      CHECK_EQ(basic::expandLine(basic::crunchLine(body)), basic::canonicalLine(body));
+    }
+    // A byte of 128 or more, here the two of an e with an accent in UTF-8.
+    // Where the lexer never reads it, inside quotes, after REM and in a
+    // bang's text, it passes through unchanged.
+    const std::string e = "\xC3\xA9";
+    const std::string kept = "10 PRINT \"" + e + "\"\n20 REM " + e + "\n30 ! " + e + "\n40 DATA \"" + e + "\"\n";
+    CHECK_EQ(basic::refusedLine(kept), -1);
+    CHECK_EQ(basic::refusal(kept), "");
+    CHECK_EQ(basic::decodeProgram(basic::encodeProgram(kept)), kept);
+    CHECK_EQ(basic::expandLine(basic::crunchLine("PRINT \"" + e + "\"")), "PRINT \"" + e + "\"");
+    // Where the lexer reads it, it would be taken for a keyword. The IDE
+    // refuses the line and names it, and encodeProgram leaves it out.
+    for (const std::string& bad : {"A=1" + e, "PRINT " + e, "DATA 1," + e}) {
+      CAPTURE(bad);
+      const std::string text = "10 PRINT 1\n20 " + bad + "\n";
+      CHECK_EQ(basic::refusedLine(text), 20);
+      CHECK(has(basic::refusal(text), "Line 20 holds a byte of 128 or more outside a string"));
+      CHECK_EQ(basic::decodeProgram(basic::encodeProgram(text)), "10 PRINT 1\n");
+    }
+  }
+
+  TEST_CASE("RENUM over stored keywords changes the targets and nothing else") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s,
+               "5 REM GOTO 10 STAYS\n"
+               "10 FOR I=1 TO 2:GOSUB 40\n"
+               "20 NEXT I:IF I>2 THEN 30\n"
+               "30 RESTORE 50:A=DATA(50):GOTO 60\n"
+               "40 PRINT \"GOTO 10\";I;:RETURN\n"
+               "50 DATA 1,2\n"
+               "60 READ B:PRINT B\n");
+    type(*s, "RENUM 100, 5");
+    CHECK(listed(*s) == std::vector<std::string>{"100 REM GOTO 10 STAYS", "105 FOR I=1 TO 2:GOSUB 120",
+                                                 "110 NEXT I:IF I>2 THEN 115",
+                                                 "115 RESTORE 125:A=DATA(125):GOTO 130",
+                                                 "120 PRINT \"GOTO 10\";I;:RETURN", "125 DATA 1,2", "130 READ B:PRINT B"});
+    type(*s, "RUN", 40000000);
+    CHECK(has(text(*s), ">RUN\nGOTO 101GOTO 1021\nREADY"));
+  }
+
+  TEST_CASE("a keyword written out still runs as the keyword") {
+    // 1TO is one word to the store, and 1 then TO to the lexer. So TO
+    // stays text in the line, and the lexer looks it up.
+    CHECK(has(runOutput("10 FOR I=1TO 3:PRINT I;:NEXT\n"), "123"));
+    auto s = boot();
+    settle(*s);
+    type(*s, "for i=1 to 2:print i*3;:next");
+    CHECK(has(text(*s), "36"));
+  }
+
+  TEST_CASE("a keyword where a name stands gets the message it got as a name") {
+    // The screens after RUN, recorded from the interpreter before keywords
+    // were stored as bytes, with each line typed in.
+    const std::vector<std::pair<std::string, std::string>> before = {
+        {"10 TO = 5",
+         "? TO IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 LOAD \"X\"",
+         "? UNKNOWN WORD LOAD IN LINE 10 READY >"},
+        {"10 PRINT 1 THEN",
+         "1? THEN IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 INPUT PRINT",
+         "?"},
+        {"10 CALL PEEK(5)",
+         "? PEEK IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: USE ITS NUMBER HERE IN LINE 10 READY >"},
+        {"10 LET PRINT 5",
+         "? UNKNOWN WORD PRINT IN LINE 10 READY >"},
+        {"10 FOR TO=1 TO 5",
+         "? TO IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 IF 1 THEN THEN",
+         "? UNKNOWN WORD THEN IN LINE 10 READY >"},
+        {"10 A = 5 MOD",
+         "? SYNTAX ERROR IN LINE 10: EXPECTED A NUMBER, A VARIABLE OR ( BUT FOUND THE END OF THE LINE READY >"},
+        {"10 A = CHR$(5)",
+         "? STRINGS ARE COMPARED WITH = <> < > <= OR >= IN LINE 10 READY >"},
+        {"10 A$ = 5 + ABS",
+         "? A NUMBER CANNOT BE USED AS A STRING IN LINE 10 READY >"},
+        {"10 NEXT PRINT",
+         "? NEXT WITHOUT A FOR IN LINE 10 READY >"},
+        {"10 READ STEP",
+         "? STEP IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 LOADFONT PRINT",
+         "? NO FONT CALLED PRINT ON THE CARTRIDGE IN LINE 10 READY >"},
+        {"10 USR(1, RUN)",
+         "? UNKNOWN WORD USR IN LINE 10 READY >"},
+        {"10 A = STEP",
+         "? STEP IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 POKE 1 STEP 2",
+         "? STEP IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        {"10 A = 1: DATA 5",
+         "? SYNTAX ERROR IN LINE 10: EXPECTED A STATEMENT BUT FOUND DATA READY >"},
+        {"10 PRINT CHR$",
+         "? SYNTAX ERROR IN LINE 10: EXPECTED A NUMBER, A VARIABLE OR ( BUT FOUND THE END OF THE LINE READY >"},
+        {"10 X = NOT NOT",
+         "? SYNTAX ERROR IN LINE 10: EXPECTED A NUMBER, A VARIABLE OR ( BUT FOUND THE END OF THE LINE READY >"},
+    };
+    for (const auto& [program, screenAfter] : before) {
+      CAPTURE(program);
+      auto s = boot();
+      settle(*s);
+      enter(*s, program);
+      runToEnd(*s, 400);
+      std::string got = after(flat(*s), ">RUN ");
+      while (!got.empty() && got.back() == ' ') got.pop_back();
+      CHECK_EQ(got, screenAfter);
+    }
+  }
+
+
+  // Proposal 4: numbers stored with their value.
+
+  namespace {
+
+  // Numbers in every written form. Then values whose bytes would fool a
+  // reader that looked at them. Those are 0, a colon, a quote, a bang, a
+  // keyword's byte and the number marker itself.
+  std::vector<std::string> everyLiteralLines() {
+    return {
+        "10 A=61440+$F000+0b1010+0B11+$ff+007",
+        "20 PRINT 65535;65536;$FFFFF",
+        "25 PRINT 0b11111111111111111",
+        "30 A=0:B=$0:C=0b0:D=00",
+        "40 A=58:B=$3A3A:C=34:D=$2222:E=$2200",
+        "50 A=$2121:B=33:C=$8000:D=$BDBD:E=$BD",
+        "60 A=128:B=189:C=$FF00:REM 10 $F 0b1",
+        "70 POKE $F000,0b01000001:PRINT \"42 $2A\"",
+        "80 FOR I=1TO 3:A=1ABC:B=0B2:C=0bx:NEXT",
+        "90 DATA 7,$2A,0b101,\"9\"",
+        "100 ! 12 $34 0b1",
+    };
+  }
+
+  }  // namespace
+
+  TEST_CASE("LIST, SAVE and LOAD give back every number as it was typed") {
+    const std::vector<std::string> lines = everyLiteralLines();
+    std::string program;
+    for (const std::string& l : lines) program += l + "\n";
+    auto s = boot();
+    settle(*s);
+    for (const std::string& l : lines) enter(*s, l);
+    CHECK(listed(*s) == lines);
+    type(*s, "!SAVE \"NUM\"");
+    REQUIRE(s->slots.size() == 1);
+    CHECK_EQ(s->slots[0].second, program);
+    type(*s, "NEW");
+    type(*s, "!LOAD \"NUM\"", 40000000);
+    CHECK(listed(*s) == lines);
+    CHECK(storedProgram(*s) == basic::encodeProgram(program));
+    CHECK_EQ(basic::decodeProgram(storedProgram(*s)), program);
+    // The IDE's reading of the machine's memory, line by line.
+    const auto back = basic::programLines(storedProgram(*s));
+    CHECK_EQ(back.size(), lines.size());
+    for (const std::string& l : lines) {
+      const size_t sp = l.find(' ');
+      CHECK_EQ(back.at(std::stoi(l.substr(0, sp))), l.substr(sp + 1));
+    }
+  }
+
+  TEST_CASE("the machine and the IDE store a number to the same bytes") {
+    std::string program;
+    auto s = boot();
+    settle(*s);
+    for (const std::string& l : everyLiteralLines()) {
+      enter(*s, l);
+      program += l + "\n";
+    }
+    CHECK(storedProgram(*s) == basic::encodeProgram(program));
+    // A number keeps its value behind the marker: 61440 is $F000.
+    const auto p = basic::encodeProgram("10 A=61440\n");
+    CHECK(p == std::vector<uint8_t>{0, 10, 14, 'A', '=', KW_LITERAL, 0xF0, 0x00, '6', '1', '4', '4', '0', 0, 0, 0, 3});
+  }
+
+  TEST_CASE("a number runs as its value in every written form") {
+    CHECK(has(runOutput("10 PRINT 61440;$F000;0b1010;0B11;$ff;007;0;$0;0b0\n"), "-4096-40961032557000"));
+    CHECK(has(runOutput("10 PRINT 65535;65536;$FFFFF;0b11111111111111111\n"), "-10-1-1"));
+    CHECK(has(runOutput("10 A=$2222:B=$3A3A:C=$BDBD:D=$8000:PRINT A;B;C;D\n"), "873814906-16963-32768"));
+    CHECK(has(runOutput("10 PRINT 2+0b1*3:IF 0b1 THEN PRINT \"Y\"\n"), "5\nY"));
+    // Typed at the prompt, where a line is not stored.
+    auto s = boot();
+    settle(*s);
+    CHECK_EQ(printed(*s, "PRINT 0b101;$1F;0B1+1"), "5312");
+  }
+
+  TEST_CASE("DATA reads 0b numbers, a byte each") {
+    CHECK(has(runOutput("10 READ A,B,C:PRINT A;B;C\n20 DATA 0b1010,0B11111111,0b00000000001\n"), "102551"));
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 DATA 0b111111111\n");
+    runToEnd(*s);
+    CHECK(has(flat(*s), "A DATA VALUE IS ONE BYTE: -128 TO 255 IN LINE 10"));
+  }
+
+  TEST_CASE("a line too long for every number's value keeps the rest as digits") {
+    // 83 numbers in 190 characters. Their values would take 249 bytes
+    // more, so only the first ones get one. The line lists and runs as
+    // typed all the same.
+    std::string body = "POKE 24576";
+    for (int i = 0; i < 81; i++) body += ",7";
+    body += ":PRINT PEEK(24656)";
+    REQUIRE(body.size() <= 250);
+    const std::string line = "10 " + body;
+    // The prompt takes 79 characters, so the line comes in by LOAD, which
+    // stores it the way a typed line is stored.
+    auto s = boot();
+    settle(*s);
+    s->slots.emplace_back("LONG", line + "\n");
+    type(*s, "!LOAD \"LONG\"", 40000000);
+    type(*s, "!SAVE \"BACK\"");
+    REQUIRE(s->slots.size() == 2);
+    CHECK_EQ(s->slots[1].second, line + "\n");
+    const std::vector<uint8_t> stored = storedProgram(*s);
+    CHECK(stored.size() <= 250 + 4 + 3);
+    CHECK(stored == basic::encodeProgram(line + "\n"));
+    type(*s, "RUN", 40000000);
+    CHECK(has(text(*s), ">RUN\n7\nREADY"));
+  }
+
+  // Proposal 5: an operand without an operator skips the descent.
+
+  TEST_CASE("a bare operand skips the expression parser's descent") {
+    // A pass of the loop with the statement, less a pass with a REM line
+    // in its place. With proposals 1, 2 and 4 in, POKE 24576, A cost 2,374
+    // cycles there, two descents through the parser included. With the
+    // fast path it measured 1,893.
+    auto loop = [](const std::string& st) {
+      return numberedTo({"A=7", "FOR I=1 TO 200", st, "NEXT I", "END"}, 5);
+    };
+    const uint64_t base = runCycles(loop("REM"));
+    const uint64_t poke = (runCycles(loop("POKE 24576, A")) - base) / 200;
+    CAPTURE(poke);
+    CHECK(poke < 2100);
+  }
+
+  TEST_CASE("an operand ends at a comma, a colon, a closing bracket or the end of the line") {
+    CHECK(has(runOutput("10 A=7:B=24576:POKE B,A:PRINT PEEK(B);:PRINT A\n"), "77"));
+    CHECK(has(runOutput("10 A=3:FOR I=1 TO A:PRINT I;:NEXT\n"), "123"));
+    CHECK(has(runOutput("10 A=3:PRINT HEX$(A,2);CHR$(65)\n"), "03A"));
+    CHECK(has(runOutput("10 A=3:IF A THEN PRINT \"T\"\n"), "T"));
+  }
+
+  TEST_CASE("GOTO typed at the prompt after an edit sets pc to the moved line and runs nothing") {
+    // GOTO at the prompt sets pc and stops: the prompt's line is all that
+    // runs, and RUN starts from the first line. So no stored line runs
+    // with the cache the last RUN left. The line it names is found by the
+    // walk, where the edit moved it.
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 GOTO 100\n20 PRINT \"NO\"\n100 PRINT \"L100\"\n110 END\n");
+    runToEnd(*s);
+    REQUIRE(has(after(text(*s), ">RUN\n"), "L100"));
+    type(*s, "50 REM A LINE THAT MOVES LINE 100 FURTHER ON");
+    type(*s, "CLS");
+    type(*s, "GOTO 100");
+    // SYS_PC, $16 on the system page: the offset of the line to run next.
+    CHECK_EQ(sysWord(*s, 0x16), lineOffset(*s, 100));
+    CHECK_EQ(s->m->ram[basic::SYS_RUNNING], 0);
+    CHECK_FALSE(has(text(*s), "L100"));
+    CHECK_FALSE(has(text(*s), "?"));
+  }
+}

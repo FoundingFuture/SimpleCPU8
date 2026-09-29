@@ -178,24 +178,28 @@ PRINT 32767+1
 -32768
 ```
 
-A number written past 32767 wraps the same way, so `PRINT 40000` shows
--25536. The boxes still come out right: `POKE 40000,7` and `PEEK(40000)`
-both reach box 40000.
+A number written past 32767 wraps the same way, so `PRINT 50000` shows
+-15536. The boxes still come out right: `POKE 50000,7` and `PEEK(50000)`
+both reach box 50000.
 
 `HEX$` writes a number in hex, the way box numbers are written with a
 dollar sign, and never shows it negative:
 
 ```basic
-PRINT 40000
-PRINT HEX$(40000)
+PRINT 50000
+PRINT HEX$(50000)
 ```
 
 ```text
--25536
-9C40
+-15536
+C350
 ```
 
 `HEX$(n,4)` pads with zeros to four digits, so `HEX$(10,4)` is `000A`.
+
+A number written with `0b` in front is binary, one digit per bit, so
+`0b1010` is 10 and `0b11110000` is 240. It reads well where each bit
+means a pixel or a switch.
 
 Text in quotes is called a string. A semicolon joins two things with no
 gap. A comma puts one space between them.
@@ -293,7 +297,7 @@ READY
 >
 ```
 
-A program holds up to 6144 bytes of lines, and a line holds up to 79
+A program holds up to 16384 bytes of lines, and a line holds up to 79
 characters.
 
 ## Remembering things
@@ -357,16 +361,18 @@ has a number instead. `PEEK` looks into a box by its number and `POKE`
 puts a value in.
 
 ```basic
-10 POKE 40000,77
-20 PRINT PEEK(40000)
+10 POKE 50000,77
+20 PRINT PEEK(50000)
 ```
 
 ```text
 77
 ```
 
-Box 40000 now holds 77. A box holds one byte, which is a number from 0
-to 255.
+Box 50000 now holds 77. A box holds one byte, which is a number from 0
+to 255. An address above 32767 prints as a negative number, so
+`PRINT 50000` shows -15536, and `POKE` and `PEEK` take it either way:
+`POKE -15536,7` fills box 50000.
 
 The screen is made of boxes too. Box 61440, which is `$F000`, is the top
 left cell of the text screen. The 42 boxes after it are the rest of the
@@ -397,9 +403,17 @@ The semicolon at the end of `PRINT` stops it moving to a new line. The
 word HERE appears at column 10, row 5.
 
 `DEEK` and `DOKE` do the same for a pair of boxes at once, so a number up
-to 65535 fits. `DOKE 40000,1000` puts 3 in box 40000 and 232 in box
-40001, because 3 times 256 plus 232 is 1000. `DEEK(40000)` reads it back
+to 65535 fits. `DOKE 50000,1000` puts 3 in box 50000 and 232 in box
+50001, because 3 times 256 plus 232 is 1000. `DEEK(50000)` reads it back
 as 1000. You will not need them for a long while.
+
+The program sits in boxes too, 16384 of them, and `DEEK(8)` is the
+number of its first box. A keyword such as `PRINT` takes one box there,
+a number from 128 up, and `LIST` spells it out again. A number such as
+61440 keeps its value in two boxes in front of its digits, so `RUN`
+never works it out from the digits. A `POKE` into the program while it
+runs is not supported. `RUN` remembers the line each `GOTO`, `GOSUB` and
+`THEN` found, and a jump keeps going where the old text sent it.
 
 ## Fonts
 
@@ -470,13 +484,14 @@ a `DATA` line and does nothing.
 
 When the program starts, `RUN` also puts every value in memory, one byte
 each. So a value must fit in a box: 0 to 255, or -128 to -1. A number
-written with a dollar sign in front is hex, so `$0F` is 15. A `DATA`
+written with a dollar sign in front is hex, so `$0F` is 15, and one
+with `0b` in front is binary, so `0b1111` is 15 too. A `DATA`
 line that starts with such a number, three or four digits after the `$`,
 says which box the bytes go to. The next lines carry on from there.
 
 ```basic
-10 PRINT PEEK(40000);" ";PEEK(40003)
-100 DATA $9C40,10,20,30
+10 PRINT PEEK(50000);" ";PEEK(50003)
+100 DATA $C350,10,20,30
 110 DATA 40,50,60
 ```
 
@@ -484,14 +499,14 @@ says which box the bytes go to. The next lines carry on from there.
 10 40
 ```
 
-`$9C40` is 40000, so 10, 20 and 30 go to boxes 40000 to 40002, and line
-110 carries on at 40003. `READ` skips the address and gives 10 first.
-`DATA(110)` gives the box line 110 starts at, 40003. Numbers stop at
-32767, so `PRINT DATA(110)` shows -25533. `PEEK` and `POKE` still find
+`$C350` is 50000, so 10, 20 and 30 go to boxes 50000 to 50002, and line
+110 carries on at 50003. `READ` skips the address and gives 10 first.
+`DATA(110)` gives the box line 110 starts at, 50003. Numbers stop at
+32767, so `PRINT DATA(110)` shows -15533. `PEEK` and `POKE` still find
 the right box.
 
-`POKE` takes a list too. `POKE 40000,1,2,3` puts 1 in box 40000, 2 in
-40001 and 3 in 40002.
+`POKE` takes a list too. `POKE 50000,1,2,3` puts 1 in box 50000, 2 in
+50001 and 3 in 50002.
 
 ## Making decisions
 
@@ -1084,4 +1099,5 @@ Functions, used inside an expression:
 Operators, in order from tightest to loosest: `-` and `NOT` on one
 value, then `*`, `/` and `MOD`, then `+` and `-`, then `=`, `<>`, `<`,
 `>`, `<=` and `>=`, then `AND`, then `OR`. A number may be written in
-hex with a dollar sign, so `$F000` is 61440. Strings join with `+`.
+hex with a dollar sign, so `$F000` is 61440, or in binary with `0b`, so
+`0b101` is 5. Strings join with `+`.

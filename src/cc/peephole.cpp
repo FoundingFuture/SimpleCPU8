@@ -251,7 +251,13 @@ class Pass {
   }
 
   bool run() {
+    // A rule that rewrites a line runs alone in its round, since the other
+    // rules read what each line was when the round began.
+    if (branchOnAnswer()) return true;
+    if (threadJumps()) return true;
+    if (invertJumps()) return true;
     bool changed = false;
+    changed |= unreachable();
     changed |= jumpsToNext();
     changed |= knownValues();
     changed |= knownWords();
@@ -261,12 +267,177 @@ class Pass {
   }
 
   std::vector<bool> alive() const { return alive_; }
+  // The lines a rule rewrote, by index, with their new text.
+  const std::map<size_t, std::string>& rewritten() const { return rewritten_; }
 
  private:
   const std::vector<std::string>& lines_;
   std::vector<Line> info_;
   std::vector<bool> alive_;
   std::map<std::string, size_t> labels_;
+  std::map<size_t, std::string> rewritten_;
+
+  void rewrite(size_t i, const std::string& ins) { rewritten_[i] = "        " + ins; }
+
+  // The first alive instruction from i on, past labels, statement marks
+  // and comments. lines_.size() when something else comes first.
+  size_t insFrom(size_t i) const {
+    for (size_t j = i; j < lines_.size(); j = next(j)) {
+      if (!alive_[j]) continue;
+      const Line& l = info_[j];
+      if (l.kind == Kind::Label || l.kind == Kind::Skip) continue;
+      return l.kind == Kind::Ins ? j : lines_.size();
+    }
+    return lines_.size();
+  }
+
+  // Is A written before it is read, on every path from line j? A call and
+  // a return end A's life. The runtime routines write A before they read
+  // it. A compiled function takes its arguments in its frame and answers
+  // in __ret. A statement starts with nothing held in A.
+  bool aDeadFrom(size_t j, int hops) const {
+    for (; j < lines_.size(); j = next(j)) {
+      const Line& l = info_[j];
+      if (l.stmt) return true;
+      if (l.kind == Kind::Label || l.kind == Kind::Skip) continue;
+      if (l.kind != Kind::Ins) return false;
+      if (l.flow) {
+        if (l.mnem == "JSR" || l.mnem == "RET" || l.mnem == "HLT") return true;
+        if (hops == 0) return false;
+        const auto target = labels_.find(l.src);
+        if (target == labels_.end() || !aDeadFrom(target->second, hops - 1)) return false;
+        if (l.mnem == "JMP") return true;
+        continue;
+      }
+      if (l.readsA) return false;
+      if (l.writesA) return true;
+    }
+    return false;
+  }
+
+  // An answer built as 0 or 1 only to be tested. boolValue in codegen.cpp
+  // writes the first six lines. The test after an inlined call writes the
+  // rest.
+  //     LD A <- 0 / JMP done / yes: / LD A <- 1 / done: / LD [t] <- A /
+  //     (labels) / LD A <- [t] / JZ X or JNZ X.
+  // The arm whose answer the test sends to X jumps to X. The other goes on
+  // after the test, and the byte and its test go. The byte is a temp no
+  // path reads again. A and the flags are dead on both paths. The labels
+  // between the store and the load have no jump.
+  bool branchOnAnswer() {
+    bool changed = false;
+    const std::map<std::string, int> refs = refCounts();
+    auto refsOf = [&](const std::string& name) {
+      const auto r = refs.find(name);
+      return r == refs.end() ? 0 : r->second;
+    };
+    for (size_t i = 0; i < lines_.size(); i++) {
+      if (!alive_[i] || info_[i].kind != Kind::Ins) continue;
+      const Line& zero = info_[i];
+      if (zero.mnem != "LD" || zero.dst != "A" || zero.src != "0") continue;
+      const size_t jmp = insFrom(next(i));
+      if (jmp != next(i) || info_[jmp].mnem != "JMP") continue;
+      const std::string done = info_[jmp].src;
+      const size_t yes = next(jmp);
+      if (yes >= lines_.size() || info_[yes].kind != Kind::Label) continue;
+      const size_t one = insFrom(yes);
+      if (one >= lines_.size() || info_[one].mnem != "LD" || info_[one].dst != "A" || info_[one].src != "1") continue;
+      const size_t doneAt = next(one);
+      if (doneAt >= lines_.size() || info_[doneAt].kind != Kind::Label || labelName(doneAt) != done) continue;
+      if (refsOf(done) != 1) continue;
+      const size_t store = insFrom(doneAt);
+      if (store >= lines_.size() || info_[store].byteStore.empty()) continue;
+      const std::string t = info_[store].byteStore;
+      if (!isTempBase(baseOf(t))) continue;
+      size_t load = next(store);
+      bool quiet = true;
+      for (; load < lines_.size() && info_[load].kind == Kind::Label; load = next(load)) {
+        if (refsOf(labelName(load)) != 0) quiet = false;
+      }
+      if (!quiet || load >= lines_.size() || info_[load].kind != Kind::Ins) continue;
+      if (info_[load].mnem != "LD" || info_[load].dst != "A" || info_[load].src != t) continue;
+      const size_t test = next(load);
+      if (test >= lines_.size() || info_[test].kind != Kind::Ins) continue;
+      const std::string cc = info_[test].mnem;
+      if (cc != "JZ" && cc != "JNZ") continue;
+      const std::string x = info_[test].src;
+      const auto xAt = labels_.find(x);
+      if (xAt == labels_.end()) continue;
+      const size_t after = next(test);
+      int budget = 64;
+      const std::string base = baseOf(t);
+      const int bytes = bytesOf(info_[store], base);
+      if (!unread(after, base, bytes, budget) || !unread(xAt->second, base, bytes, budget)) continue;
+      if (!aDeadFrom(after, 4) || !aDeadFrom(xAt->second, 4)) continue;
+      if (!flagsDeadFrom(after, 4) || !flagsDeadFrom(xAt->second, 4)) continue;
+      alive_[i] = false;
+      alive_[store] = false;
+      alive_[load] = false;
+      alive_[test] = false;
+      if (cc == "JZ") {
+        // False goes to X, true goes on after the test.
+        rewrite(jmp, "JMP " + x);
+        alive_[one] = false;
+      } else {
+        // True goes to X, false goes on at done, now after the test.
+        rewrite(one, "JMP " + x);
+      }
+      changed = true;
+      i = test;
+    }
+    return changed;
+  }
+
+  // A jump to a label whose first instruction is JMP Y goes to Y.
+  bool threadJumps() {
+    bool changed = false;
+    for (size_t i = 0; i < lines_.size(); i++) {
+      if (!alive_[i] || info_[i].kind != Kind::Ins || !isJump(info_[i].mnem)) continue;
+      const auto target = labels_.find(info_[i].src);
+      if (target == labels_.end()) continue;
+      const size_t j = insFrom(target->second);
+      if (j >= lines_.size() || j == i || info_[j].mnem != "JMP" || info_[j].src == info_[i].src) continue;
+      rewrite(i, info_[i].mnem + " " + info_[j].src);
+      changed = true;
+    }
+    return changed;
+  }
+
+  static std::string inverse(const std::string& cc) {
+    static const std::map<std::string, std::string> pairs = {{"JZ", "JNZ"}, {"JNZ", "JZ"}, {"JC", "JNC"},
+                                                             {"JNC", "JC"}, {"JN", "JP"},  {"JP", "JN"},
+                                                             {"JV", "JNV"}, {"JNV", "JV"}};
+    const auto p = pairs.find(cc);
+    return p == pairs.end() ? "" : p->second;
+  }
+
+  // Jcc L1 / JMP L2 / L1: is J(not cc) L2 / L1:. The labels between the
+  // two jumps may have no jump to them, since the JMP goes.
+  bool invertJumps() {
+    bool changed = false;
+    const std::map<std::string, int> refs = refCounts();
+    for (size_t i = 0; i < lines_.size(); i++) {
+      if (!alive_[i] || info_[i].kind != Kind::Ins || !isJump(info_[i].mnem)) continue;
+      const std::string flip = inverse(info_[i].mnem);
+      if (flip.empty()) continue;
+      size_t j = next(i);
+      bool quiet = true;
+      for (; j < lines_.size() && info_[j].kind == Kind::Label; j = next(j)) {
+        if (refs.count(labelName(j))) quiet = false;
+      }
+      if (!quiet || j >= lines_.size() || info_[j].kind != Kind::Ins || info_[j].mnem != "JMP") continue;
+      bool lands = false;
+      for (size_t k = next(j); k < lines_.size() && info_[k].kind == Kind::Label; k = next(k)) {
+        if (labelName(k) == info_[i].src) lands = true;
+      }
+      if (!lands) continue;
+      rewrite(i, flip + " " + info_[j].src);
+      alive_[j] = false;
+      changed = true;
+      i = j;
+    }
+    return changed;
+  }
 
   size_t next(size_t i) const {
     for (size_t j = i + 1; j < lines_.size(); j++) {
@@ -308,6 +479,31 @@ class Pass {
       if (!z && !n) return true;
     }
     return false;
+  }
+
+  // An instruction after a JMP, a RET or a HLT that no jump reaches: the
+  // labels between have no jump to them. Nothing past a barrier or a
+  // statement mark is taken.
+  bool unreachable() {
+    bool changed = false;
+    const std::map<std::string, int> refs = refCounts();
+    for (size_t i = 0; i < lines_.size(); i++) {
+      if (!alive_[i] || info_[i].kind != Kind::Ins) continue;
+      const std::string& m = info_[i].mnem;
+      if (m != "JMP" && m != "RET" && m != "HLT") continue;
+      for (size_t j = next(i); j < lines_.size(); j = next(j)) {
+        const Line& l = info_[j];
+        if (l.stmt || l.kind == Kind::Barrier) break;
+        if (l.kind == Kind::Label) {
+          if (refs.count(labelName(j))) break;
+          continue;
+        }
+        if (l.kind != Kind::Ins) break;
+        alive_[j] = false;
+        changed = true;
+      }
+    }
+    return changed;
   }
 
   // JMP L, or a conditional jump to L, right before L.
@@ -633,15 +829,17 @@ std::vector<std::string> peephole(const std::vector<std::string>& lines, std::ve
   // The end of the text ends every statement.
   cur.push_back(STMT_MARK);
   origin.push_back(static_cast<int>(lines.size()));
-  for (int round = 0; round < 8; round++) {
+  for (int round = 0; round < 16; round++) {
     Pass pass(cur);
     if (!pass.run()) break;
     const std::vector<bool> alive = pass.alive();
+    const std::map<size_t, std::string>& rewritten = pass.rewritten();
     std::vector<std::string> kept;
     std::vector<int> keptOrigin;
     for (size_t i = 0; i < cur.size(); i++) {
       if (!alive[i]) continue;
-      kept.push_back(cur[i]);
+      const auto r = rewritten.find(i);
+      kept.push_back(r == rewritten.end() ? cur[i] : r->second);
       keptOrigin.push_back(origin[i]);
     }
     cur = std::move(kept);
