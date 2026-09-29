@@ -59,16 +59,18 @@ static unsigned int jc_found;
  */
 static unsigned char jc_hit(void)
 {
-    char *t;
+    unsigned char *t;
     jc_at = 0;
     if (jc_on == 0) return 0;
     /* A pointer that walks reads a byte in two instructions, where
      * lx_text[i] adds two words first.
      */
-    t = lx_text + lx_pos;
+    t = (unsigned char *)lx_text + lx_pos;
     while (*t == 32) t = t + 1;
-    /* THEN B = 1 has no number to look up. A $ starts a hex one. */
-    if ((*t < 48 || *t > 57) && *t != 36) return 0;
+    /* THEN B = 1 has no number to look up. A stored number starts with
+     * its marker, and one kept as digits with a digit or a $.
+     */
+    if (*t != KW_LITERAL && (*t < 48 || *t > 57) && *t != 36) return 0;
     jc_at = (unsigned int)t - (unsigned int)prog;
     jc_slot = jc_at ^ (jc_at >> 8);
     if (jc_site[jc_slot] != jc_at) return 0;

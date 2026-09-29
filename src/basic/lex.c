@@ -39,6 +39,33 @@ static unsigned char ishex(unsigned char c)
     return isdig(c) || (c >= 65 && c <= 70);
 }
 
+static unsigned char isbin(unsigned char c) { return c == 48 || c == 49; }
+
+/* True when the text at t opens a binary number: 0b and a binary digit. */
+static unsigned char at_binary(unsigned char *t)
+{
+    return t[0] == 48 && (t[1] == 98 || t[1] == 66) && isbin(t[2]);
+}
+
+/* Past the digits of the number that starts at t: $ and hex digits, 0b and
+ * binary digits, or decimal digits. The lexer reads a number over the
+ * same extent, so a stored literal's digits end where they ended when
+ * typed.
+ */
+static unsigned char *past_number(unsigned char *t)
+{
+    if (*t == 36) {
+        t = t + 1;
+        while (ishex(*t)) t = t + 1;
+    } else if (at_binary(t)) {
+        t = t + 2;
+        while (isbin(*t)) t = t + 1;
+    } else {
+        while (isdig(*t)) t = t + 1;
+    }
+    return t;
+}
+
 static unsigned char hexval(unsigned char c)
 {
     c = upper(c);
@@ -112,6 +139,30 @@ void lx_next(void)
 
     if (c == 0) { lx_tok = T_END; lx_len = 0; return; }
 
+    /* A number a stored line holds with its value, docs/design/basic-speed.md
+     * proposal 4. The word loads in one instruction, and the digits after
+     * it are stepped over, never converted.
+     */
+    if (c == KW_LITERAL) {
+        unsigned char *t;
+        t = (unsigned char *)lx_text + lx_pos;
+        lx_num = *(int *)(t + 1);
+        t = t + 3;
+        /* Most numbers are decimal and start with 1 to 9. A 0 may open
+         * 0b, and a $ opens hex.
+         */
+        if (*t > 48 && *t <= 57) {
+            t = t + 1;
+            while (*t >= 48 && *t <= 57) t = t + 1;
+        } else {
+            t = past_number(t);
+        }
+        lx_pos = (unsigned int)t - (unsigned int)lx_text;
+        lx_tok = T_NUM;
+        lx_len = 0;
+        return;
+    }
+
     /* A keyword a stored line holds as its byte. */
     if (c >= KW_FIRST) {
         lx_kw = c;
@@ -122,6 +173,20 @@ void lx_next(void)
     }
 
     if (isdig(c)) {
+        /* A binary number, 0b1010, the way a bit pattern reads. Sixteen
+         * bits wrap, as decimal does.
+         */
+        if (c == 48 && at_binary((unsigned char *)&lx_text[lx_pos])) {
+            lx_num = 0;
+            lx_pos = lx_pos + 2;
+            while (isbin(lx_text[lx_pos])) {
+                lx_num = (lx_num << 1) | (lx_text[lx_pos] - 48);
+                lx_pos = lx_pos + 1;
+            }
+            lx_tok = T_NUM;
+            lx_len = 0;
+            return;
+        }
         lx_num = 0;
         while (isdig(lx_text[lx_pos])) {
             lx_num = lx_num * 10 + (lx_text[lx_pos] - 48);

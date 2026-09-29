@@ -7,9 +7,11 @@
  * lost by using it as the terminator.
  *
  * The text holds each keyword as one byte, KW_ in keywords.h, so the lexer
- * reads a keyword in one load. LIST, SAVE and RENUM read the words back
- * with ed_expand. Strings, the rest of a line after REM or a bang, and a
- * DATA line stay as typed. docs/design/basic-speed.md, proposal 2.
+ * reads a keyword in one load. A number holds its value behind a marker,
+ * KW_LITERAL, ahead of its digits, so the lexer never converts them. LIST,
+ * SAVE and RENUM read the text back with ed_expand. Strings, the rest of a
+ * line after REM or a bang, and a DATA line stay as typed.
+ * docs/design/basic-speed.md, proposals 2 and 4.
  */
 unsigned char prog[PROGMAX];
 
@@ -207,13 +209,46 @@ static unsigned char data_line(unsigned char *t)
     return word_is(t, n, "DATA");
 }
 
+static unsigned char hex_of(unsigned char c)
+{
+    c = upper_of(c);
+    if (c >= 65) return c - 55;
+    return c - 48;
+}
+
+/* The value of the number that starts at t[i], and where it ends. */
+static unsigned int lit_val;
+
+/* Where the number that starts at t[i] ends, read as the lexer reads one:
+ * $ and hex digits, 0b and binary digits, or decimal digits. Its value
+ * goes to lit_val, wrapped at 16 bits as the lexer wraps it.
+ */
+static unsigned int lit_end(unsigned char *t, unsigned int i)
+{
+    unsigned int v;
+    v = 0;
+    if (t[i] == 36) {
+        i = i + 1;
+        while (is_hex(t[i])) { v = (v << 4) | hex_of(t[i]); i = i + 1; }
+    } else if (t[i] == 48 && (t[i + 1] == 98 || t[i + 1] == 66) && (t[i + 2] == 48 || t[i + 2] == 49)) {
+        i = i + 2;
+        while (t[i] == 48 || t[i] == 49) { v = (v << 1) | (t[i] - 48); i = i + 1; }
+    } else {
+        while (is_digit(t[i])) { v = v * 10 + (t[i] - 48); i = i + 1; }
+    }
+    lit_val = v;
+    return i;
+}
+
+/* How many numbers the last crunch_pass met. */
+static unsigned char lit_count;
+
 /* The typed text t as a stored line at o, with its length returned. The
  * walk is keywords_up's, and a keyword it would put in capitals becomes
- * its byte. A DATA line stays text, which data.c reads as it always has.
- * crunchLine in program.cpp is the IDE's copy of this rule, and a test
- * holds the two to one result.
+ * its byte. The first marks numbers get their value behind KW_LITERAL.
+ * A DATA line stays text, which data.c reads as it always has.
  */
-static unsigned int crunch(unsigned char *t, unsigned char *o)
+static unsigned int crunch_pass(unsigned char *t, unsigned char *o, unsigned char marks)
 {
     unsigned int i;
     unsigned int j;
@@ -221,6 +256,7 @@ static unsigned int crunch(unsigned char *t, unsigned char *o)
     unsigned char k;
     i = 0;
     n = 0;
+    lit_count = 0;
     if (data_line(t)) {
         while (t[i]) { o[n] = t[i]; n = n + 1; i = i + 1; }
         o[n] = 0;
@@ -232,11 +268,24 @@ static unsigned int crunch(unsigned char *t, unsigned char *o)
         if (t[i] == 34) {
             while (t[j] && t[j] != 34) j = j + 1;
             if (t[j]) j = j + 1;
-        } else if (t[i] == 36 && is_hex(t[i + 1])) {
-            while (is_hex(t[j])) j = j + 1;
-        } else if (is_digit(t[i])) {
-            /* A number runs over letters, as the IDE's does: 1TO stays. */
-            while (is_name(t[j]) || t[j] == 46) j = j + 1;
+        } else if ((t[i] == 36 && is_hex(t[i + 1])) || is_digit(t[i])) {
+            /* A word that starts with a digit runs over letters, as the
+             * IDE's does: 1TO stays. The number at its start is the one
+             * the lexer reads, and the letters after it stay text.
+             */
+            if (t[i] == 36) {
+                while (is_hex(t[j])) j = j + 1;
+            } else {
+                while (is_name(t[j]) || t[j] == 46) j = j + 1;
+            }
+            lit_end(t, i);
+            if (lit_count < marks) {
+                o[n] = KW_LITERAL;
+                o[n + 1] = lit_val >> 8;
+                o[n + 2] = lit_val;
+                n = n + 3;
+            }
+            lit_count = lit_count + 1;
         } else if (is_letter(t[i]) || t[i] == 95) {
             while (is_name(t[j])) j = j + 1;
             if (t[j] == 36) j = j + 1;
@@ -258,6 +307,25 @@ static unsigned int crunch(unsigned char *t, unsigned char *o)
     return n;
 }
 
+/* The typed text t as a stored line at o, with its length returned.
+ * crunchLine in program.cpp is the IDE's copy of this rule, and a test
+ * holds the two to one result.
+ *
+ * DESIGN: a number's value costs 3 bytes, and a stored line holds 250 at
+ * most. The first numbers of the line get their value while the line
+ * fits. A number past that stays digits, which the lexer still reads.
+ */
+static unsigned int crunch(unsigned char *t, unsigned char *o)
+{
+    unsigned int n;
+    unsigned char marks;
+    n = crunch_pass(t, o, 0);
+    marks = lit_count;
+    if (n + 3 * marks > 250) marks = (250 - n) / 3;
+    if (marks == 0) return n;
+    return crunch_pass(t, o, marks);
+}
+
 unsigned int ed_expand(unsigned char *t, char *o)
 {
     unsigned int i;
@@ -274,6 +342,13 @@ unsigned int ed_expand(unsigned char *t, char *o)
     while (t[i]) {
         c = t[i];
         i = i + 1;
+        /* A number's value, which may hold any byte, 0 included. Its
+         * digits follow as text.
+         */
+        if (c == KW_LITERAL) {
+            i = i + 2;
+            continue;
+        }
         if (c >= KW_FIRST) {
             w = kw_text(c);
             while (*w != 32) { o[n] = *w; n = n + 1; w = w + 1; }

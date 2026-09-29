@@ -21,6 +21,13 @@
 /* How many words the list holds. */
 #define KW_COUNT     61
 #define KW_FIRST     128
+/* The byte after the last word's marks a number literal: the marker, the
+ * value as a big-endian word, then the digits as typed. The two value
+ * bytes can be anything, 0 and a colon included, so every reader of a
+ * stored line steps over them by the marker. docs/design/basic-speed.md,
+ * proposal 4.
+ */
+#define KW_LITERAL   (KW_FIRST + KW_COUNT)
 
 #define KW_ABS       128
 #define KW_AND       129

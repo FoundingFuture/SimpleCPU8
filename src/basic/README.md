@@ -7,7 +7,8 @@ packages/ui/src/basic/ with extract.mjs. The script writes each TypeScript
 string constant to a file with its exact value. bang.c, store.c and data.c
 are new in this tree.
 This BASIC differs from the browser's in its drawing words, in RENUM, in
-DATA, in HEX$, in its fonts, in its jump cache and in its stored keywords. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
+DATA, in HEX$, in its fonts, in its jump cache, in its stored keywords and numbers, and in `0b`
+numbers. `INK` replaces `COLOR` in run.c, and `PIXEL` replaces `POINT` in
 expr.c. `PLOT` draws in the INK colour, where it drew white. `CIRCLE rx,
 ry, fill` draws a ring in INK with an optional fill, where `CIRCLE r`
 filled a disc. main.c sets INK to white at boot. `RENUM start, step` is
@@ -28,6 +29,11 @@ back into text for LIST, SAVE and RENUM. A DATA line, a string, the rest
 of a REM line and a bang's text stay as typed. lex.c reads the byte, and
 still looks up a keyword written out, as in a typed command or `1TO`.
 run.c and expr.c test `lx_kw` where they called `lx_is`.
+A stored number carries its value: the byte KW_LITERAL, the value high
+byte first, then the digits as typed. lex.c loads the value and steps
+over the digits. A line keeps values for as many numbers as fit in 250
+bytes, and the rest stay digits. `0b1010` is new, a binary number, in
+lex.c, in the store and in data.c's byte check.
 A refresh from upstream undoes all of this, so redo it after one.
 
 ## Files

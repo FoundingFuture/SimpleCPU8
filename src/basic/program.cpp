@@ -118,9 +118,31 @@ bool isDataLine(std::string_view t) {
 
 }  // namespace
 
-// The walk is canonicalLine's, and a word it puts in capitals becomes its
-// byte. crunch in edit.c is the machine's copy of this rule.
-std::string crunchLine(std::string_view body) {
+namespace {
+
+// lit_end in edit.c: the value of the number at the start of t, read the
+// way the lexer reads one, wrapped at 16 bits.
+uint16_t numberValue(std::string_view t) {
+  uint16_t v = 0;
+  size_t i = 0;
+  auto at = [&](size_t k) { return k < t.size() ? t[k] : '\0'; };
+  if (at(0) == '$') {
+    for (i = 1; isHexDigit(at(i)); i++) {
+      const char c = static_cast<char>(std::toupper(static_cast<unsigned char>(at(i))));
+      v = static_cast<uint16_t>((v << 4) | (c >= 'A' ? c - 'A' + 10 : c - '0'));
+    }
+  } else if (at(0) == '0' && (at(1) == 'b' || at(1) == 'B') && (at(2) == '0' || at(2) == '1')) {
+    for (i = 2; at(i) == '0' || at(i) == '1'; i++) v = static_cast<uint16_t>((v << 1) | (at(i) - '0'));
+  } else {
+    for (i = 0; isDigit(at(i)); i++) v = static_cast<uint16_t>(v * 10 + (at(i) - '0'));
+  }
+  return v;
+}
+
+// One walk of crunch_pass in edit.c. The first `marks` numbers get their
+// value behind KW_LITERAL. `numbers` counts the numbers met.
+std::string crunchPass(std::string_view body, size_t marks, size_t& numbers) {
+  numbers = 0;
   if (isDataLine(body)) return canonicalLine(body);
   std::string out;
   size_t i = 0;
@@ -130,10 +152,19 @@ std::string crunchLine(std::string_view body) {
     if (c == '"') {
       end = body.find('"', i + 1);
       end = end == std::string_view::npos ? body.size() : end + 1;
-    } else if (c == '$' && i + 1 < body.size() && isHexDigit(body[i + 1])) {
-      while (end < body.size() && isHexDigit(body[end])) end++;
-    } else if (isDigit(c)) {
-      while (end < body.size() && (isNameChar(body[end]) || body[end] == '.')) end++;
+    } else if ((c == '$' && i + 1 < body.size() && isHexDigit(body[i + 1])) || isDigit(c)) {
+      if (c == '$') {
+        while (end < body.size() && isHexDigit(body[end])) end++;
+      } else {
+        while (end < body.size() && (isNameChar(body[end]) || body[end] == '.')) end++;
+      }
+      if (numbers < marks) {
+        const uint16_t v = numberValue(body.substr(i));
+        out += static_cast<char>(KW_LITERAL);
+        out += static_cast<char>(v >> 8);
+        out += static_cast<char>(v & 255);
+      }
+      numbers++;
     } else if (isNameStart(c)) {
       while (end < body.size() && isNameChar(body[end])) end++;
       if (end < body.size() && body[end] == '$') end++;
@@ -157,6 +188,20 @@ std::string crunchLine(std::string_view body) {
   return out;
 }
 
+}  // namespace
+
+// crunch in edit.c is the machine's copy of this rule. A number's value
+// costs 3 bytes, and a stored line holds 250. So the first numbers get
+// their value while the line fits, and the rest stay digits.
+std::string crunchLine(std::string_view body) {
+  size_t numbers = 0;
+  std::string out = crunchPass(body, 0, numbers);
+  size_t marks = numbers;
+  if (out.size() + 3 * marks > 250) marks = (250 - out.size()) / 3;
+  if (marks == 0) return out;
+  return crunchPass(body, marks, numbers);
+}
+
 // ed_expand in edit.c is the machine's copy of this walk.
 std::string expandLine(std::string_view stored) {
   if (isDataLine(stored)) return std::string(stored);
@@ -164,6 +209,11 @@ std::string expandLine(std::string_view stored) {
   size_t i = 0;
   while (i < stored.size()) {
     uint8_t c = static_cast<uint8_t>(stored[i++]);
+    // A number's value, any two bytes. Its digits follow as text.
+    if (c == KW_LITERAL) {
+      i += 2;
+      continue;
+    }
     if (c >= KW_FIRST && c < KW_FIRST + keywordOrder().size()) {
       out += keywordOrder()[c - KW_FIRST];
       if (c == KW_REM) c = '!';
@@ -264,9 +314,16 @@ std::vector<uint8_t> encodeProgram(const std::string& text) {
 namespace {
 
 // The stored text of the record at p, rec bytes long, without its zero.
+// A number's two value bytes are taken with its marker, since either can
+// be 0.
 std::string storedText(std::span<const uint8_t> bytes, size_t p, size_t rec) {
   std::string t;
-  for (size_t i = p + 3; i < p + rec - 1 && bytes[i]; i++) t += static_cast<char>(bytes[i]);
+  for (size_t i = p + 3; i < p + rec - 1 && bytes[i]; i++) {
+    t += static_cast<char>(bytes[i]);
+    if (bytes[i] == KW_LITERAL) {
+      for (size_t k = 1; k <= 2 && i + 1 < p + rec - 1; k++) t += static_cast<char>(bytes[++i]);
+    }
+  }
   return t;
 }
 

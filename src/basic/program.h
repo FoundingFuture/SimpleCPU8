@@ -3,7 +3,8 @@
 // two forms, and this is the bridge between them.
 //
 // A stored line is two bytes of line number, high first, one byte of
-// record length, the text with each keyword as one byte, and a zero. A line number of zero ends the
+// record length, the text with each keyword as one byte and each number
+// with its value, and a zero. A line number of zero ends the
 // program, so an empty program is three bytes. edit.c is the C side of the
 // same format. The system page says where the program sits: SYS_PROG holds
 // its address and SYS_PROG_LEN its length. docs/basic-system-page.md.
@@ -52,7 +53,9 @@ std::string canonicalLine(std::string_view body);
 
 // A line's body as the interpreter stores it. The walk is canonicalLine's.
 // Each word it puts in capitals is one byte, 128 plus the word's place in
-// basic/keywords.h. A DATA line stays canonicalLine's text.
+// basic/keywords.h. A number is KW_LITERAL, its value high byte first,
+// then its digits, while the line stays within 250 bytes. A DATA line
+// stays canonicalLine's text.
 // crunch in edit.c is the machine's copy of the rule.
 std::string crunchLine(std::string_view body);
 

@@ -197,6 +197,10 @@ PRINT HEX$(40000)
 
 `HEX$(n,4)` pads with zeros to four digits, so `HEX$(10,4)` is `000A`.
 
+A number written with `0b` in front is binary, one digit per bit, so
+`0b1010` is 10 and `0b11110000` is 240. It reads well where each bit
+means a pixel or a switch.
+
 Text in quotes is called a string. A semicolon joins two things with no
 gap. A comma puts one space between them.
 
@@ -403,7 +407,9 @@ as 1000. You will not need them for a long while.
 
 The program sits in boxes too, and `DEEK(8)` is the number of its first
 box. A keyword such as `PRINT` takes one box there, a number from 128
-up, and `LIST` spells it out again. Do not `POKE` into the program while
+up, and `LIST` spells it out again. A number such as 61440 keeps its
+value in two boxes in front of its digits, so `RUN` never works it out
+from the digits. Do not `POKE` into the program while
 it runs. `RUN` remembers the
 line each `GOTO`, `GOSUB` and `THEN` found, and a jump keeps going where
 the old text sent it.
@@ -477,7 +483,8 @@ a `DATA` line and does nothing.
 
 When the program starts, `RUN` also puts every value in memory, one byte
 each. So a value must fit in a box: 0 to 255, or -128 to -1. A number
-written with a dollar sign in front is hex, so `$0F` is 15. A `DATA`
+written with a dollar sign in front is hex, so `$0F` is 15, and one
+with `0b` in front is binary, so `0b1111` is 15 too. A `DATA`
 line that starts with such a number, three or four digits after the `$`,
 says which box the bytes go to. The next lines carry on from there.
 
@@ -1091,4 +1098,5 @@ Functions, used inside an expression:
 Operators, in order from tightest to loosest: `-` and `NOT` on one
 value, then `*`, `/` and `MOD`, then `+` and `-`, then `=`, `<>`, `<`,
 `>`, `<=` and `>=`, then `AND`, then `OR`. A number may be written in
-hex with a dollar sign, so `$F000` is 61440. Strings join with `+`.
+hex with a dollar sign, so `$F000` is 61440, or in binary with `0b`, so
+`0b101` is 5. Strings join with `+`.

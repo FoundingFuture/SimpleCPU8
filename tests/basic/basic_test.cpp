@@ -2417,12 +2417,13 @@ TEST_SUITE("basic speed") {
     // 280 lines of one GOTO each, visited in a scrambled order, twice. A
     // site that read another site's target would skip lines or loop.
     const int n = 280;
-    std::string program = "1 FOR P=1 TO 2:GOTO 1000\n";
+    std::string program = "1 FOR P=1 TO 2:GOTO 100\n";
     for (int i = 0; i < n; i++) {
-      const int next = i + 1 < n ? 1000 + ((i + 1) * 97) % n : 9000;
-      program += std::to_string(1000 + (i * 97) % n) + " C=C+1:GOTO " + std::to_string(next) + "\n";
+      const int next = i + 1 < n ? 100 + ((i + 1) * 97) % n : 900;
+      program += std::to_string(100 + (i * 97) % n) + " C=C+1:GOTO " + std::to_string(next) + "\n";
     }
-    program += "9000 NEXT P:PRINT \"VISITS\";C\n";
+    program += "900 NEXT P:PRINT \"VISITS\";C\n";
+    REQUIRE(basic::encodeProgram(program).size() < basic::PROGRAM_MAX - 3);
     CHECK(has(runOutput(program), "VISITS560"));
   }
 
@@ -2725,4 +2726,113 @@ TEST_SUITE("basic speed") {
     }
   }
 
+
+  // Proposal 4: numbers stored with their value.
+
+  namespace {
+
+  // Numbers in every written form. Then values whose bytes would fool a
+  // reader that looked at them. Those are 0, a colon, a quote, a bang, a
+  // keyword's byte and the number marker itself.
+  std::vector<std::string> everyLiteralLines() {
+    return {
+        "10 A=61440+$F000+0b1010+0B11+$ff+007",
+        "20 PRINT 65535;65536;$FFFFF",
+        "25 PRINT 0b11111111111111111",
+        "30 A=0:B=$0:C=0b0:D=00",
+        "40 A=58:B=$3A3A:C=34:D=$2222:E=$2200",
+        "50 A=$2121:B=33:C=$8000:D=$BDBD:E=$BD",
+        "60 A=128:B=189:C=$FF00:REM 10 $F 0b1",
+        "70 POKE $F000,0b01000001:PRINT \"42 $2A\"",
+        "80 FOR I=1TO 3:A=1ABC:B=0B2:C=0bx:NEXT",
+        "90 DATA 7,$2A,0b101,\"9\"",
+        "100 ! 12 $34 0b1",
+    };
+  }
+
+  }  // namespace
+
+  TEST_CASE("LIST, SAVE and LOAD give back every number as it was typed") {
+    const std::vector<std::string> lines = everyLiteralLines();
+    std::string program;
+    for (const std::string& l : lines) program += l + "\n";
+    auto s = boot();
+    settle(*s);
+    for (const std::string& l : lines) type(*s, l);
+    CHECK(listed(*s) == lines);
+    type(*s, "!SAVE \"NUM\"");
+    REQUIRE(s->slots.size() == 1);
+    CHECK_EQ(s->slots[0].second, program);
+    type(*s, "NEW");
+    type(*s, "!LOAD \"NUM\"", 40000000);
+    CHECK(listed(*s) == lines);
+    CHECK(storedProgram(*s) == basic::encodeProgram(program));
+    CHECK_EQ(basic::decodeProgram(storedProgram(*s)), program);
+    // The IDE's reading of the machine's memory, line by line.
+    const auto back = basic::programLines(storedProgram(*s));
+    CHECK_EQ(back.size(), lines.size());
+    for (const std::string& l : lines) {
+      const size_t sp = l.find(' ');
+      CHECK_EQ(back.at(std::stoi(l.substr(0, sp))), l.substr(sp + 1));
+    }
+  }
+
+  TEST_CASE("the machine and the IDE store a number to the same bytes") {
+    std::string program;
+    auto s = boot();
+    settle(*s);
+    for (const std::string& l : everyLiteralLines()) {
+      type(*s, l);
+      program += l + "\n";
+    }
+    CHECK(storedProgram(*s) == basic::encodeProgram(program));
+    // A number keeps its value behind the marker: 61440 is $F000.
+    const auto p = basic::encodeProgram("10 A=61440\n");
+    CHECK(p == std::vector<uint8_t>{0, 10, 14, 'A', '=', KW_LITERAL, 0xF0, 0x00, '6', '1', '4', '4', '0', 0, 0, 0, 3});
+  }
+
+  TEST_CASE("a number runs as its value in every written form") {
+    CHECK(has(runOutput("10 PRINT 61440;$F000;0b1010;0B11;$ff;007;0;$0;0b0\n"), "-4096-40961032557000"));
+    CHECK(has(runOutput("10 PRINT 65535;65536;$FFFFF;0b11111111111111111\n"), "-10-1-1"));
+    CHECK(has(runOutput("10 A=$2222:B=$3A3A:C=$BDBD:D=$8000:PRINT A;B;C;D\n"), "873814906-16963-32768"));
+    CHECK(has(runOutput("10 PRINT 2+0b1*3:IF 0b1 THEN PRINT \"Y\"\n"), "5\nY"));
+    // Typed at the prompt, where a line is not stored.
+    auto s = boot();
+    settle(*s);
+    CHECK_EQ(printed(*s, "PRINT 0b101;$1F;0B1+1"), "5312");
+  }
+
+  TEST_CASE("DATA reads 0b numbers, a byte each") {
+    CHECK(has(runOutput("10 READ A,B,C:PRINT A;B;C\n20 DATA 0b1010,0B11111111,0b00000000001\n"), "102551"));
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 DATA 0b111111111\n");
+    type(*s, "RUN", 20000000);
+    CHECK(has(flat(*s), "A DATA VALUE IS ONE BYTE: -128 TO 255 IN LINE 10"));
+  }
+
+  TEST_CASE("a line too long for every number's value keeps the rest as digits") {
+    // 83 numbers in 190 characters. Their values would take 249 bytes
+    // more, so only the first ones get one. The line lists and runs as
+    // typed all the same.
+    std::string body = "POKE 24576";
+    for (int i = 0; i < 81; i++) body += ",7";
+    body += ":PRINT PEEK(24656)";
+    REQUIRE(body.size() <= 250);
+    const std::string line = "10 " + body;
+    // The prompt takes 79 characters, so the line comes in by LOAD, which
+    // stores it the way a typed line is stored.
+    auto s = boot();
+    settle(*s);
+    s->slots.emplace_back("LONG", line + "\n");
+    type(*s, "!LOAD \"LONG\"", 40000000);
+    type(*s, "!SAVE \"BACK\"");
+    REQUIRE(s->slots.size() == 2);
+    CHECK_EQ(s->slots[1].second, line + "\n");
+    const std::vector<uint8_t> stored = storedProgram(*s);
+    CHECK(stored.size() <= 250 + 4 + 3);
+    CHECK(stored == basic::encodeProgram(line + "\n"));
+    type(*s, "RUN", 40000000);
+    CHECK(has(text(*s), ">RUN\n7\nREADY"));
+  }
 }

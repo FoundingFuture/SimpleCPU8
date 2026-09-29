@@ -385,11 +385,15 @@ DATA lines are not crunched and read raw, as before. A literal costs 3
 bytes more than its digits. The tokens of proposal 2 save about 30
 percent of a typical line, so a program still shrinks.
 
-| Row | Now | With proposals 2 and 4 |
-|---|---|---|
-| `A = B * 3 + C` | 8,760 | about 4,400 |
-| `A = PEEK(61440)` | 10,006 | about 3,000 |
-| `POKE 61440, A` | 8,078 | about 3,300 |
+| Row | Now | With proposals 2 and 4 | Measured |
+|---|---|---|---|
+| `A = B * 3 + C` | 8,760 | about 4,400 | 4,901 |
+| `A = PEEK(61440)` | 10,006 | about 3,000 | 3,571 |
+| `POKE 61440, A` | 8,078 | about 3,300 | 3,079 |
+
+Measured with proposals 1, 2 and 4 in. In `POKE 61440, 7` a stored
+`61440` costs `lx_next` 381 cycles and a stored `7` costs 265. As digits
+they cost 1,170 and 386.
 
 ## Proposal 5: an operand without an operator skips the descent
 

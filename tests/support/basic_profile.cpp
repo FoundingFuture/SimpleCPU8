@@ -89,13 +89,13 @@ int readVar(const Machine& m, const Var& v) {
   return (m.ram[static_cast<size_t>(v.at)] << 8) | m.ram[static_cast<size_t>(v.at) + 1];
 }
 
-// A stored line's bytes as a person reads them: a byte above 127 shows as
-// its number in angle brackets.
+// A stored line's bytes as a person reads them. A byte below 32 or above
+// 127 shows as its number in angle brackets.
 std::string shown(const Machine& m, int from, int to) {
   std::string t;
   for (int i = from; i < to && i < 65536; i++) {
     const uint8_t c = m.ram[static_cast<size_t>(i)];
-    if (c < 128) t += static_cast<char>(c);
+    if (c >= 32 && c < 128) t += static_cast<char>(c);
     else t += "<" + std::to_string(c) + ">";
   }
   return t;
