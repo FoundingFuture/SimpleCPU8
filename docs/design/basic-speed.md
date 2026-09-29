@@ -18,6 +18,7 @@ the end.
 - [Proposal 5: an operand without an operator skips the descent](#proposal-5-an-operand-without-an-operator-skips-the-descent)
 - [The ceiling](#the-ceiling)
 - [Decisions](#decisions)
+- [Measured after the change](#measured-after-the-change)
 
 ## How it was measured
 
@@ -497,3 +498,35 @@ Eddie decided, after the profile, that every proposal goes in:
 - The operand fast path of proposal 5 goes in with the tokens.
 - The order of work is the cache, then the tokens, the literals and the
   fast path, then proposal 3.
+
+## Measured after the change
+
+All five proposals are in. tests/support/basic_profile.cpp measured
+every row again at commit 8b353bb, on the same programs as the
+[statement costs](#statement-costs).
+
+| Statement | Before | After | In a frame |
+|---|---|---|---|
+| `A = A + 1` | 7,138 | 3,171 | 20.7 |
+| `A=A+1` | 6,995 | 3,063 | 21.4 |
+| `A = B * 3 + C` | 8,760 | 4,228 | 15.5 |
+| `POKE 61440, A` | 8,078 | 2,233 | 29.4 |
+| `IF A > 5 THEN B = 1`, false | 7,307 | 3,038 | 21.6 |
+| `IF A > 5 THEN B = 1`, true | 11,620 | 4,179 | 15.7 |
+| `GOTO` the line below, line 3 to line 4 of 5 | 4,693 | 925 | 70.8 |
+| `GOTO` 200 lines down, line 3 to line 202 of 300 | 60,326 | 980 | 66.9 |
+| `GOTO` the line below, line 297 to line 298 of 300 | 87,063 | 960 | 68.3 |
+| `GOSUB` and `RETURN`, routine on line 2 of 300 | 7,935 | 1,785 | 36.7 |
+| `GOSUB` and `RETURN`, routine on line 300 of 300 | 91,422 | 1,821 | 36.0 |
+| `A = PEEK(61440)` | 10,006 | 2,918 | 22.5 |
+| `FOR`/`NEXT`, empty body, on two lines, one pass | 4,405 | 2,013 | 32.6 |
+| `FOR I=1 TO 1000:NEXT`, on one line, one pass | 2,911 | 689 | 95.1 |
+
+The Centipede tick ran on the prototypes docs/design/centipede-design.md
+measured, each figure with the prototype's own loop. One chain step costs
+67,116 to 70,296 cycles, 1.02 to 1.07 frames where it cost 3.04 to 3.09.
+From a record it costs 96,629 to 100,820, 1.47 to 1.54 frames where it
+cost 4.26 to 4.33. The player's half step with the shot's climb of 2 rows
+costs 63,873 to 71,643, 0.97 to 1.09 frames where it cost 3.0 to 3.3. The
+player's step alone costs 45,122 to 52,892 and the shot's climb alone
+45,301.
