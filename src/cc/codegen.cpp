@@ -1975,7 +1975,7 @@ class Gen {
                           e.a->name + "_SIZE) copies it into RAM, and then dst[...] reads it.");
         }
         const CType t = typeOf(ep);
-        loadPlace(placeOf(ep, slot, sizeOf(t) == 1), sizeOf(t), slot);
+        loadPlace(placeOf(ep, slot, sizeOf(t) <= 2), sizeOf(t), slot);
         return t;
       }
       case ExprKind::Call: return genCall(ep, slot);
@@ -2044,9 +2044,10 @@ class Gen {
     bool viaA = false;
   };
 
-  // The address of a[i] or *p into D2. byteLoad says the caller will load
-  // one byte and can take [D2+A]. Slots from slot up are free to use.
-  Place placeOf(const ExprPtr& ep, int slot, bool byteLoad) {
+  // The address of a[i] or *p into D2. load says the caller loads the
+  // element, one byte or a word, and can take [D2+A]. Slots from slot up
+  // are free to use.
+  Place placeOf(const ExprPtr& ep, int slot, bool load) {
     const Expr& e = *ep;
     if (e.k == ExprKind::Un && e.op == "*") {
       // *(p + k) is p's target k elements on.
@@ -2076,7 +2077,13 @@ class Gen {
       if (!leaf) genLow(e.i, slot + 1);
       op("LD A <- " + (leaf ? leaf->lo : lo(slot + 1)));
       op(base.empty() ? "LD D2 <- " + word(slot) : base);
-      if (w == 1 && byteLoad) return {0, true};
+      if (w == 1 && load) return {0, true};
+      // A word element is two steps of A: one here, one in the load's
+      // [D2+A]. No word store takes [D2+A], so a store adds both.
+      if (w == 2 && load) {
+        op("LD D2 <- D2+A");
+        return {0, true};
+      }
       for (int k = 0; k < w; k++) op("LD D2 <- D2+A");
       return {};
     }
@@ -2102,9 +2109,19 @@ class Gen {
   }
 
   // Loads the element at place into slot, as size bytes.
+  //
+  // PERF DECISION: a word is one load through D2 into D1 and one store of
+  // D1, where two bytes through A took four instructions.
+  // docs/design/basic-speed.md, after proposal 3. D1 is free here: only a
+  // call's argument copy holds it, from values already in their slots.
   void loadPlace(const Place& p, int size, int slot) {
     use(slot);
     if (p.viaA) {
+      if (size == 2) {
+        op("LD D1 <- [D2+A]");
+        op("LD " + word(slot) + " <- D1");
+        return;
+      }
       op("LD A <- [D2+A]");
       op("LD " + lo(slot) + " <- A");
       return;
@@ -2115,15 +2132,40 @@ class Gen {
       op("LD " + lo(slot) + " <- A");
       return;
     }
-    // Big-endian: the high byte first.
-    op("LD A <- " + at(0));
-    op("LD " + hi(slot) + " <- A");
-    op("LD A <- " + at(1));
-    op("LD " + lo(slot) + " <- A");
+    op("LD D1 <- " + at(0));
+    op("LD " + word(slot) + " <- D1");
+  }
+
+  // "[X]" and "[X+n]" one byte on.
+  static std::string nextByte(const std::string& m) {
+    const std::string inner = m.substr(1, m.size() - 2);
+    const size_t plus = inner.rfind('+');
+    if (plus != std::string::npos && plus + 1 < inner.size() &&
+        std::all_of(inner.begin() + static_cast<std::ptrdiff_t>(plus) + 1, inner.end(),
+                    [](char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; })) {
+      return "[" + inner.substr(0, plus + 1) + S(std::stoi(inner.substr(plus + 1)) + 1) + "]";
+    }
+    return "[" + inner + "+1]";
+  }
+
+  // What a D register load of v's whole word names: its constant, or its
+  // high byte's address when its low byte is the next. Empty when the two
+  // bytes are named apart, as a byte widened to a word is.
+  static std::string wordOf(const Side& v) {
+    if (v.imm) return S(*v.imm);
+    if (v.hi.size() < 3 || v.hi.front() != '[' || v.hi.back() != ']') return "";
+    return v.lo == nextByte(v.hi) ? v.hi : "";
   }
 
   void storePlace(const Place& p, int size, const Side& v) {
     auto at = [&](int k) { return p.disp + k == 0 ? std::string("[D2]") : "[D2+" + S(p.disp + k) + "]"; };
+    if (size == 2) {
+      if (const std::string w = wordOf(v); !w.empty()) {
+        op("LD D1 <- " + w);
+        op("LD " + at(0) + " <- D1");
+        return;
+      }
+    }
     if (size == 1) {
       op("LD A <- " + v.lo);
       op("LD " + at(0) + " <- A");
@@ -2248,10 +2290,8 @@ class Gen {
       op("LD " + lo(slot) + " <- A");
       return;
     }
-    op("LD A <- [D2]+");
-    op("LD " + hi(slot) + " <- A");
-    op("LD A <- [D2]");
-    op("LD " + lo(slot) + " <- A");
+    op("LD D1 <- [D2]");
+    op("LD " + word(slot) + " <- D1");
   }
 
   void storeThrough(int addrSlot, int valSlot, int size) {
@@ -2261,10 +2301,8 @@ class Gen {
       op("LD [D2] <- A");
       return;
     }
-    op("LD A <- " + hi(valSlot));
-    op("LD [D2]+ <- A");
-    op("LD A <- " + lo(valSlot));
-    op("LD [D2] <- A");
+    op("LD D1 <- " + word(valSlot));
+    op("LD [D2] <- D1");
   }
 
   // want says the assignment's value is used, so it has to be left in
@@ -2405,7 +2443,7 @@ class Gen {
       const CType pt = typeOf(e.e);
       if (pt.ptr == 0) fail(e.pos, "cannot take * of " + typeName(pt));
       const CType t{pt.base, pt.ptr - 1, std::nullopt};
-      loadPlace(placeOf(ep, slot, sizeOf(t) == 1), sizeOf(t), slot);
+      loadPlace(placeOf(ep, slot, sizeOf(t) <= 2), sizeOf(t), slot);
       return t;
     }
 
@@ -3290,10 +3328,8 @@ class Gen {
     acpRun(emitter(), slotAt(0), "ACP_CVT", F64, I64);
     // The low two bytes of a big-endian 64 bit integer are its last two.
     op("LD D2 <- " + slotAt(1) + " + 6");
-    op("LD A <- [D2]+");
-    op("LD " + hi(slot) + " <- A");
-    op("LD A <- [D2]");
-    op("LD " + lo(slot) + " <- A");
+    op("LD D1 <- [D2]");
+    op("LD " + word(slot) + " <- D1");
   }
 
   // a <op> b on two doubles, leaving 0 or 1 in `slot`. ACP_CMP hands back
@@ -3306,10 +3342,8 @@ class Gen {
     useD(2);
     acpRun(emitter(), slotAt(0), "ACP_CMP", F64, I64);
     op("LD D2 <- " + slotAt(2) + " + 6");
-    op("LD A <- [D2]+");
-    op("LD " + hi(slot) + " <- A");
-    op("LD A <- [D2]");
-    op("LD " + lo(slot) + " <- A");
+    op("LD D1 <- [D2]");
+    op("LD " + word(slot) + " <- D1");
     loadConst(slot + 1, 0, T(BaseType::Int));
     compareInto(slot, e.op, slot, slot + 1, T(BaseType::Int));
     return T(BaseType::Int);
