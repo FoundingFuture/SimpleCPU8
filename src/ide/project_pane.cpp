@@ -515,7 +515,6 @@ void Ide::saveAll() {
 // project with no folder yet asks for one first, and every document
 // goes there.
 std::string Ide::saveTarget() const {
-  if (example_) return "Save project as...";
   if (!projectDir_.empty()) return "Save project";
   if (!romPath_.empty()) return "Save into " + fs::path(romPath_).filename().string() + (romSaveConfirmed_ ? "" : "...");
   return "Save project...";
@@ -552,19 +551,18 @@ bool Ide::saveIntoRom() {
 }
 
 void Ide::saveProject() {
+  // An example's Save is disabled, and Ctrl+S says why.
+  if (refuseExample("saved")) return;
   if (projectDir_.empty() && !romPath_.empty()) {
     if (romSaveConfirmed_) saveIntoRom();
     else askRomSave_ = true;
     return;
   }
-  if (projectDir_.empty() || example_) {
+  if (projectDir_.empty()) {
     const fs::path startIn = !settings_.projectsDir.empty() && fs::is_directory(settings_.projectsDir)
                                  ? fs::path(settings_.projectsDir)
                                  : fs::current_path();
-    dialog_.open(FileDialog::Mode::OpenFolder,
-                 example_ ? "Save the example as your own project: pick or make its folder"
-                          : "Save the project: pick or make its folder",
-                 startIn, {},
+    dialog_.open(FileDialog::Mode::OpenFolder, "Save the project: pick or make its folder", startIn, {},
                  [this](const fs::path& p) { saveProjectAs(p.string()); });
     return;
   }
@@ -849,7 +847,9 @@ void Ide::filesPane(const char* name, bool* open) {
   if (ImGui::SmallButton("Build")) buildProject(false);
   ImGui::SameLine();
   if (ImGui::SmallButton("Build and run")) buildProject(true);
+  ImGui::BeginDisabled(example_);
   if (ImGui::SmallButton("Save")) saveProject();
+  ImGui::EndDisabled();
   ImGui::SameLine();
   if (ImGui::SmallButton("Boot BASIC")) bootBasic();
   ImGui::SameLine();
@@ -967,7 +967,9 @@ void Ide::editorPane(const char* name) {
   const DocKind kind = docKindOf(d->name);
   ImGui::Text("%s%s", d->name.c_str(), d->dirty ? " (unsaved)" : "");
   ImGui::SameLine();
+  ImGui::BeginDisabled(example_);
   if (ImGui::SmallButton("Save")) saveProject();
+  ImGui::EndDisabled();
   ImGui::SameLine();
   if (ImGui::SmallButton("Build")) buildProject(false);
   if (kind == DocKind::Basic) {
