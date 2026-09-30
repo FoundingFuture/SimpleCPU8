@@ -941,7 +941,9 @@ void Ide::menuBar() {
     }
     ImGui::Separator();
     const std::string saveLabel = saveTarget();
-    if (ImGui::MenuItem(saveLabel.c_str(), "Ctrl+S")) saveProject();
+    // An example is never written, so its Save is disabled. Save project as
+    // below makes a copy of your own.
+    if (ImGui::MenuItem(saveLabel.c_str(), "Ctrl+S", false, !example_)) saveProject();
     if (ImGui::MenuItem("Remove file from project...", nullptr, false, activeDoc() != nullptr)) {
       askRemove(activeDoc()->name);
     }

@@ -12,9 +12,10 @@ Picking one opens that folder as the project.
 
 An example stays as it is. Its documents can be edited, built and run.
 Build compiles the open documents with the example's own assets, and the
-ROM stays in memory, so nothing lands in the example's folder. Save opens
-Save project as, which writes the documents, the assets and the README
-into a folder of your own and makes that the project. Removing a file,
+ROM stays in memory, so nothing lands in the example's folder. Save is
+disabled, and Ctrl+S says so in Messages. Save project as writes the
+documents, the assets and the README into a folder of your own and makes
+that the project. Removing a file,
 adding or removing an asset, and a sprite or font save are refused until
 then, with a note in Messages. Save project as refuses a folder inside
 examples/.
