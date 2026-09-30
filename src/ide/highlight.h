@@ -42,8 +42,11 @@ std::vector<Span> lexLine(Syntax syntax, std::string_view line, LexState& state)
 
 // A multiline text box with the syntax drawn in colour over it. Takes the
 // same arguments as panes::inputMultiline and returns what it returns.
+// lineNumbers puts each line's number in a column before the text, outside
+// the box, so the numbers are never edited, selected or copied. A build
+// error names its line by that number.
 bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, ImGuiInputTextFlags flags = 0,
-                ImGuiInputTextCallback callback = nullptr, void* user = nullptr);
+                ImGuiInputTextCallback callback = nullptr, void* user = nullptr, bool lineNumbers = false);
 
 // One line of code in colour at the cursor, as TextUnformatted would put
 // it. For the listing, where the line is not edited.

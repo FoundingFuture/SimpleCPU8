@@ -316,8 +316,21 @@ std::vector<Span> lexLine(Syntax syntax, std::string_view line, LexState& state)
 }
 
 bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, ImGuiInputTextFlags flags,
-                ImGuiInputTextCallback callback, void* user) {
+                ImGuiInputTextCallback callback, void* user, bool lineNumbers) {
   if (syntax == Syntax::Plain) return panes::inputMultiline(id, text, size, flags, callback, user);
+
+  // The number column: as wide as the last line's number, three digits at
+  // least, so it does not widen at line 10 and 100 while typing.
+  int lines = 1;
+  if (lineNumbers)
+    for (char c : text) lines += c == '\n';
+  int digits = 1;
+  for (int n = lines; n >= 10; n /= 10) digits++;
+  digits = std::max(digits, 3);
+  const float digitWidth = ImGui::CalcTextSize("0").x;
+  const float gutter = lineNumbers ? digitWidth * static_cast<float>(digits + 1) : 0.0f;
+  const ImVec2 gutterAt = ImGui::GetCursorScreenPos();
+  if (lineNumbers) ImGui::SetCursorScreenPos(ImVec2(gutterAt.x + gutter, gutterAt.y));
 
   ImGuiWindow* parent = ImGui::GetCurrentWindow();
   const ImGuiID itemId = ImGui::GetID(id);
@@ -344,6 +357,23 @@ bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, I
   const ImVec2 origin(box->Pos.x + g.Style.FramePadding.x - scrollX, box->Pos.y + g.Style.FramePadding.y - box->Scroll.y);
   const int firstVisible = std::max(0, static_cast<int>((box->Scroll.y - g.Style.FramePadding.y) / lineHeight));
   const int lastVisible = firstVisible + static_cast<int>(box->InnerRect.GetHeight() / lineHeight) + 2;
+
+  if (lineNumbers) {
+    // Each visible line's number, right aligned in the column, level with
+    // its line and clipped to the box's rows as the box scrolls.
+    ImDrawList* pdl = parent->DrawList;
+    pdl->PushClipRect(ImVec2(gutterAt.x, box->InnerClipRect.Min.y), ImVec2(gutterAt.x + gutter, box->InnerClipRect.Max.y),
+                      true);
+    const ImU32 dim = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    char number[16];
+    for (int n = firstVisible; n <= lastVisible && n < lines; n++) {
+      const int len = ImFormatString(number, sizeof number, "%d", n + 1);
+      const float w = ImGui::CalcTextSize(number, number + len).x;
+      const float y = origin.y + static_cast<float>(n) * lineHeight;
+      pdl->AddText(g.Font, g.FontSize, ImVec2(gutterAt.x + gutter - digitWidth * 0.5f - w, y), dim, number, number + len);
+    }
+    pdl->PopClipRect();
+  }
 
   // Walk the lines from the top, lexing only to carry a C comment's state
   // until the first visible line.
