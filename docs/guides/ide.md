@@ -37,6 +37,18 @@ sets the dot, and the next build gives it an address. The Run level's
 Breakpoints pane lists them as `hello.c:14` with their address, beside
 the ones set in the Listing's margin.
 
+## Idle
+
+A paused IDE draws nothing until a key, a click or a mouse move arrives,
+so it uses almost no processor time. Three things keep it drawing every
+frame: a running machine, a tune the sound chip still plays, and a
+playing sprite preview. The text cursor does not blink, since a blink
+would need a frame twice a second.
+
+The Files pane reads the assets folder when a project opens and when the
+IDE adds, removes or saves an asset. It reads it again when the window
+comes back to the front, so a file another program changed shows up.
+
 ## The examples
 
 File, Open example lists the examples in examples/ by kind: Assembly,

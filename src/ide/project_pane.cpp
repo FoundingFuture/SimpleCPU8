@@ -128,6 +128,7 @@ void Ide::newScratchProject() {
   romPath_.clear();
   docs_.clear();
   forgetSourceBreaks();
+  assetsStale_ = true;
   filesChanged_ = false;
   addDoc("main.asm", DEFAULT_SOURCE);
   docs_.back().dirty = false;
@@ -195,6 +196,7 @@ std::vector<Ide::AssetEntry> Ide::assetList() const {
 
 void Ide::addAsset(const std::string& path) {
   if (refuseExample("added")) return;
+  assetsStale_ = true;
   const fs::path from(path);
   const std::string name = from.filename().string();
   for (const AssetEntry& a : assetList()) {
@@ -230,6 +232,7 @@ void Ide::addAsset(const std::string& path) {
 
 void Ide::removeAsset(const std::string& name) {
   if (refuseExample("removed")) return;
+  assetsStale_ = true;
   if (sprite_.isOpen() && sprite_.name() == name) sprite_.close();
   if (!projectDir_.empty()) {
     const fs::path file = layout().assets / name;
@@ -310,6 +313,7 @@ void Ide::openProject(const std::string& dir) {
   romPath_.clear();
   docs_.clear();
   forgetSourceBreaks();
+  assetsStale_ = true;
   filesChanged_ = false;
   syncDoc_.clear();
   for (const auto& entry : fs::directory_iterator(l.sources, ec)) {
@@ -371,6 +375,7 @@ void Ide::openRomAsProject(const std::string& path) {
   }
   docs_.clear();
   forgetSourceBreaks();
+  assetsStale_ = true;
   filesChanged_ = false;
   syncDoc_.clear();
   const project::Carried carry = project::carried(*r.cartridge);
@@ -451,6 +456,7 @@ void Ide::saveProjectAs(const std::string& dir) {
   projectDir_ = root.string();
   example_ = false;
   projectTitle_ = root.filename().string();
+  assetsStale_ = true;
   for (Doc& d : docs_) saveDoc(d);
   if (sprite_.dirty()) sprite_.save();
   for (const auto& [name, bytes] : romFiles_) {
@@ -905,7 +911,13 @@ void Ide::filesPane(const char* name, bool* open) {
   // The assets: pictures, sounds and any file the sources name.
   ImGui::Spacing();
   ImGui::SeparatorText("Assets");
-  const std::vector<AssetEntry> assets = assetList();
+  if (assetsStale_) {
+    shownAssets_ = assetList();
+    assetsStale_ = false;
+  }
+  // A button below that changes the assets only marks the list stale, so
+  // the list stays whole while the loop walks it.
+  const std::vector<AssetEntry>& assets = shownAssets_;
   if (assets.empty()) ImGui::TextDisabled("none yet");
   for (const AssetEntry& a : assets) {
     ImGui::PushID(a.name.c_str());

@@ -456,6 +456,7 @@ void Ide::setRunning(bool on) {
   running_ = on;
   owed_ = 0.0;
   tick_ = 0.0;
+  freshRun_ = on;
   const Speed& s = LADDER[static_cast<size_t>(speed_)];
   if (on) {
     computer_.setTrace(tracedRun(s));
@@ -475,7 +476,10 @@ void Ide::setRunning(bool on) {
 // breakpoint stops it too.
 void Ide::pace() {
   const Speed& s = LADDER[static_cast<size_t>(speed_)];
-  const double dt = static_cast<double>(GetFrameTime());
+  // The frame a run starts in may have begun in an idle wait for input.
+  // That wait is not time the machine owes, so the first frame counts none.
+  const double dt = freshRun_ ? 0.0 : static_cast<double>(GetFrameTime());
+  freshRun_ = false;
   auto stopped = [&](bool exhausted) {
     if (!exhausted && !computer_.hitBreakpoint) return false;
     setRunning(false);
@@ -629,6 +633,12 @@ void Ide::applyLock() {
   if (computer_.microcodeName() == *lockedMicrocode_) return;
   mcErrors_ = computer_.selectMicrocode(*lockedMicrocode_);
   if (!mcErrors_.empty()) note("the locked microcode set no longer parses; the cartridge's own set runs");
+}
+
+bool Ide::idle() const {
+  if (running_ && !poweredOff_) return false;
+  if (computer_.apu().audioActive()) return false;
+  return !(spriteVisible_ && sprite_.animating());
 }
 
 void Ide::toggleBreakpoint(int instr) {
@@ -820,6 +830,10 @@ void Ide::drawScreenOnly() {
 
 void Ide::update() {
   trackWindow();
+  // Files may have changed outside while the window was behind another.
+  const bool focused = IsWindowFocused();
+  if (focused && !windowFocused_) assetsStale_ = true;
+  windowFocused_ = focused;
   // Escape leaves the full screen before the keyboard is read, so the
   // machine never sees it.
   if (screenOnly_ && IsKeyPressed(KEY_ESCAPE)) leaveScreenOnly();

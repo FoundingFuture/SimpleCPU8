@@ -31,6 +31,7 @@
 
 #include "ide/ide.h"
 #include "ide/settings.h"
+#include "vm/redraw.h"
 
 int main(int argc, char** argv) {
   SetConfigFlags(FLAG_WINDOW_RESIZABLE | FLAG_VSYNC_HINT | FLAG_WINDOW_HIGHDPI);
@@ -42,6 +43,9 @@ int main(int argc, char** argv) {
   // The layout is kept in the settings folder and written only by Save
   // layout in the Settings menu, never on every change.
   ImGui::GetIO().IniFilename = nullptr;
+  // DESIGN: the text cursor does not blink. An idle IDE sleeps until
+  // input, see vm/redraw.h, and a blink would need a frame twice a second.
+  ImGui::GetIO().ConfigInputTextCursorBlink = false;
 
   {
     // The IDE registers the handler for its own entries in the layout
@@ -84,6 +88,13 @@ int main(int argc, char** argv) {
     if (run) ide.run();
 
     int hostFrames = 0;
+    sc8::RedrawPacer pacer;
+    // An idle IDE sleeps in EndDrawing until the next input event. The
+    // screenshot switch counts frames, so it never sleeps.
+    auto paceRedraw = [&] {
+      if (pacer.waitAfterFrame(screenshot.empty() && ide.idle())) EnableEventWaiting();
+      else DisableEventWaiting();
+    };
     while (!ide.done()) {
       // The close gesture asks about unsaved documents before it ends.
       // The question is asked in the IDE, so the full screen goes first.
@@ -104,6 +115,7 @@ int main(int argc, char** argv) {
       if (ide.screenOnly()) {
         BeginDrawing();
         ide.drawScreenOnly();
+        paceRedraw();
         EndDrawing();
         continue;
       }
@@ -112,6 +124,7 @@ int main(int argc, char** argv) {
       rlImGuiBegin();
       ide.frame();
       rlImGuiEnd();
+      paceRedraw();
       EndDrawing();
     }
   }

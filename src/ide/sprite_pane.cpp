@@ -64,6 +64,7 @@ std::optional<std::vector<uint8_t>> Ide::readAsset(const std::string& name) cons
 }
 
 bool Ide::writeAsset(const std::string& name, const std::vector<uint8_t>& bytes) {
+  assetsStale_ = true;
   if (refuseExample(name + " saved")) return false;
   if (!projectDir_.empty()) {
     const fs::path dir = layout().assets;
