@@ -59,6 +59,13 @@ DocKind docKindOf(const std::string& name) {
 
 namespace {
 
+// A microcode set's errors as the build writes errors, file:line: message.
+std::vector<std::string> microcodeErrors(const McParsed& parsed) {
+  std::vector<std::string> out;
+  for (const McError& e : parsed.errors) out.push_back("microcode.txt:" + std::to_string(e.line) + ": " + e.message);
+  return out;
+}
+
 // The checkout's examples/, which the build names. A distribution will
 // name another folder.
 fs::path examplesRoot() { return fs::path(SC8_EXAMPLES_DIR); }
@@ -533,7 +540,7 @@ bool Ide::saveIntoRom() {
   }
   project::Built built = buildInMemory();
   for (const std::string& n : built.notes) note(n);
-  for (const std::string& e : built.errors) note(e);
+  reportErrors(built.errors);
   if (!built.cartridge) {
     note("not saved: " + fs::path(romPath_).filename().string() + " is left as it was until the build succeeds");
     return false;
@@ -603,7 +610,7 @@ void Ide::buildProject(bool run) {
     built = buildInMemory();
   }
   for (const std::string& n : built.notes) note(n);
-  for (const std::string& e : built.errors) note(e);
+  reportErrors(built.errors);
   if (!built.cartridge) return;
   insertBuilt(built, projectTitle_);
   if (run) setRunning(true);
@@ -991,7 +998,7 @@ void Ide::editorPane(const char* name) {
     ImGui::SameLine();
     if (ImGui::SmallButton("Apply to machine")) {
       McParsed parsed = parseMicrocode(d->text);
-      for (const McError& e : parsed.errors) note("microcode.txt:" + std::to_string(e.line) + ": " + e.message);
+      reportErrors(microcodeErrors(parsed));
       if (parsed.errors.empty()) {
         customText_ = d->text;
         selectMicrocode(d->text);
@@ -1005,7 +1012,7 @@ void Ide::editorPane(const char* name) {
         note("microcode unlocked: the next build or ROM brings its own set");
       } else {
         McParsed parsed = parseMicrocode(d->text);
-        for (const McError& e : parsed.errors) note("microcode.txt:" + std::to_string(e.line) + ": " + e.message);
+        reportErrors(microcodeErrors(parsed));
         if (parsed.errors.empty()) {
           lockedMicrocode_ = d->text;
           customText_ = d->text;

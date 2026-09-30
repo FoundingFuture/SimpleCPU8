@@ -1,5 +1,6 @@
 #include "vm/audio.h"
 
+#include <algorithm>
 #include <atomic>
 #include <vector>
 
@@ -8,6 +9,7 @@
 #include "miniaudio.h"
 
 #include "devices/apu_ports.h"
+#include "vm/alert_tone.h"
 
 namespace sc8 {
 
@@ -20,6 +22,8 @@ struct Audio::Impl {
   std::atomic<size_t> tail{0};  // next read
   ma_device device{};
   float gain = 1.0f;
+  // Where the build error tone is. SAMPLES and past it is silence.
+  std::atomic<int> alertAt{alert::SAMPLES};
 
   size_t queued() const { return (head.load() + CAPACITY - tail.load()) % CAPACITY; }
 
@@ -28,15 +32,21 @@ struct Audio::Impl {
     auto* dst = static_cast<float*>(out);
     size_t t = self->tail.load();
     const size_t h = self->head.load();
+    const int alertFrom = self->alertAt.load();
+    int a = alertFrom;
     for (ma_uint32 i = 0; i < frames; i++) {
       float v = 0.0f;
       if (t != h) {
         v = (static_cast<float>(self->ring[t]) - 128.0f) / 128.0f * self->gain;
         t = (t + 1) % CAPACITY;
       }
+      if (a < alert::SAMPLES) v = std::clamp(v + alert::sample(a++), -1.0f, 1.0f);
       dst[i] = v;
     }
     self->tail.store(t);
+    // An alert() during this block started the tone again: keep its start.
+    int expected = alertFrom;
+    self->alertAt.compare_exchange_strong(expected, a);
   }
 };
 
@@ -85,5 +95,7 @@ void Audio::push(std::span<const uint8_t> samples) {
 }
 
 size_t Audio::queued() const { return impl_->queued(); }
+
+void Audio::alert() { impl_->alertAt.store(0); }
 
 }  // namespace sc8

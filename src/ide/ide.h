@@ -240,7 +240,10 @@ class Ide {
   void loadCartridge(Cartridge cart, const std::string& what);
   void burnRom(const std::string& path);
   void rebuildListing();
-  void note(std::string message) { messages_.push_back(std::move(message)); }
+  void note(std::string message) { messages_.push_back({std::move(message), false}); }
+  // A build's or a microcode set's errors: each on a red line in Messages,
+  // and the error tone once, when Preferences has it on.
+  void reportErrors(const std::vector<std::string>& errors);
   std::vector<project::Source> sources() const;
   project::Layout layout() const;
 
@@ -420,7 +423,11 @@ class Ide {
   Assembled assembled_;
   bool haveSource_ = false;  // the listing has source lines
   std::vector<ListLine> listing_;
-  std::vector<std::string> messages_;
+  struct Message {
+    std::string text;
+    bool error;  // a build error, drawn on red
+  };
+  std::vector<Message> messages_;
 
   Level level_ = Level::Project;
   bool layoutBuilt_[LEVEL_COUNT] = {false, false, false, false};

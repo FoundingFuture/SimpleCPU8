@@ -7,6 +7,7 @@ add_library(sc8_vm STATIC
   computer.cpp
   display.cpp
   audio.cpp
+  alert_tone.cpp
   keys.cpp)
 
 target_include_directories(sc8_vm PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/..")
