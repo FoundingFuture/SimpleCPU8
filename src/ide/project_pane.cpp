@@ -1053,7 +1053,8 @@ void Ide::editorPane(const char* name) {
     // order, lines typed on the machine's screen, the editor just left.
     if (!ImGui::IsItemActive() && BasicAssist::sortText(d->text)) d->dirty = true;
     if (std::string n = basicAssist_.takeNote(); !n.empty()) note(n);
-  } else if (codeEditor("##doc", d->text, syntaxOf(d->name), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput)) {
+  } else if (codeEditor("##doc", d->text, syntaxOf(d->name), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput,
+                        nullptr, nullptr, true)) {
     d->dirty = true;
   }
   ImGui::End();

@@ -12,6 +12,13 @@ comes from the compiler, the assembler or a microcode set. A build with errors
 also plays two falling notes over the machine's sound. Settings,
 Preferences, Sound on a build error turns them off.
 
+## Line numbers
+
+The editor numbers the lines of a C or assembly document in a column
+left of the text. The column sits outside the text box, so a number is
+never edited, selected or copied. A build error's line number is the one
+in that column.
+
 ## The examples
 
 File, Open example lists the examples in examples/ by kind: Assembly,
