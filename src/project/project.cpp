@@ -661,12 +661,9 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
     }
   }
 
-  // The assembly text, and where each line came from for the messages.
-  struct Span {
-    int firstLine;
-    std::string file;
-  };
-  std::vector<Span> spans;
+  // The assembly text, and where each line came from, for the messages
+  // and for a breakpoint on a source line.
+  std::vector<LineMap::Span>& spans = b.lines.spans;
   int lineCount = 0;
   auto append = [&](const std::string& file, std::string part) {
     if (!part.empty() && part.back() != '\n') part += '\n';
@@ -734,6 +731,10 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
     if (!r.errors.empty()) return b;
     append("generated.asm", r.assembly);
     romEntries = std::move(r.rom);
+    for (const auto& [key, asmLine] : r.lineOf) {
+      const size_t colon = key.rfind(':');
+      b.lines.cLines[key.substr(0, colon)][std::stoi(key.substr(colon + 1))] = asmLine;
+    }
   } else if (basicProject) {
 #if SC8_HAVE_BASIC
     append("basic.asm", std::string(basicAsm()));
@@ -753,8 +754,8 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
     if (!unit.empty()) append("cycles.asm", unit);
   }
   auto whereLine = [&](int line) -> std::string {
-    const Span* s = &spans.front();
-    for (const Span& sp : spans) {
+    const LineMap::Span* s = &spans.front();
+    for (const LineMap::Span& sp : spans) {
       if (sp.firstLine <= line) s = &sp;
     }
     if (s->file == "basic.asm") return "the BASIC interpreter:" + std::to_string(line - s->firstLine);

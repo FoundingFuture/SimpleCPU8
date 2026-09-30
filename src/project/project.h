@@ -143,6 +143,19 @@ constexpr ExampleKind EXAMPLE_KINDS[] = {
 // an error message.
 Created create(const std::filesystem::path& dir, Kind kind);
 
+// Where each source's lines sit in the assembly a build made, so a
+// breakpoint on a source line finds its address. breakpoints.h reads it.
+struct LineMap {
+  struct Span {
+    int firstLine;  // the .code line before the file's line 1
+    std::string file;
+  };
+  std::vector<Span> spans;  // in the order the build joined them
+  // By C file, each line to the line of the compiler's output that its
+  // first instruction came from. Lines count from 1.
+  std::map<std::string, std::map<int, int>> cLines;
+};
+
 struct Built {
   std::optional<Cartridge> cartridge;  // nothing on an error
   Assembled assembled;                 // what the assembler made, for a listing
@@ -153,6 +166,7 @@ struct Built {
   size_t ramBytes = 0;
   size_t dataBytes = 0;
   std::vector<std::string> sources;  // the files that went in, in order
+  LineMap lines;
 };
 
 // Compile and assemble. Nothing is written to disk.

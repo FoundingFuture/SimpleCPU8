@@ -127,6 +127,7 @@ void Ide::newScratchProject() {
   carriedProject_ = false;
   romPath_.clear();
   docs_.clear();
+  forgetSourceBreaks();
   filesChanged_ = false;
   addDoc("main.asm", DEFAULT_SOURCE);
   docs_.back().dirty = false;
@@ -308,6 +309,7 @@ void Ide::openProject(const std::string& dir) {
   carriedProject_ = false;
   romPath_.clear();
   docs_.clear();
+  forgetSourceBreaks();
   filesChanged_ = false;
   syncDoc_.clear();
   for (const auto& entry : fs::directory_iterator(l.sources, ec)) {
@@ -368,6 +370,7 @@ void Ide::openRomAsProject(const std::string& path) {
     if (k == "title" && !v.empty()) projectTitle_ = v;
   }
   docs_.clear();
+  forgetSourceBreaks();
   filesChanged_ = false;
   syncDoc_.clear();
   const project::Carried carry = project::carried(*r.cartridge);
@@ -651,6 +654,10 @@ void Ide::insertBuilt(project::Built& built, const std::string& what) {
   builtAssembly_ = built.assembly;
   assembled_ = std::move(built.assembled);
   haveSource_ = !built.assembly.empty();
+  lineMap_ = std::move(built.lines);
+  builtTexts_.clear();
+  for (const Doc& d : docs_) builtTexts_[d.name] = d.text;
+  placeSourceBreaks();
   // A ROM with BASIC slots runs the interpreter: a BASIC or mixed project
   // puts it first, and an opened ROM with slots came from one.
   const bool hasBasic = !built.cartridge->basic.empty();
@@ -1053,9 +1060,18 @@ void Ide::editorPane(const char* name) {
     // order, lines typed on the machine's screen, the editor just left.
     if (!ImGui::IsItemActive() && BasicAssist::sortText(d->text)) d->dirty = true;
     if (std::string n = basicAssist_.takeNote(); !n.empty()) note(n);
-  } else if (codeEditor("##doc", d->text, syntaxOf(d->name), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput,
-                        nullptr, nullptr, true)) {
-    d->dirty = true;
+  } else {
+    // The number column. A click on a number sets or clears a breakpoint.
+    gutterMarks_.clear();
+    if (auto sb = sourceBreaks_.find(d->name); sb != sourceBreaks_.end()) {
+      for (const auto& [line, pc] : sb->second.lines) gutterMarks_.push_back(line);
+    }
+    Gutter gutter{&gutterMarks_, 0};
+    if (codeEditor("##doc", d->text, syntaxOf(d->name), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput,
+                   nullptr, nullptr, &gutter)) {
+      d->dirty = true;
+    }
+    if (gutter.clicked) toggleSourceBreak(*d, gutter.clicked);
   }
   ImGui::End();
 }

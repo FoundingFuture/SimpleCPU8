@@ -110,7 +110,9 @@ and its word.
 
 Click the margin left of a line and a red dot appears. That is a
 breakpoint. Run stops when the processor reaches that instruction,
-with every register intact, and Run again carries on from there.
+with every register intact, and Run again carries on from there. A
+click on a line's number in the editor sets one on that line of your
+source, and it stays on that line through edits and builds.
 
 ## A first program, traced
 

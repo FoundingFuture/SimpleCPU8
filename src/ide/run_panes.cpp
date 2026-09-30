@@ -287,13 +287,33 @@ void Ide::stackBody() {
   hexDump("stack", m.stack.data(), m.stackSize(), stackJump_, hot, static_cast<int>(m.sp));
 }
 
+// The editor's breakpoints by file and line, then the listing's by address.
 void Ide::breakpointsPane() {
   ImGui::Begin("Breakpoints");
-  if (breakpoints_.empty()) {
-    ImGui::TextDisabled("none. Click a line's margin in the listing to set one.");
+  if (breakpoints_.empty() && sourceBreaks_.empty()) {
+    ImGui::TextDisabled("none. Click a line number in the editor, or a line's margin in the listing, to set one.");
   } else {
     if (ImGui::SmallButton("clear all")) {
       breakpoints_.clear();
+      sourceBreaks_.clear();
+      pushBreakpoints();
+    }
+    std::optional<std::pair<std::string, int>> removeLine;
+    for (const auto& [name, sb] : sourceBreaks_) {
+      for (const auto& [line, pc] : sb.lines) {
+        const std::string where = name + ":" + std::to_string(line);
+        ImGui::PushID(where.c_str());
+        if (ImGui::SmallButton("x")) removeLine = {name, line};
+        ImGui::SameLine();
+        if (pc) ImGui::Text("%s  %s", hex(*pc, 4).c_str(), where.c_str());
+        else ImGui::Text("      %s  (placed by the next build)", where.c_str());
+        ImGui::PopID();
+      }
+    }
+    if (removeLine) {
+      auto doc = sourceBreaks_.find(removeLine->first);
+      doc->second.lines.erase(removeLine->second);
+      if (doc->second.lines.empty()) sourceBreaks_.erase(doc);
       pushBreakpoints();
     }
     std::optional<uint16_t> remove;
@@ -338,7 +358,7 @@ void Ide::listingPane(const char* name) {
     const ListLine& line = listing_[i];
     ImGui::PushID(static_cast<int>(i));
     const bool isPc = line.instr && *line.instr == pcLine;
-    const bool hasBp = line.instr && breakpoints_.count(static_cast<uint16_t>(*line.instr));
+    const bool hasBp = line.instr && breaksAt(static_cast<uint16_t>(*line.instr));
     const ImVec2 rowStart = ImGui::GetCursorScreenPos();
     if (isPc) {
       const ImU32 bg = computer_.hitBreakpoint ? IM_COL32(120, 40, 30, 255)

@@ -21,6 +21,7 @@
 #include "core/mcparse.h"
 #include "ide/native_window.h"
 #include "ide/panes.h"
+#include "project/breakpoints.h"
 
 namespace fs = std::filesystem;
 
@@ -478,7 +479,7 @@ void Ide::pace() {
   auto stopped = [&](bool exhausted) {
     if (!exhausted && !computer_.hitBreakpoint) return false;
     setRunning(false);
-    if (computer_.hitBreakpoint) note("stopped at breakpoint, PC " + hex(computer_.machine().pc, 4));
+    if (computer_.hitBreakpoint) note(stopNote());
     return true;
   };
   if (s.micro) {
@@ -533,7 +534,7 @@ void Ide::stepMicro() {
 void Ide::runOneFrame() {
   setRunning(false);
   computer_.runToNextFrame();
-  if (computer_.hitBreakpoint) note("stopped at breakpoint, PC " + hex(computer_.machine().pc, 4));
+  if (computer_.hitBreakpoint) note(stopNote());
 }
 
 // Power on reloads the RAM image and starts from the first slot, the
@@ -632,6 +633,16 @@ void Ide::applyLock() {
 
 void Ide::toggleBreakpoint(int instr) {
   const auto pc = static_cast<uint16_t>(instr);
+  for (auto doc = sourceBreaks_.begin(); doc != sourceBreaks_.end(); ++doc) {
+    auto& lines = doc->second.lines;
+    for (auto it = lines.begin(); it != lines.end(); ++it) {
+      if (it->second != pc) continue;
+      lines.erase(it);
+      if (lines.empty()) sourceBreaks_.erase(doc);
+      pushBreakpoints();
+      return;
+    }
+  }
   if (!breakpoints_.erase(pc)) breakpoints_.insert(pc);
   pushBreakpoints();
 }
@@ -639,7 +650,115 @@ void Ide::toggleBreakpoint(int instr) {
 // The computer holds a new machine after every power on. The set lives
 // here and is pushed after each one.
 void Ide::pushBreakpoints() {
-  computer_.setBreakpoints(std::vector<uint16_t>(breakpoints_.begin(), breakpoints_.end()));
+  std::vector<uint16_t> all(breakpoints_.begin(), breakpoints_.end());
+  for (const auto& [name, sb] : sourceBreaks_) {
+    for (const auto& [line, pc] : sb.lines) {
+      if (pc) all.push_back(*pc);
+    }
+  }
+  computer_.setBreakpoints(all);
+}
+
+bool Ide::breaksAt(uint16_t pc) const {
+  if (breakpoints_.count(pc)) return true;
+  for (const auto& [name, sb] : sourceBreaks_) {
+    for (const auto& [line, at] : sb.lines) {
+      if (at == pc) return true;
+    }
+  }
+  return false;
+}
+
+std::string Ide::stopNote() const {
+  const uint16_t pc = computer_.machine().pc;
+  std::string text = "stopped at breakpoint, PC " + hex(pc, 4);
+  for (const auto& [name, sb] : sourceBreaks_) {
+    for (const auto& [line, at] : sb.lines) {
+      if (at == pc) return text + ", " + name + ":" + std::to_string(line);
+    }
+  }
+  return text;
+}
+
+// A click on a line that has no code sets the breakpoint on the next line
+// that does. The click can place it at once only when the document is as
+// the last build read it. Otherwise the next build places it.
+void Ide::toggleSourceBreak(const Doc& doc, int line) {
+  followEdits();
+  auto found = sourceBreaks_.find(doc.name);
+  if (found != sourceBreaks_.end() && found->second.lines.erase(line)) {
+    if (found->second.lines.empty()) sourceBreaks_.erase(found);
+    pushBreakpoints();
+    return;
+  }
+  const std::string where = doc.name + ":" + std::to_string(line);
+  auto built = builtTexts_.find(doc.name);
+  std::optional<project::Stop> stop;
+  if (built != builtTexts_.end() && built->second == doc.text) {
+    stop = project::stopAt(lineMap_, assembled_, doc.name, line);
+    if (!stop) {
+      note(where + ": no code at or after this line, so no breakpoint");
+      return;
+    }
+  } else {
+    note(where + ": the breakpoint stops the machine once the project is built again");
+  }
+  SourceBreaks& sb = sourceBreaks_[doc.name];
+  if (sb.lines.empty()) sb.text = doc.text;
+  if (stop) sb.lines[stop->line] = static_cast<uint16_t>(stop->pc);
+  else sb.lines[line] = std::nullopt;
+  pushBreakpoints();
+}
+
+void Ide::followEdits() {
+  bool moved = false;
+  for (auto it = sourceBreaks_.begin(); it != sourceBreaks_.end();) {
+    auto& [name, sb] = *it;
+    const Doc* doc = nullptr;
+    for (const Doc& d : docs_) {
+      if (d.name == name) doc = &d;
+    }
+    if (!doc) {
+      it = sourceBreaks_.erase(it);
+      moved = true;
+      continue;
+    }
+    if (doc->text != sb.text) {
+      const project::Edit edit(sb.text, doc->text);
+      std::map<int, std::optional<uint16_t>> lines;
+      for (const auto& [line, pc] : sb.lines) {
+        if (const auto to = edit.follow(line)) lines.emplace(*to, pc);
+      }
+      moved = moved || lines.size() != sb.lines.size();
+      sb.lines = std::move(lines);
+      sb.text = doc->text;
+    }
+    it = sb.lines.empty() ? sourceBreaks_.erase(it) : std::next(it);
+  }
+  if (moved) pushBreakpoints();
+}
+
+void Ide::placeSourceBreaks() {
+  followEdits();
+  for (auto it = sourceBreaks_.begin(); it != sourceBreaks_.end();) {
+    auto& [name, sb] = *it;
+    std::map<int, std::optional<uint16_t>> placed;
+    for (const auto& [line, pc] : sb.lines) {
+      if (const auto stop = project::stopAt(lineMap_, assembled_, name, line)) {
+        placed.emplace(stop->line, static_cast<uint16_t>(stop->pc));
+      } else {
+        note(name + ":" + std::to_string(line) + ": no code at or after this line, the breakpoint is removed");
+      }
+    }
+    sb.lines = std::move(placed);
+    it = sb.lines.empty() ? sourceBreaks_.erase(it) : std::next(it);
+  }
+}
+
+void Ide::forgetSourceBreaks() {
+  sourceBreaks_.clear();
+  builtTexts_.clear();
+  lineMap_ = {};
 }
 
 // ---- the host frame
@@ -768,6 +887,7 @@ void Ide::frame() {
   }
   menuBar();
   shortcuts();
+  followEdits();
   screenHasKeys_ = false;
   switch (level_) {
     case Level::Basic:
