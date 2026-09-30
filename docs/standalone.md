@@ -320,7 +320,8 @@ Elsewhere it is the ~/.config folder. The file `settings.txt` holds the
 projects folder, where New project and Open project start, and the UI
 size. The size scales every font and
 spacing through Dear ImGui's font scaling, so text stays sharp. Preferences in
-the Settings menu edits both. The pane layout is written only by Save
+the Settings menu edits both. It also switches the tone a failed build
+plays, `error_sound` in the file, on until it is turned off. The pane layout is written only by Save
 layout in that menu, to `layout.ini` beside the settings. It is read at
 the next start. The file also keeps the IDE window's place, size and
 monitor, and whether it was maximized or filled the monitor. On macOS it

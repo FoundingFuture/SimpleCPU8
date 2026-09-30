@@ -14,6 +14,7 @@ struct Settings {
   std::string projectsDir;  // where New project and Open project start
   float uiScale = 1.0f;     // every font and spacing times this
   bool formatAssembly = true;  // lay out .asm documents when they are saved
+  bool errorSound = true;      // a tone when a build or a microcode set fails
 
   // The folder, created when missing. Empty when no home is known.
   static std::filesystem::path dir();

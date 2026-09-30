@@ -45,6 +45,8 @@ void Settings::load() {
       if (f >= 0.5f && f <= 4.0f) uiScale = f;
     } else if (key == "format_asm") {
       formatAssembly = value != "0";
+    } else if (key == "error_sound") {
+      errorSound = value != "0";
     }
   }
 }
@@ -57,6 +59,7 @@ bool Settings::save() const {
   o << "projects = " << projectsDir << "\n";
   o << "scale = " << uiScale << "\n";
   o << "format_asm = " << (formatAssembly ? 1 : 0) << "\n";
+  o << "error_sound = " << (errorSound ? 1 : 0) << "\n";
   return static_cast<bool>(o);
 }
 

@@ -28,6 +28,11 @@ class Audio {
   // How many samples wait in the buffer, so the pump knows when to render.
   size_t queued() const;
 
+  // Play the build error tone, alert_tone.h, over the machine's sound. A
+  // second call starts it again. Safe from any thread: the device reads
+  // one atomic position, so its callback stays free of locks.
+  void alert();
+
   // Unity. The headroom for a dense mix is the APU's master gain.
   // Computer sets that to the browser's MASTER_GAIN, so a ROM sounds the same.
   float gain = 1.0f;

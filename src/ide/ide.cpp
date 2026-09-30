@@ -1302,6 +1302,10 @@ void Ide::settingsDialog() {
   if (ImGui::IsItemHovered()) {
     ImGui::SetTooltip("mnemonics in one column, operands in the next, long labels on a line of their own");
   }
+  ImGui::Checkbox("Sound on a build error", &editing_.errorSound);
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("two falling notes when a build or a microcode set has an error");
+  }
   ImGui::Spacing();
   if (ImGui::Button("Save", ImVec2(90, 0))) {
     settings_ = editing_;
@@ -1323,9 +1327,26 @@ void Ide::settingsDialog() {
   ImGui::EndPopup();
 }
 
+void Ide::reportErrors(const std::vector<std::string>& errors) {
+  for (const std::string& e : errors) messages_.push_back({e, true});
+  if (!errors.empty() && settings_.errorSound) audio_.alert();
+}
+
 void Ide::messagesPane(const char* name, bool* open) {
   ImGui::Begin(name, open);
-  for (const std::string& msg : messages_) ImGui::TextWrapped("%s", msg.c_str());
+  for (const Message& msg : messages_) {
+    if (!msg.error) {
+      ImGui::TextWrapped("%s", msg.text.c_str());
+      continue;
+    }
+    // A build error on dark red, the width of the pane and the height of
+    // its wrapped text, so it stands out among the notes.
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float width = ImGui::GetContentRegionAvail().x;
+    const ImVec2 size = ImGui::CalcTextSize(msg.text.c_str(), nullptr, false, width);
+    ImGui::GetWindowDrawList()->AddRectFilled(at, ImVec2(at.x + width, at.y + size.y), IM_COL32(120, 24, 24, 255));
+    ImGui::TextWrapped("%s", msg.text.c_str());
+  }
   if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
   ImGui::End();
 }

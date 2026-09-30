@@ -4,6 +4,14 @@
 microcode tools around one running machine. This guide covers its panes
 one at a time.
 
+## Messages
+
+The Messages pane lists what the IDE did and what went wrong. A build
+error stands on a dark red line, with the file and the line it names. It
+comes from the compiler, the assembler or a microcode set. A build with errors
+also plays two falling notes over the machine's sound. Settings,
+Preferences, Sound on a build error turns them off.
+
 ## The examples
 
 File, Open example lists the examples in examples/ by kind: Assembly,
