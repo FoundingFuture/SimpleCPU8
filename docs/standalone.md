@@ -47,8 +47,8 @@ title is the first line of README.md. There is no manifest to learn.
 Two layouts are read. The flat one keeps everything in one folder and
 writes `mygame/mygame.rom`. The larger one has `src/` for the sources,
 `assets/` for the pictures and sounds, and writes `build/mygame.rom`. A
-folder with a `src/` directory is the larger layout. examples/hello-c is
-the flat case and examples/bounce the larger one. The build makes every
+folder with a `src/` directory is the larger layout. examples/c/hello-c is
+the flat case and examples/c/bounce the larger one. The build makes every
 example that holds C or a `src/` folder this way. src/project is the code
 behind both `simplecpu-make` and the IDE.
 
@@ -69,7 +69,7 @@ instruction slot: `CALL DOUBLE` in a `.bas` names a C function or an
 assembly label, and the build writes the label's slot into the program
 before it goes into the ROM. An unknown name is a build error naming the
 file and line. `<basicvars.h>` gives the C side `basic_get` and
-`basic_set` on the variables A to Z. examples/basic-c is the worked
+`basic_set` on the variables A to Z. examples/basic/basic-c is the worked
 example, and docs/basic-system-page.md has the CALL and JMP statements.
 
 `simplecpu-make new mygame --c` lays a project out, and so do `--basic`,
@@ -79,7 +79,7 @@ tab has the same four buttons. The microcode kind starts from the naive
 set written out as `microcode.txt`, and its program shows what every
 instruction costs under that set and under the optimal one, side by side.
 The build counts the rows and writes the table into the ROM, so a changed
-row shows as a changed number at the next run. examples/cycles is that
+row shows as a changed number at the next run. examples/microcode/cycles is that
 project.
 
 `simplecpu --rom game.rom` prints the frame rates when it ends: the
@@ -159,7 +159,7 @@ through a vector set with DOKE. simplecpu-asm takes more than one source
 on its command line. Each starts in the code section, and `.code`, `.ram`
 and `.data` may each open again, with offsets carrying on. So
 `simplecpu-asm basic.asm driver.asm` burns the interpreter and a driver into
-one ROM. examples/basic-driver is the worked example: the interpreter at
+one ROM. examples/basic/basic-driver is the worked example: the interpreter at
 slot 0, a driver at slot $F000, and a BASIC program in the BAS chunk that
 DOKEs the vector and calls the driver.
 
@@ -499,9 +499,10 @@ Written new:
 The C compiler is ported. Its tests run doubles and rom_copy through a
 stub GPU in the test rig that answers CMD_RAM_MOVE and CMD_COPY only.
 
-The 25 demos sit in examples/ as assembly. The build burns each into a
-ROM under build/roms and CTest runs every ROM headless. The assembler's
-output for each demo matches the browser project's golden bytes.
+The browser's 24 demos sit in examples/assembly, beside hello and pacman.
+The build burns each into a ROM under build/roms and CTest runs every ROM
+headless. The assembler's output for each demo matches the browser
+project's golden bytes.
 
 The BASIC interpreter is ported as a ROM built from the C sources in
 src/basic. The function sc8::basicRom() hands the bytes to the virtual

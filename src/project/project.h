@@ -70,6 +70,14 @@ struct Layout {
 // Read a folder's shape. The build directory is not created here.
 Layout layoutOf(const std::filesystem::path& dir);
 
+// Copy a project's files other than its sources into the folder to, in
+// the larger layout. The README goes to to/README.md and every asset file
+// to to/assets/, replacing a file of the same name. These are the files a
+// ROM carries beside the sources. The IDE's Save as writes the sources
+// itself and calls this for the rest. A project saved as its own folder
+// copies nothing. The files written come back, or an error message.
+Created copyProjectFiles(const Layout& from, const std::filesystem::path& to);
+
 // The loaders a compiler or an assembler resolves an asset name with. A
 // conversion note, when one comes back, is appended to notes.
 Assets loaders(const Layout& layout, std::vector<std::string>* notes);
@@ -116,6 +124,18 @@ struct Options {
 
 enum class Kind { C, Basic, Assembly, Microcode };
 
+// The folders under examples/, one for each kind of project, in the order
+// the IDE's Open example menu lists them. Each has its folder and label.
+// An example sits in the folder of its kind. examples/CMakeLists.txt
+// builds every folder one level down, and a test holds the tree to this
+// list.
+struct ExampleKind {
+  const char* folder;
+  const char* label;
+};
+constexpr ExampleKind EXAMPLE_KINDS[] = {
+    {"assembly", "Assembly"}, {"basic", "BASIC"}, {"c", "C"}, {"microcode", "Microcode"}};
+
 // Lay out a new project of a kind at dir, which must not exist yet or be
 // empty: the folders, a README, a .gitignore for build/ and a first
 // source that builds and runs. Microcode is an assembly project with the
@@ -137,6 +157,11 @@ struct Built {
 
 // Compile and assemble. Nothing is written to disk.
 Built build(const Layout& layout, const Options& opts);
+
+// The same with the sources given, where the folder would be read. The
+// title, the assets and the files the ROM carries still come from the
+// folder. The IDE builds an example this way, from its open documents.
+Built build(const Layout& layout, const std::vector<Source>& sources, const Options& opts);
 
 // The same from sources in memory. Errors name the sources by their names
 // under `where`, a folder shown in messages. `base` is a cartridge whose

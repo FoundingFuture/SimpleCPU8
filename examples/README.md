@@ -1,9 +1,14 @@
 # Example programs
 
-The demos of the browser version as plain assembly, one directory per
-program. Each directory holds `<name>.asm`, a README whose first line is
-the ROM title, and any asset the source names. Edit a source in any editor.
-The build assembles it again.
+The examples sit in one folder for each kind of project: assembly/,
+basic/, c/ and microcode/. The IDE's File, Open example menu lists them
+by these folders. An example opens read only, and File, Save project as
+keeps a copy of your own.
+
+assembly/ holds the demos of the browser version as plain assembly, one
+directory per program. Each directory holds `<name>.asm`, a README whose
+first line is the ROM title, and any asset the source names. Edit a source
+in any editor. The build assembles it again.
 
 ## Building the ROMs
 

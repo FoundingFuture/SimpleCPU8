@@ -391,6 +391,25 @@ class Ide {
   // and for Save project as. carriedProject_ says the ROM had sources.
   std::vector<std::pair<std::string, std::vector<uint8_t>>> romFiles_;
   bool carriedProject_ = false;
+  // The open project is one of the examples, which is never written: Save
+  // is Save project as, and a build stays in memory.
+  bool example_ = false;
+  // The examples File, Open example lists, read once at start from the
+  // checkout's examples/ by project::EXAMPLE_KINDS. A kind with no example
+  // has no group.
+  struct Example {
+    std::string name;
+    std::string title;  // the README's first line
+    std::string dir;
+  };
+  struct ExampleGroup {
+    std::string label;
+    std::vector<Example> items;
+  };
+  std::vector<ExampleGroup> examples_;
+  void readExamples();
+  // Refuse a write into an example, with a note naming what was refused.
+  bool refuseExample(const std::string& what);
   std::string romPath_;  // the ROM file opened, for a burn to the same place
   std::vector<Doc> docs_;
   size_t active_ = 0;

@@ -10,5 +10,5 @@ set starts as the naive one. Merge two rows of an instruction in
 microcode.txt, build, run: its number in the MY column drops. The IDE's
 Microcode level shows the rows firing.
 
-    simplecpu-make examples/cycles
-    simplecpu --rom examples/cycles/build/cycles.rom
+    simplecpu-make examples/microcode/cycles
+    simplecpu --rom examples/microcode/cycles/build/cycles.rom

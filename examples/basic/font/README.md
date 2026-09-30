@@ -20,9 +20,9 @@ src/autorun.bas runs in three steps, with a key press between them:
 `SETTEXT 8,8` then puts the built-in glyphs in 8 by 8 cells, 32 by 32.
 PEEK(34) and PEEK(35) show the grid after each step.
 
-    simplecpu-make examples/font
-    simplecpu --rom examples/font/build/font.rom
+    simplecpu-make examples/basic/font
+    simplecpu --rom examples/basic/font/build/font.rom
 
 The font is text, eight rows of `X` and `.` a glyph. The IDE opens it in
-the font editor: `simplecpu-ide examples/font/assets/chunky.font`, or a
+the font editor: `simplecpu-ide examples/basic/font/assets/chunky.font`, or a
 double click on chunky.font under Assets.

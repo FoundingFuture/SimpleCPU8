@@ -1,8 +1,10 @@
 # Assembles every example into a ROM under build/roms, and runs each ROM
 # headless as a CTest test.
 #
-# An example is a directory holding <name>.asm and a README.md whose first
-# line is "# Title". The title goes into the ROM's META chunk. The ROM
+# The examples sit one folder down, by kind: assembly/, basic/, c/ and
+# microcode/, the folders the IDE's Open example menu lists. project.h
+# names them. An example is a directory holding <name>.asm and a README.md
+# whose first line is "# Title". The title goes into the ROM's META chunk. The ROM
 # depends on every asset the source names through .file, .image, .palette
 # or .sample. That list is read from the source text at configure time.
 
@@ -16,7 +18,7 @@ file(MAKE_DIRECTORY "${SC8_ROM_DIR}")
 set(SC8_HALTING_DEMOS circle div16 div8 gpu hello list mul16 mul8 text textmode)
 set(SC8_TEST_MAX_INSTRUCTIONS 2000000)
 
-file(GLOB SC8_EXAMPLE_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*")
+file(GLOB SC8_EXAMPLE_DIRS LIST_DIRECTORIES true CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*/*")
 set(SC8_ROMS)
 foreach(dir IN LISTS SC8_EXAMPLE_DIRS)
   if(NOT IS_DIRECTORY "${dir}")
@@ -117,7 +119,7 @@ if(TARGET sc8_basic)
     COMMENT "Copying basic.rom into roms")
   add_custom_target(basic_rom_copy ALL DEPENDS "${SC8_ROM_DIR}/basic.rom")
 
-  set(SC8_DRIVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/basic-driver")
+  set(SC8_DRIVER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/basic/basic-driver")
   set(SC8_DRIVER_ROM "${SC8_ROM_DIR}/basic-driver.rom")
   add_custom_command(
     OUTPUT "${SC8_DRIVER_ROM}"

@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <string>
 
 #include "asm/asm.h"
@@ -41,6 +42,113 @@ void write(const fs::path& p, const std::string& text) {
 }
 
 }  // namespace
+
+// The IDE builds an example from its open documents, since it never writes
+// them into the example's folder. Everything else comes from the folder.
+TEST_SUITE("a build from sources in memory") {
+  TEST_CASE("the folder's own sources build what the folder builds") {
+    TempDir t;
+    write(t.path / "src" / "main.asm", "        HLT\n.data\nship: .file('ship.bin')\n");
+    write(t.path / "assets" / "ship.bin", "AB");
+    write(t.path / "README.md", "# Ships\n");
+    const project::Layout l = project::layoutOf(t.path);
+    const project::Built disk = project::build(l, {});
+    REQUIRE_MESSAGE(disk.cartridge, (disk.errors.empty() ? std::string() : disk.errors[0]));
+    const project::Built mem =
+        project::build(l, {{"main.asm", "        HLT\n.data\nship: .file('ship.bin')\n"}}, {});
+    REQUIRE(mem.cartridge);
+    CHECK(encodeCartridge(*mem.cartridge) == encodeCartridge(*disk.cartridge));
+  }
+
+  TEST_CASE("an edited source builds as edited, with the folder's title and assets") {
+    TempDir t;
+    write(t.path / "src" / "main.asm", "        HLT\n");
+    write(t.path / "assets" / "ship.bin", "AB");
+    write(t.path / "README.md", "# Ships\n");
+    const project::Layout l = project::layoutOf(t.path);
+    const project::Built mem = project::build(
+        l, {{"main.asm", "        LD A <- 7\n        LD [r] <- A\n        HLT\n.ram\nr: ds 1\n"}}, {});
+    REQUIRE_MESSAGE(mem.cartridge, (mem.errors.empty() ? std::string() : mem.errors[0]));
+    CHECK_EQ(mem.instructions, 3u);
+    bool titled = false;
+    for (const auto& [k, v] : mem.cartridge->meta) titled = titled || (k == "title" && v == "Ships");
+    CHECK(titled);
+    bool carried = false;
+    for (const auto& [name, bytes] : mem.cartridge->sources) carried = carried || name == "assets/ship.bin";
+    CHECK(carried);
+    // Nothing was written: the folder's source is as it was, and no ROM.
+    std::ifstream in(t.path / "src" / "main.asm");
+    CHECK_EQ(std::string(std::istreambuf_iterator<char>(in), {}), "        HLT\n");
+    CHECK_FALSE(fs::exists(t.path / "build"));
+  }
+}
+
+// Save as in the IDE writes the sources itself. The rest of a project,
+// its README and its assets, comes along through copyProjectFiles.
+TEST_SUITE("copying a project's other files") {
+  TEST_CASE("a flat project's assets go into assets/, and its README with them") {
+    TempDir from;
+    TempDir to;
+    write(from.path / "main.asm", "        HLT\n");
+    write(from.path / "ship.png", "PNG bytes");
+    write(from.path / "tune.wav", "WAV bytes");
+    write(from.path / "README.md", "# Flat\nThe readme.\n");
+    const project::Created c = project::copyProjectFiles(project::layoutOf(from.path), to.path);
+    REQUIRE_MESSAGE(c.error.empty(), c.error);
+    auto text = [](const fs::path& p) {
+      std::ifstream in(p);
+      return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    CHECK_EQ(text(to.path / "assets" / "ship.png"), "PNG bytes");
+    CHECK_EQ(text(to.path / "assets" / "tune.wav"), "WAV bytes");
+    CHECK_EQ(text(to.path / "README.md"), "# Flat\nThe readme.\n");
+    // The sources are Save as's to write, not this.
+    CHECK_FALSE(fs::exists(to.path / "main.asm"));
+    CHECK_FALSE(fs::exists(to.path / "assets" / "main.asm"));
+    CHECK_EQ(c.files.size(), 3u);
+  }
+
+  TEST_CASE("a project with src/ brings every file in its assets/") {
+    TempDir from;
+    TempDir to;
+    write(from.path / "src" / "main.c", "int main(void) { return 0; }\n");
+    write(from.path / "assets" / "ball.png", "ball");
+    write(from.path / "assets" / "wall.font", "font");
+    write(from.path / "README.md", "# Nested\n");
+    const project::Created c = project::copyProjectFiles(project::layoutOf(from.path), to.path);
+    REQUIRE_MESSAGE(c.error.empty(), c.error);
+    CHECK(fs::exists(to.path / "assets" / "ball.png"));
+    CHECK(fs::exists(to.path / "assets" / "wall.font"));
+    CHECK(fs::exists(to.path / "README.md"));
+    CHECK_FALSE(fs::exists(to.path / "src" / "main.c"));
+    // The copy builds with the assets where the larger layout looks.
+    write(to.path / "src" / "main.c", "int main(void) { return 0; }\n");
+    const project::Layout l = project::layoutOf(to.path);
+    CHECK_EQ(project::assetFiles(l).size(), 2u);
+  }
+
+  TEST_CASE("an asset of the same name in the target is replaced") {
+    TempDir from;
+    TempDir to;
+    write(from.path / "src" / "main.asm", "        HLT\n");
+    write(from.path / "assets" / "ship.png", "new");
+    write(to.path / "assets" / "ship.png", "old");
+    REQUIRE(project::copyProjectFiles(project::layoutOf(from.path), to.path).error.empty());
+    std::ifstream in(to.path / "assets" / "ship.png");
+    CHECK_EQ(std::string(std::istreambuf_iterator<char>(in), {}), "new");
+  }
+
+  TEST_CASE("a project saved as its own folder copies nothing") {
+    TempDir t;
+    write(t.path / "src" / "main.asm", "        HLT\n");
+    write(t.path / "assets" / "ship.png", "ship");
+    write(t.path / "README.md", "# Same\n");
+    const project::Created c = project::copyProjectFiles(project::layoutOf(t.path), t.path);
+    CHECK(c.error.empty());
+    CHECK(c.files.empty());
+    CHECK(fs::exists(t.path / "assets" / "ship.png"));
+  }
+}
 
 TEST_SUITE("project layouts") {
   TEST_CASE("an empty path is the working directory, as a bare file name's parent is") {
@@ -500,7 +608,7 @@ TEST_SUITE("assets on the cartridge by name") {
   }
 }
 
-// examples/font as simplecpu-make builds it, booted headless. The program
+// examples/basic/font as simplecpu-make builds it, booted headless. The program
 // waits for a key between its three steps, so each one is checked on
 // screen before the next.
 namespace {
@@ -540,9 +648,9 @@ void pressKey(testing::Session& s) {
 
 }  // namespace
 
-TEST_SUITE("examples/font") {
+TEST_SUITE("examples/basic/font") {
   TEST_CASE("simplecpu-make builds it, and it runs its font, the built-in font, then 8 by 8 cells") {
-    const fs::path example = fs::path(SC8_EXAMPLES_DIR) / "font";
+    const fs::path example = fs::path(SC8_EXAMPLES_DIR) / project::EXAMPLE_KINDS[1].folder / "font";
     TempDir t;
     fs::create_directories(t.path);
     const fs::path rom = t.path / "font.rom";
@@ -596,3 +704,47 @@ TEST_SUITE("examples/font") {
   }
 }
 #endif
+
+// The Open example menu lists examples/ by these folders. So examples/
+// holds exactly the folders EXAMPLE_KINDS names, and each example sits in
+// the folder of its kind.
+TEST_SUITE("the examples folder") {
+  TEST_CASE("examples/ holds one folder for each kind, and nothing else as a folder") {
+    std::set<std::string> folders;
+    for (const auto& e : fs::directory_iterator(SC8_EXAMPLES_DIR)) {
+      if (e.is_directory()) folders.insert(e.path().filename().string());
+    }
+    std::set<std::string> kinds;
+    for (const project::ExampleKind& k : project::EXAMPLE_KINDS) kinds.insert(k.folder);
+    CHECK(folders == kinds);
+  }
+
+  TEST_CASE("each example sits in the folder of its kind") {
+    auto has = [](const fs::path& dir, const std::string& ext) {
+      for (const auto& e : fs::directory_iterator(dir)) {
+        if (e.path().extension() == ext) return true;
+      }
+      return false;
+    };
+    size_t count = 0;
+    for (const project::ExampleKind& k : project::EXAMPLE_KINDS) {
+      for (const auto& e : fs::directory_iterator(fs::path(SC8_EXAMPLES_DIR) / k.folder)) {
+        if (!e.is_directory()) continue;
+        count++;
+        const fs::path src = project::layoutOf(e.path()).sources;
+        const bool micro = fs::exists(src / "microcode.txt");
+        const bool bas = has(src, ".bas");
+        const bool c = has(src, ".c");
+        const bool assembly = has(src, ".asm");
+        const std::string folder = k.folder;
+        CAPTURE(e.path().string());
+        if (folder == "microcode") CHECK(micro);
+        if (folder == "basic") CHECK((bas && !micro));
+        if (folder == "c") CHECK((c && !bas && !micro));
+        if (folder == "assembly") CHECK((assembly && !c && !bas && !micro));
+      }
+    }
+    CHECK(count > 0);
+  }
+}
+

@@ -792,7 +792,7 @@ The data directives:
 `db` and `dw` switch the width for the rest of the line, so `db 5, dw
 &next` places a byte and a word. A `.org` leaves a gap of unloaded
 slots, and fetching one crashes. That is how a driver sits at a known
-slot apart from the program that calls it. examples/basic-driver is
+slot apart from the program that calls it. examples/basic/basic-driver is
 one, at slot `$F000`.
 
 A number is decimal, hex with `$` or `0x`, or binary with `0b`.
@@ -1057,7 +1057,7 @@ bug:    .sprite('bug.png')            ; the count, 8 by 8, both frames
 ```
 
 A strip from another program says nothing about its frames, so give the
-count: `.sprite('bug.png', 2)`. examples/pacman keeps every sprite this
+count: `.sprite('bug.png', 2)`. examples/assembly/pacman keeps every sprite this
 way, a PNG a strip, and the sprite editor opens them. A picture in other colours is moved onto the 3-3-2 palette, and
 the build says `colors quantized to the current palette`.
 
@@ -1865,6 +1865,7 @@ docs/design/cpu-core-spec-v2.md is the processor's reference, with the
 opcode of every instruction and the cycle count of both sets. The
 device references are docs/design/gpu-ports.md,
 docs/design/acp-ports.md and docs/design/audio-design.md. The IDE's
-manual pane shows the same tables. The 25 programs in examples/ are all
-assembly. examples/sprite is Space Invaders and examples/pacman is
-Pac-Man. Both run on the ports this guide covered.
+manual pane shows the same tables. The programs in examples/assembly are
+all assembly. examples/assembly/sprite is Space Invaders and
+examples/assembly/pacman is Pac-Man. Both run on the ports this guide
+covered.

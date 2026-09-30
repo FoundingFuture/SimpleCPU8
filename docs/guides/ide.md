@@ -4,6 +4,21 @@
 microcode tools around one running machine. This guide covers its panes
 one at a time.
 
+## The examples
+
+File, Open example lists the examples in examples/ by kind: Assembly,
+BASIC, C and Microcode. A name's tooltip is the first line of its README.
+Picking one opens that folder as the project.
+
+An example stays as it is. Its documents can be edited, built and run.
+Build compiles the open documents with the example's own assets, and the
+ROM stays in memory, so nothing lands in the example's folder. Save opens
+Save project as, which writes the documents, the assets and the README
+into a folder of your own and makes that the project. Removing a file,
+adding or removing an asset, and a sprite or font save are refused until
+then, with a note in Messages. Save project as refuses a folder inside
+examples/.
+
 ## The sprite editor
 
 The sprite editor draws a sprite strip: the frames of one animated

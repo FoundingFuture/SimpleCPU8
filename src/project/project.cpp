@@ -263,6 +263,27 @@ std::vector<fs::path> assetFiles(const Layout& layout) {
   return out;
 }
 
+Created copyProjectFiles(const Layout& from, const fs::path& to) {
+  Created c;
+  std::error_code ec;
+  if (fs::exists(to, ec) && fs::equivalent(from.root, to, ec)) return c;
+  auto copy = [&](const fs::path& src, const fs::path& dst) {
+    fs::create_directories(dst.parent_path(), ec);
+    if (!fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec)) {
+      c.error = "cannot copy " + src.string() + " to " + dst.string() + (ec ? ": " + ec.message() : "");
+      return false;
+    }
+    c.files.push_back(dst);
+    return true;
+  };
+  const fs::path readme = from.root / "README.md";
+  if (fs::is_regular_file(readme, ec) && !copy(readme, to / "README.md")) return c;
+  for (const fs::path& p : assetFiles(from)) {
+    if (!copy(p, to / "assets" / p.filename())) return c;
+  }
+  return c;
+}
+
 namespace {
 
 // DESIGN: BASIC finds an asset by name at run time, through STO_FIND over
@@ -813,6 +834,10 @@ Built build(const Layout& layout, const Options& opts) {
     }
   }
   if (auto t = readText(layout.sources / "microcode.txt")) sources.push_back({"microcode.txt", *t});
+  return build(layout, sources, opts);
+}
+
+Built build(const Layout& layout, const std::vector<Source>& sources, const Options& opts) {
   std::vector<std::string> notes;
   Assets assets = loaders(layout, &notes);
   const std::vector<fs::path> assetPaths = assetFiles(layout);

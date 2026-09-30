@@ -94,7 +94,7 @@ driver's next:
 ```
 
 From assembly, the same in four loads, as docs/storage-design.md shows.
-examples/basic-driver is the worked example.
+examples/basic/basic-driver is the worked example.
 
 ## Calling a routine
 
@@ -153,7 +153,7 @@ label's slot into the program before the ROM is written. The interpreter
 itself knows only numbers. A name typed at the prompt is a syntax error.
 A C function called this way runs on the interpreter's own runtime. It may
 keep globals and call other functions. It reads and writes the
-variables A to Z through `<basicvars.h>`. examples/basic-c is the worked
+variables A to Z through `<basicvars.h>`. examples/basic/basic-c is the worked
 example. docs/standalone.md, under Making a program, has the project side.
 
 ## The error codes
