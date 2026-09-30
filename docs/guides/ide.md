@@ -12,12 +12,30 @@ comes from the compiler, the assembler or a microcode set. A build with errors
 also plays two falling notes over the machine's sound. Settings,
 Preferences, Sound on a build error turns them off.
 
-## Line numbers
+## Line numbers and breakpoints
 
 The editor numbers the lines of a C or assembly document in a column
 left of the text. The column sits outside the text box, so a number is
 never edited, selected or copied. A build error's line number is the one
 in that column.
+
+A click on a line's number sets a breakpoint there, a red dot in the
+column. A second click clears it. The machine stops before the line's
+first instruction runs, and Messages names the line:
+`stopped at breakpoint, PC 0007, hello.c:14`. A line without code, such as
+a comment, a blank line or a declaration, puts the dot on the next line
+that has code. A line after the file's last instruction takes no
+breakpoint.
+
+A breakpoint moves with its line. Lines typed or pasted above it move it
+down, and lines deleted above it move it up. Deleting its own line
+removes it. A line joined onto the one above takes its breakpoint along.
+
+Each build places the breakpoints again, so they stay on their lines
+when the code moves. A click in a document edited since the last build
+sets the dot, and the next build gives it an address. The Run level's
+Breakpoints pane lists them as `hello.c:14` with their address, beside
+the ones set in the Listing's margin.
 
 ## The examples
 

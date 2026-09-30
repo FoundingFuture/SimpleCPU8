@@ -96,6 +96,9 @@ struct CcResult {
   std::string romHeader;
   // The program's __ROM objects, for a build that lists its assets.
   std::vector<cc::RomEntry> rom;
+  // "file:line" to the line of `assembly` that C line produced first, as
+  // Compiled::lineOf. A breakpoint on a C line reads it.
+  std::map<std::string, int> lineOf;
   std::vector<std::string> errors;
 };
 

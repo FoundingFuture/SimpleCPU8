@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -274,8 +275,35 @@ class Ide {
   void statusMenu();
   void selectMicrocode(const std::string& name);
   void applyLock();
+  // A breakpoint set in the listing's margin. One on the address of an
+  // editor breakpoint removes that one.
   void toggleBreakpoint(int instr);
+  // The machine stops at the listing's addresses and at every editor
+  // breakpoint the last build placed.
   void pushBreakpoints();
+  bool breaksAt(uint16_t pc) const;
+  // What Messages says when the machine stops at a breakpoint.
+  std::string stopNote() const;
+  // Breakpoints set in the editor's number column, by document. A line
+  // maps to the address the last build gave it, or to nothing until a
+  // build does. The lines refer to `text` and follow every edit made to it.
+  struct SourceBreaks {
+    std::string text;
+    std::map<int, std::optional<uint16_t>> lines;
+  };
+  std::map<std::string, SourceBreaks> sourceBreaks_;
+  project::LineMap lineMap_;                       // the last build's
+  std::map<std::string, std::string> builtTexts_;  // each document as the last build read it
+  std::vector<int> gutterMarks_;                   // the active document's breakpoint lines
+  void toggleSourceBreak(const Doc& doc, int line);
+  // Move each document's breakpoints with the edits made since they were
+  // placed. A line the edits removed loses its breakpoint.
+  void followEdits();
+  // After a build: each editor breakpoint to the address its line, or the
+  // next line with code, now has.
+  void placeSourceBreaks();
+  // A new project, ROM or scratch: no document keeps a breakpoint.
+  void forgetSourceBreaks();
   void typeIntoMachine();
 
   // BASIC: a .bas document and the interpreter's program memory are two
