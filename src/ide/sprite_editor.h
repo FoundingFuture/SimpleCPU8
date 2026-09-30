@@ -89,6 +89,8 @@ class SpriteEditor {
   void setView(const std::string& line);
   // The preview picture is shown in the pane this frame.
   bool previewShown() const { return previewShown_; }
+  // A preview in view is playing its frames, so it changes without input.
+  bool animating() const { return open_ && playing_ && (previewShown_ || previewOnScreen()); }
 
  private:
   enum class Tool { Pencil, Line, Rect, Ellipse, Fill, Gradient, Roll, HalfCircle };

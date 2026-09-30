@@ -137,6 +137,10 @@ class Ide {
   // saving.
   void requestQuit();
   bool done() const { return done_; }
+  // Nothing on screen changes without input: the machine is not running,
+  // the sound chip is silent and no sprite preview is playing. The host
+  // loop then sleeps until the next event, see vm/redraw.h.
+  bool idle() const;
 
   DisplaySettings display;
 
@@ -184,6 +188,12 @@ class Ide {
     uintmax_t bytes = 0;
   };
   std::vector<AssetEntry> assetList() const;
+  // The Files pane's list of assets, never read on every frame. A project
+  // opening, an asset the IDE writes or removes, and the window coming
+  // back to the front each read the folder again.
+  std::vector<AssetEntry> shownAssets_;
+  bool assetsStale_ = true;
+  bool windowFocused_ = true;
   void addAsset(const std::string& path);
   void removeAsset(const std::string& name);
   // An asset's bytes, and a write of new ones, for the sprite editor. In a
@@ -471,6 +481,7 @@ class Ide {
   bool askQuit_ = false;
 
   bool running_ = false;
+  bool freshRun_ = false;  // the next paced frame is a run's first
   int speed_ = 8;  // index into the ladder, f60 by default
   double owed_ = 0.0;
   double tick_ = 0.0;
