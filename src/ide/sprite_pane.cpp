@@ -260,9 +260,9 @@ void Ide::spritePreview() {
 }
 
 void Ide::loadDisplay() {
-  const fs::path dir = Settings::dir();
-  if (dir.empty()) return;
-  std::ifstream in(dir / "display.txt");
+  const fs::path file = Settings::displayFile();
+  if (file.empty()) return;
+  std::ifstream in(file);
   if (!in) return;
   std::stringstream text;
   text << in.rdbuf();
@@ -270,9 +270,9 @@ void Ide::loadDisplay() {
 }
 
 void Ide::saveDisplay() {
-  const fs::path dir = Settings::dir();
-  if (dir.empty()) return;
-  std::ofstream o(dir / "display.txt");
+  const fs::path file = Settings::displayFile();
+  if (file.empty()) return;
+  std::ofstream o(file);
   o << "# SimpleCPU-8 IDE display\n" << display.toText();
 }
 

@@ -23,6 +23,11 @@ fs::path Settings::dir() {
   return base;
 }
 
+fs::path Settings::file(const char* name) {
+  const fs::path base = dir();
+  return base.empty() ? base : base / name;
+}
+
 void Settings::load() {
   const fs::path file = settingsFile();
   if (file.empty()) return;
