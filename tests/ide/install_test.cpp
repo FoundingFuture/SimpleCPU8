@@ -64,8 +64,18 @@ struct Archive {
   }
 };
 
-int install(const Archive& a, const std::string& flags, const std::string& shell = "/bin/sh") {
-  const std::string cmd = "env -u ZDOTDIR -u XDG_DATA_HOME SHELL=" + shell + " sh \"" SC8_PACKAGING_DIR "/install.sh\" --archive \"" +
+// The stand-in for lsregister: it writes its arguments to a file, so no
+// test registers an app with the real LaunchServices database.
+fs::path fakeRegister(const fs::path& root) {
+  const fs::path script = root / "lsregister";
+  write(script, "#!/bin/sh\necho \"$@\" >> \"" + (root / "registered.txt").string() + "\"\n");
+  fs::permissions(script, fs::perms::owner_all);
+  return script;
+}
+
+int install(const Archive& a, const fs::path& root, const std::string& flags, const std::string& shell = "/bin/sh") {
+  const std::string cmd = "env -u ZDOTDIR -u XDG_DATA_HOME SHELL=" + shell + " SIMPLECPU_LSREGISTER=\"" +
+                          fakeRegister(root).string() + "\" sh \"" SC8_PACKAGING_DIR "/install.sh\" --archive \"" +
                           a.file.string() + "\" " + flags + " > /dev/null";
   return std::system(cmd.c_str());
 }
@@ -78,7 +88,7 @@ TEST_SUITE("install.sh") {
     setEnv("HOME", home.root.string());
     Archive a(home.root);
     write(Settings::examplesDir() / "old" / "README.md", "# gone\n");
-    REQUIRE(install(a, "--no-path") == 0);
+    REQUIRE(install(a, home.root, "--no-path") == 0);
     CHECK(read(Settings::examplesDir() / "c" / "hello" / "README.md") == "# Hello\n");
     CHECK_FALSE(fs::exists(Settings::examplesDir() / "old"));
   }
@@ -87,16 +97,26 @@ TEST_SUITE("install.sh") {
   TEST_CASE("macOS: the app goes to ~/Applications") {
     FakeHome home;
     Archive a(home.root);
-    REQUIRE(install(a, "--no-path") == 0);
+    REQUIRE(install(a, home.root, "--no-path") == 0);
     CHECK(fs::exists(home.root / "Applications" / "SimpleCPU-8.app" / "Contents" / "MacOS" / "simplecpu-ide"));
     CHECK_FALSE(fs::exists(home.root / ".zprofile"));
+  }
+
+  // The Apps view and Spotlight list what LaunchServices knows. Finder
+  // registers an app it copies, and a cp from a script does not.
+  TEST_CASE("macOS: the app is registered with LaunchServices") {
+    FakeHome home;
+    Archive a(home.root);
+    REQUIRE(install(a, home.root, "--no-path") == 0);
+    const fs::path app = home.root / "Applications" / "SimpleCPU-8.app";
+    CHECK(read(home.root / "registered.txt") == "-f " + app.string() + "\n");
   }
 
   TEST_CASE("macOS: --path adds the programs' folder to the profile once") {
     FakeHome home;
     Archive a(home.root);
-    REQUIRE(install(a, "--path", "/bin/zsh") == 0);
-    REQUIRE(install(a, "--path", "/bin/zsh") == 0);
+    REQUIRE(install(a, home.root, "--path", "/bin/zsh") == 0);
+    REQUIRE(install(a, home.root, "--path", "/bin/zsh") == 0);
     const std::string profile = read(home.root / ".zprofile");
     CHECK(count(profile, "Applications/SimpleCPU-8.app/Contents/MacOS") == 1);
   }
@@ -105,7 +125,7 @@ TEST_SUITE("install.sh") {
     FakeHome home;
     setEnv("HOME", home.root.string());
     Archive a(home.root);
-    REQUIRE(install(a, "--no-path") == 0);
+    REQUIRE(install(a, home.root, "--no-path") == 0);
     const fs::path share = home.root / ".local" / "share";
     CHECK(fs::exists(share / "simplecpu-8" / "bin" / "simplecpu-ide"));
     CHECK(fs::exists(share / "icons" / "hicolor" / "256x256" / "apps" / "simplecpu-8.png"));
@@ -118,7 +138,7 @@ TEST_SUITE("install.sh") {
     FakeHome home;
     setEnv("HOME", home.root.string());
     Archive a(home.root);
-    REQUIRE(install(a, "--path") == 0);
+    REQUIRE(install(a, home.root, "--path") == 0);
     CHECK(fs::is_symlink(home.root / ".local" / "bin" / "simplecpu-asm"));
     CHECK(fs::is_symlink(home.root / ".local" / "bin" / "simplecpu-ide"));
   }

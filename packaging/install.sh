@@ -12,7 +12,9 @@
 #
 # macOS   ~/Applications/SimpleCPU-8.app holds everything. The programs sit
 #         in Contents/MacOS, so --path adds that folder to the shell's
-#         profile.
+#         profile. The app is registered with LaunchServices, so the Apps
+#         view lists it under Developer Tools. SIMPLECPU_LSREGISTER names
+#         another command for that, which the tests use.
 # Linux   ~/.local/share/simplecpu-8 holds the programs, the ROMs and the
 #         docs. The IDE gets a launcher entry and an icon under
 #         ~/.local/share. --path links the programs into ~/.local/bin.
@@ -28,6 +30,7 @@
 set -eu
 
 REPO=FoundingFuture/SimpleCPU8
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 PROGRAMS="simplecpu simplecpu-ide simplecpu-asm simplecpu-cc simplecpu-make simplecpu-run"
 
 say() { printf '%s\n' "$*"; }
@@ -102,6 +105,10 @@ install_macos() {
   xattr -dr com.apple.quarantine "$app" 2>/dev/null || true
   install_examples "$app/Contents/Resources/examples"
   bindir="$app/Contents/MacOS"
+  # Finder registers an app it copies, and cp does not. Unregistered, the
+  # app is missing from the Apps view and from Open With.
+  "${SIMPLECPU_LSREGISTER:-$LSREGISTER}" -f "$app" ||
+    say "Could not register $app with LaunchServices. Opening it once from Finder does that."
   say "SimpleCPU-8 is in $app"
 }
 
@@ -207,7 +214,7 @@ main() {
       --path) path_choice=yes ;;
       --no-path) path_choice=no ;;
       -h|--help)
-        if [ -f "$0" ]; then sed -n '2,26p' "$0"; else say "flags: --path --no-path --version <v> --archive <file>"; fi
+        if [ -f "$0" ]; then sed -n '2,29p' "$0"; else say "flags: --path --no-path --version <v> --archive <file>"; fi
         exit 0 ;;
       *) fail "unknown flag $1" ;;
     esac
