@@ -368,3 +368,54 @@ TEST_SUITE("a word through a pointer") {
     CHECK_EQ((r.m->ram[at] << 8) | r.m->ram[at + 1], 2000);
   }
 }
+
+// sizeof names an array's whole size. Its operand is the one place where
+// an array's name does not stand for a pointer to the first element.
+// BASIC's RUN cleared its 512 byte jump cache with memset(jc_site, 0,
+// sizeof(jc_site)), and that cleared 2 bytes while sizeof said 2.
+TEST_SUITE("sizeof") {
+  TEST_CASE("an array is its length times its element") {
+    const Ran r = ran(R"(
+      unsigned int w[256];
+      unsigned char b[5];
+      int i[3];
+      unsigned int rw; unsigned int rb; unsigned int ri;
+      int main(void) { rw = sizeof(w); rb = sizeof(b); ri = sizeof i; return 0; }
+    )");
+    CHECK(r.u16("rw") == 512);
+    CHECK(r.u16("rb") == 5);
+    CHECK(r.u16("ri") == 6);
+  }
+
+  TEST_CASE("an array declared extern with its length") {
+    const Ran r = ran(R"(
+      extern unsigned int e[26];
+      unsigned int e[26];
+      unsigned int re;
+      int main(void) { re = sizeof(e); return 0; }
+    )");
+    CHECK(r.u16("re") == 52);
+  }
+
+  TEST_CASE("an element, a pointer and a scalar keep their sizes") {
+    const Ran r = ran(R"(
+      unsigned int w[8];
+      unsigned int *p;
+      unsigned char c;
+      unsigned int re; unsigned int rp; unsigned int rc;
+      int main(void) { re = sizeof(w[0]); rp = sizeof(p); rc = sizeof(c); return 0; }
+    )");
+    CHECK(r.u16("re") == 2);
+    CHECK(r.u16("rp") == 2);
+    CHECK(r.u16("rc") == 1);
+  }
+
+  TEST_CASE("memset with sizeof clears the whole array") {
+    const Ran r = ran(R"(
+      unsigned int w[64];
+      unsigned int last;
+      int main(void) { w[63] = 7; memset(w, 0, sizeof(w)); last = w[63]; return 0; }
+    )", 400000);
+    CHECK(r.u16("last") == 0);
+  }
+}
