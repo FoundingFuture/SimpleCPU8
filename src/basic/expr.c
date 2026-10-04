@@ -26,6 +26,8 @@ static int fn_call(void)
         lx_next();
         a = 0;
         if (IS_PUNCT(40)) { lx_next(); a = ex_int(); if (IS_PUNCT(41)) lx_next(); }
+        /* CHECK leaves the generator where RUN will find it. */
+        if (checking) return 0;
         if (a <= 0) return rand();
         return rand() % a;
     }
@@ -111,17 +113,17 @@ static int fn_call(void)
         lx_next();
         if (rt_routine_name()) return 0;
         a = ex_int();
-        doke(SYS_CALL, a);
+        if (!checking) doke(SYS_CALL, a);
         n = 0;
         while (n < 3) {
             v = 0;
             if (IS_PUNCT(44)) { lx_next(); v = ex_int(); }
-            doke(SYS_USR + n * 2, v);
+            if (!checking) doke(SYS_USR + n * 2, v);
             n = n + 1;
         }
         if (!IS_PUNCT(41)) { rt_expect(") TO CLOSE USR, AFTER AT MOST THREE PARAMETERS"); return 0; }
         lx_next();
-        if (err) return 0;
+        if (err || checking) return 0;
         if (width < 0 || width > 2) { rt_error(E_USRWIDTH); return 0; }
         /* D3 is saved on the machine stack. A C function drops its own
          * parameters on return and an assembly routine drops none, so D3
@@ -160,12 +162,15 @@ static int fn_call(void)
      * stands on the closing bracket, which data.c reads back after it.
      */
     if (lx_kw == KW_DATA) {
+        unsigned char lone;
         lx_next();
         if (!IS_PUNCT(40)) { rt_expect("( AFTER DATA"); return 0; }
         lx_next();
+        lone = rt_lone_before(41);
         a = ex_int();
         if (err) return 0;
         if (!IS_PUNCT(41)) { rt_expect(")"); return 0; }
+        if (checking && !lone) { lx_next(); return 0; }
         a = dt_addr(a);
         if (err) return 0;
         lx_next();
@@ -195,6 +200,7 @@ static int fn_call(void)
             int y;
             y = ex_int();
             if (IS_PUNCT(41)) lx_next();
+            if (checking) return 0;
             return gpu_read_pixel(a >> 8, a, y >> 8, y);
         }
     }
@@ -475,6 +481,7 @@ static unsigned int str_primary(void)
     }
     if (lx_kw == KW_INKEYS) {
         lx_next();
+        if (checking) return 0;
         {
             unsigned char k;
             k = key_get();

@@ -1,6 +1,7 @@
-// The BASIC tests' machine. It boots a ROM headless with the IDE's device
+// A BASIC machine with no window. It boots a ROM with the IDE's device
 // chain, the GPU in text mode and keys typed through the input device.
-// tests/basic and tests/project both run BASIC on it.
+// The project build checks .bas files on it (check.cpp), and tests/basic
+// and tests/project run BASIC on it.
 #pragma once
 
 #include <algorithm>
@@ -21,7 +22,7 @@
 #include "devices/input.h"
 #include "devices/storage.h"
 
-namespace sc8::testing {
+namespace sc8::basic {
 
 inline const Microcode& optimal() {
   static const Microcode mc = buildOptimal();
@@ -83,4 +84,4 @@ struct Session {
   void pushKey(int code, bool release) { input.pushKey(static_cast<uint8_t>(code), release); }
 };
 
-}  // namespace sc8::testing
+}  // namespace sc8::basic

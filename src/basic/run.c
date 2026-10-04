@@ -3,6 +3,7 @@
 
 int vars[NVARS];
 unsigned char loop_back;
+unsigned char checking;
 
 static unsigned int gosub[GOSUBMAX];
 static unsigned char ngosub;
@@ -99,6 +100,18 @@ static unsigned char lone_number(void)
     return lx_text[q] == 0 || lx_text[q] == 58;
 }
 
+/* The same with a closing character in place of the line's end, for
+ * DATA(n). CHECK looks up a line only when its number is written out.
+ */
+unsigned char rt_lone_before(unsigned char close)
+{
+    unsigned char q;
+    if (lx_tok != T_NUM) return 0;
+    q = lx_pos;
+    while (lx_text[q] == 32) q = q + 1;
+    return lx_text[q] == close;
+}
+
 /* What the first error of a command was about, for the message. err_what
  * is what a syntax error expected, err_found what stood there instead.
  */
@@ -149,8 +162,24 @@ static void note_found(void)
     rt_found(lx_word);
 }
 
+/* The mistakes only a value or the machine's state makes. CHECK has no
+ * values to go on, so these are RUN's to find.
+ */
+static unsigned char from_values(unsigned char code)
+{
+    switch (code) {
+    case E_DIVZERO: case E_RANGE: case E_BREAK: case E_BANG: case E_NOTFOUND:
+    case E_STOFULL: case E_BADNAME: case E_USRWIDTH: case E_GOSUBS: case E_RETURN:
+    case E_FORS: case E_NEXT: case E_STRLONG: case E_STRMEM: case E_SAVEBIG:
+    case E_RENUM: case E_NODATA: case E_HEXWIDTH: case E_TEXTSIZE: case E_NOFONT:
+        return 1;
+    }
+    return 0;
+}
+
 void rt_error(unsigned char code)
 {
+    if (checking && from_values(code)) return;
     if (err == E_OK) {
         err = code;
         err_what = 0;
@@ -161,6 +190,15 @@ void rt_error(unsigned char code)
 
 unsigned char rt_routine_name(void)
 {
+    /* A keyword with a bracket after it is a function, PEEK(4) or DEEK(0),
+     * whose value is the slot to call. A routine name never takes one.
+     */
+    if (lx_tok == T_KEY) {
+        unsigned char q;
+        q = lx_pos;
+        while (lx_text[q] == 32) q = q + 1;
+        if (lx_text[q] == 40) return 0;
+    }
     lx_name();
     if (lx_tok != T_NAME || IS_INTVAR) return 0;
     rt_error(E_ROUTINE);
@@ -292,7 +330,7 @@ static void do_print(void)
         if (lx_tok == T_END) break;
         if (IS_PUNCT(58)) break;
         if (IS_PUNCT(59)) { newline = 0; lx_next(); continue; }
-        if (IS_PUNCT(44)) { term_putc(32); newline = 1; lx_next(); continue; }
+        if (IS_PUNCT(44)) { if (!checking) term_putc(32); newline = 1; lx_next(); continue; }
         newline = 1;
         /* The value is checked before it is printed. An expression that
          * failed comes back as 0, and PRINT 1/0 used to show that 0 in
@@ -302,15 +340,15 @@ static void do_print(void)
             unsigned int s;
             s = ex_str();
             if (err) return;
-            str_put(s);
+            if (!checking) str_put(s);
         } else {
             int v;
             v = ex_int();
             if (err) return;
-            term_putn(v);
+            if (!checking) term_putn(v);
         }
     }
-    if (newline) term_nl();
+    if (newline && !checking) term_nl();
 }
 
 static void do_input(void)
@@ -319,15 +357,19 @@ static void do_input(void)
     int slot;
     unsigned char letter;
 
-    if (lx_tok == T_STR) { str_put(lx_str); lx_next(); if (IS_PUNCT(59) || IS_PUNCT(44)) lx_next(); }
-    term_putc(63);
-    term_putc(32);
+    if (lx_tok == T_STR) {
+        if (!checking) str_put(lx_str);
+        lx_next();
+        if (IS_PUNCT(59) || IS_PUNCT(44)) lx_next();
+    }
+    if (!checking) { term_putc(63); term_putc(32); }
     lx_name();
     if (lx_tok != T_NAME) { rt_expect("A VARIABLE AFTER INPUT"); return; }
     is_str = IS_STRVAR;
     letter = lx_word[0] - 65;
     slot = var_slot();
     lx_next();
+    if (checking) return;
 
     term_readline(line_buf);
     if (is_str) {
@@ -390,7 +432,14 @@ static unsigned char after_let(void)
     /* Graphics, so a program can draw. Each is one GPU command, or two
      * for a filled CIRCLE. All draw in the INK colour.
      */
-    case KW_INK: lx_next(); rt_ink(ex_int()); return 1;
+    case KW_INK:
+        lx_next();
+        {
+            int c;
+            c = ex_int();
+            if (!checking) rt_ink(c);
+            return 1;
+        }
     case KW_PLOT:
         lx_next();
         {
@@ -399,7 +448,7 @@ static unsigned char after_let(void)
             x = ex_int();
             if (IS_PUNCT(44)) lx_next();
             y = ex_int();
-            gpu_plot(x >> 8, x, y >> 8, y, ink);
+            if (!checking) gpu_plot(x >> 8, x, y >> 8, y, ink);
             return 1;
         }
     case KW_MOVE:
@@ -410,7 +459,7 @@ static unsigned char after_let(void)
             x = ex_int();
             if (IS_PUNCT(44)) lx_next();
             y = ex_int();
-            gpu_move_to(x >> 8, x, y >> 8, y);
+            if (!checking) gpu_move_to(x >> 8, x, y >> 8, y);
             return 1;
         }
     case KW_DRAW:
@@ -421,7 +470,7 @@ static unsigned char after_let(void)
             x = ex_int();
             if (IS_PUNCT(44)) lx_next();
             y = ex_int();
-            gpu_line_to(x >> 8, x, y >> 8, y);
+            if (!checking) gpu_line_to(x >> 8, x, y >> 8, y);
             return 1;
         }
     /* CIRCLE rx, ry, fill: an outline around the pen in INK. ry is
@@ -448,6 +497,7 @@ static unsigned char after_let(void)
                 if (!IS_PUNCT(41)) { rt_expect(")"); return 1; }
                 lx_next();
             }
+            if (checking) return 1;
             if (filled) {
                 gpu_set_color(fill);
                 out(GPU_RADIUS_Y, ry);
@@ -458,16 +508,27 @@ static unsigned char after_let(void)
             gpu_ring(rx);
             return 1;
         }
-    case KW_PAPER: lx_next(); term_paper(ex_int()); return 1;
+    case KW_PAPER:
+        lx_next();
+        {
+            int c;
+            c = ex_int();
+            if (!checking) term_paper(c);
+            return 1;
+        }
     /* LOADFONT name: the font of that name on the cartridge, which the
      * storage device finds in any case. LOADFONT alone: the built-in font.
      * The grid follows the font's cell, and the screen starts over.
      */
     case KW_LOADFONT:
         lx_next();
-        if (lx_tok == T_END || IS_PUNCT(58)) { gpu_reset_font(); term_grid(); return 1; }
+        if (lx_tok == T_END || IS_PUNCT(58)) {
+            if (!checking) { gpu_reset_font(); term_grid(); }
+            return 1;
+        }
         lx_name();
         if (lx_tok != T_NAME) { rt_expect("A FONT NAME AFTER LOADFONT"); return 1; }
+        if (checking) { lx_next(); return 1; }
         {
             /* STO_FIND's answer: a kind, three bytes of cartridge address,
              * three of length. A local, so the zero page keeps what the
@@ -493,7 +554,7 @@ static unsigned char after_let(void)
             if (!IS_PUNCT(44)) { rt_expect(", AND THE HEIGHT"); return 1; }
             lx_next();
             h = ex_int();
-            if (err) return 1;
+            if (err || checking) return 1;
             if (w < 4 || w > 8 || h < 4 || h > 8) { rt_error(E_TEXTSIZE); return 1; }
             gpu_text_cell(w, h);
             term_grid();
@@ -504,6 +565,7 @@ static unsigned char after_let(void)
         {
             int n;
             n = ex_int();
+            if (checking) return 1;
             while (n > 0) { wait_frame(); n = n - 1; }
             return 1;
         }
@@ -511,14 +573,17 @@ static unsigned char after_let(void)
         lx_next();
         {
             int a;
+            int v;
             a = ex_int();
             if (IS_PUNCT(44)) lx_next();
-            poke(a, ex_int());
+            v = ex_int();
+            if (!checking) poke(a, v);
             /* POKE a, 1, 2, 3 fills the boxes after a in turn. */
             while (IS_PUNCT(44)) {
                 lx_next();
                 a = a + 1;
-                poke(a, ex_int());
+                v = ex_int();
+                if (!checking) poke(a, v);
             }
             return 1;
         }
@@ -539,7 +604,7 @@ static unsigned char after_let(void)
         {
             int n;
             n = ex_int();
-            if (err) return 1;
+            if (err || checking) return 1;
             doke(SYS_CALL, n);
             asm("LD D2 <- [$0018]");
             asm("JSR D2");
@@ -553,7 +618,7 @@ static unsigned char after_let(void)
         {
             int n;
             n = ex_int();
-            if (err) return 1;
+            if (err || checking) return 1;
             doke(SYS_CALL, n);
             asm("LD D2 <- [$0018]");
             asm("JMP D2");
@@ -568,6 +633,7 @@ static unsigned char after_let(void)
             a = ex_int();
             if (IS_PUNCT(44)) lx_next();
             v = ex_int();
+            if (checking) return 1;
             poke(a, v >> 8);
             poke(a + 1, v);
             return 1;
@@ -605,10 +671,11 @@ static unsigned char statement(void)
         lx_tok = T_END;
         return 1;
     case KW_PRINT: lx_next(); do_print(); return 1;
-    case KW_CLS: lx_next(); term_cls(); return 1;
+    case KW_CLS: lx_next(); if (!checking) term_cls(); return 1;
     case KW_END:
     case KW_STOP:
         lx_next();
+        if (checking) return 1;
         running = 0;
         return 0;
     case KW_INPUT: lx_next(); do_input(); return 1;
@@ -619,7 +686,9 @@ static unsigned char statement(void)
         for (;;) {
             lx_name();
             if (lx_tok != T_NAME) { rt_expect("A VARIABLE AFTER READ"); return 1; }
-            if (IS_STRVAR) {
+            if (checking) {
+                if (!IS_STRVAR && !IS_INTVAR) { rt_error(E_NOTVAR); return 1; }
+            } else if (IS_STRVAR) {
                 unsigned char letter;
                 unsigned int s;
                 letter = lx_word[0] - 65;
@@ -647,8 +716,10 @@ static unsigned char statement(void)
         if (lx_tok == T_END || IS_PUNCT(58)) { dt_restore(); return 1; }
         {
             int n;
+            unsigned char lone;
+            lone = lone_number();
             n = ex_int();
-            if (err) return 1;
+            if (err || (checking && !lone)) return 1;
             dt_restore_line(n);
             return 1;
         }
@@ -660,6 +731,12 @@ static unsigned char statement(void)
             unsigned int p;
             unsigned char lone;
             lone = lone_number();
+            if (checking) {
+                int n;
+                n = ex_int();
+                if (lone && !err) line_at(n);
+                return 1;
+            }
             p = line_at(ex_int());
             if (err) return 0;
             if (lone) jc_put(p);
@@ -677,6 +754,12 @@ static unsigned char statement(void)
             } else {
                 lx_next();
                 lone = lone_number();
+                if (checking) {
+                    int n;
+                    n = ex_int();
+                    if (lone && !err) line_at(n);
+                    return 1;
+                }
                 p = line_at(ex_int());
                 if (err) return 0;
             }
@@ -697,6 +780,7 @@ static unsigned char statement(void)
 
     case KW_RETURN:
         lx_next();
+        if (checking) return 1;
         if (ngosub == 0) { rt_error(E_RETURN); return 0; }
         ngosub = ngosub - 1;
         pc = gosub[ngosub];
@@ -718,11 +802,13 @@ static unsigned char statement(void)
                 then = cond != 0;
                 lx_next();
             }
-            if (cond == 0) { lx_tok = T_END; return 1; }
+            /* CHECK reads what follows THEN whatever the condition. */
+            if (cond == 0 && !checking) { lx_tok = T_END; return 1; }
             /* THEN 100 is a GOTO, which is how BASIC has always read. */
             if (lx_tok == T_NUM) {
                 unsigned int p;
                 p = line_at(lx_num);
+                if (checking) { lx_next(); return 1; }
                 if (err) return 0;
                 if (then) jc_put(p);
                 pc = p;
@@ -743,8 +829,13 @@ static unsigned char statement(void)
             lx_next();
             if (IS_PUNCT(61)) lx_next(); else { rt_expect("="); return 1; }
             from = ex_int();
-            vars[slot] = from;
+            if (!checking) vars[slot] = from;
             if (lx_kw == KW_TO) lx_next(); else { rt_expect("TO"); return 1; }
+            if (checking) {
+                ex_int();
+                if (lx_kw == KW_STEP) { lx_next(); ex_int(); }
+                return 1;
+            }
             if (nfor >= FORMAX) { rt_error(E_FORS); return 1; }
             for_var[nfor] = slot;
             for_to[nfor] = ex_int();
@@ -763,6 +854,7 @@ static unsigned char statement(void)
         lx_next();
         /* NEXT I, and the name is ignored. So is a keyword there. */
         if (lx_tok == T_NAME || lx_tok == T_KEY) lx_next();
+        if (checking) return 1;
         if (nfor == 0) { rt_error(E_NEXT); return 1; }
         {
             unsigned char t;
@@ -791,7 +883,11 @@ static unsigned char statement(void)
     /* The bang statement takes the whole rest of the line, colons and all:
      * what a driver makes of its text is the driver's business.
      */
-    if (IS_PUNCT(33)) { bang_run(&lx_text[lx_pos]); lx_tok = T_END; return 1; }
+    if (IS_PUNCT(33)) {
+        if (!checking) bang_run(&lx_text[lx_pos]);
+        lx_tok = T_END;
+        return 1;
+    }
     return after_let();
 }
 
@@ -882,6 +978,76 @@ void rt_run(void)
     err_line = 0;
 }
 
+/* CHECK, and CHECK n to start at line n: every stored line read once, in
+ * order, and never run.
+ *
+ * DESIGN: the check is the interpreter reading its own lines with
+ * `checking` set, so it says what RUN says in RUN's words. A statement
+ * parses as it always does and skips what it would do: nothing prints,
+ * waits, reads a key, pokes, draws or calls. No jump is taken, so an
+ * endless loop ends like any program. GOTO, GOSUB, THEN, RESTORE and
+ * DATA( look up a line only when its number is written out. rt_error
+ * passes over what only values cause, from_values above. The project
+ * build runs this on every .bas file, src/basic/check.cpp.
+ *
+ * An assignment still assigns, and a string still takes heap: the hot
+ * path stays as it was. The variables, the strings and READ's place are
+ * copied out first and back after. The heap's top goes back after every
+ * line, and the collector never runs, see str_new.
+ */
+static int saved_vars[NVARS];
+static unsigned int saved_svar[NSTRS];
+
+static void rt_check(unsigned int from)
+{
+    unsigned int at;
+    unsigned int next;
+    unsigned int n;
+    unsigned int top;
+    unsigned int read;
+
+    memcpy(saved_vars, vars, sizeof(saved_vars));
+    memcpy(saved_svar, svar, sizeof(saved_svar));
+    top = heap_top;
+    read = read_at;
+    ngosub = 0;
+    nfor = 0;
+    jc_on = 0;
+    loop_back = 0;
+    checking = 1;
+
+    /* DATA's bytes are checked where RUN checks them, before line 1. A
+     * mistake above the first line asked for was reported already.
+     */
+    dt_pack();
+    if (err && err_line < from) err = E_OK;
+
+    at = 0;
+    while (err == E_OK) {
+        n = *(unsigned int *)&prog[at];
+        if (n == 0) break;
+        next = at + prog[at + 2];
+        if (n >= from) {
+            err_line = n;
+            cur_line = at;
+            pc = next;
+            running = 1;
+            heap_top = top;
+            run_line((char *)&prog[at + 3], 0);
+        }
+        at = next;
+    }
+
+    checking = 0;
+    running = 0;
+    memcpy(vars, saved_vars, sizeof(saved_vars));
+    memcpy(svar, saved_svar, sizeof(saved_svar));
+    heap_top = top;
+    read_at = read;
+    if (err) say_error();
+    else err_line = 0;
+}
+
 /* A line typed at the prompt. A number in front stores it, anything else
  * runs now, which is what makes BASIC feel like BASIC.
  */
@@ -911,6 +1077,15 @@ void rt_line(char *text)
 
     lx_start(&text[i]);
     if (lx_is("RUN")) { rt_run(); return; }
+    if (lx_is("CHECK")) {
+        unsigned int from;
+        lx_next();
+        from = 0;
+        if (lx_tok == T_NUM) { from = lx_num; lx_next(); }
+        if (lx_tok != T_END) { rt_expect("A LINE NUMBER"); say_error(); return; }
+        rt_check(from);
+        return;
+    }
     if (lx_is("LIST")) { do_list(); if (err) say_error(); return; }
     if (lx_is("NEW")) { ed_new(); str_init(); term_puts("READY"); term_nl(); return; }
     /* RENUM start, step: 10 and 10 unless given. */

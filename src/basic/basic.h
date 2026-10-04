@@ -179,6 +179,10 @@ void ed_renum(unsigned int start, unsigned int step);
 /* run.c: statements. */
 extern int vars[NVARS];
 extern unsigned char loop_back;
+/* 1 while CHECK reads the program: statements parse and do nothing. */
+extern unsigned char checking;
+/* 1 when the lexer stands on a number with only `close` after it. */
+unsigned char rt_lone_before(unsigned char close);
 
 /* The error codes a program reads back from SYS_ERR. The first twelve
  * keep the numbers they always had. The rest split the old broad ones, so

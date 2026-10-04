@@ -27,6 +27,9 @@ constexpr size_t PROGRAM_MAX = 16384;
 // System page addresses the bridge reads, mirrored from basic.h.
 constexpr uint16_t SYS_PROG = 0x08;
 constexpr uint16_t SYS_PROG_LEN = 0x0A;
+// The last error's code, 0 for none, and the line it was on.
+constexpr uint16_t SYS_ERR = 0x12;
+constexpr uint16_t SYS_ERR_LINE = 0x13;
 constexpr uint16_t SYS_RUNNING = 0x15;
 constexpr uint16_t SYS_COL = 0x05;
 constexpr uint16_t SYS_ROW = 0x06;
