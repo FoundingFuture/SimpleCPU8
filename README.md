@@ -10,6 +10,34 @@ This is the standalone successor of the browser version in the SimpleCPU
 repository. docs/design/ carries that project's design record, and
 docs/standalone.md records what this version adds.
 
+## Install
+
+packaging/install.sh installs the latest GitHub release on macOS and Linux.
+packaging/install.ps1 does the same on Windows. Each one picks the archive for
+the machine's system and processor, arm64 or x86_64. Each install installs
+for the current user and needs no administrator rights.
+
+```bash
+sh packaging/install.sh                 # asks whether to add the programs to PATH
+sh packaging/install.sh --path          # adds them without asking
+sh packaging/install.sh --version 0.1.0
+sh packaging/install.sh --archive dist/simplecpu-0.1.0-macos-arm64.tar.gz
+```
+
+```powershell
+.\packaging\install.ps1 -Path
+```
+
+| System | Programs | Examples |
+|---|---|---|
+| macOS | `~/Applications/SimpleCPU-8.app` | `~/Library/Application Support/SimpleCPU-8/examples` |
+| Linux | `~/.local/share/simplecpu-8`, launcher in the applications menu | `~/.config/simplecpu-8/examples` |
+| Windows | `%LOCALAPPDATA%\Programs\SimpleCPU-8`, Start Menu entry | `%APPDATA%\SimpleCPU-8\examples` |
+
+The IDE's File, Open example lists the examples folder. A build from the
+checkout reads the same folder, so it shows the examples of the last
+install. Every install replaces that folder.
+
 ## Build
 
 Requirements: CMake 3.24 or newer and a C++20 compiler such as GCC 13,
@@ -28,6 +56,7 @@ libxinerama-dev`.
 ./r pacman     # run build/release/roms/pacman.rom
 ./r --ide      # the IDE
 ./d            # a distribution for this machine's OS under dist/
+./d --arch arm64 --upload   # macOS: attach the archive to the draft release
 ```
 
 The scripts are bash and run on macOS, Linux and Windows under Git Bash.

@@ -1,7 +1,10 @@
-# The six distributions: macOS, Linux and Windows, each on arm64 and
-# x86_64. Every job runs ./d on a host of its own kind, so nothing is
-# cross compiled. macOS builds one architecture per job here, so each
-# archive holds a plain binary; ./d on a Mac builds a universal one.
+# Linux and Windows distributions, each on arm64 and x86_64. Every job runs
+# ./d on a host of its own kind, so nothing is cross compiled. It then
+# installs the archive with the installer users run, to check the two agree. macOS
+# is built on a Mac with ./d --upload, see the header of ./d.
+#
+# A v* tag also drafts the GitHub Release with these four archives. The
+# macOS two are uploaded to the draft, and the release is published by hand.
 name: dist
 
 on:
@@ -15,8 +18,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-14,        arch: arm64,  name: macos-arm64 }
-          - { os: macos-13,        arch: x86_64, name: macos-x86_64 }
           - { os: ubuntu-24.04,     arch: x86_64, name: linux-x86_64 }
           - { os: ubuntu-24.04-arm, arch: arm64,  name: linux-arm64 }
           - { os: windows-2022,     arch: x86_64, name: windows-x86_64 }
@@ -29,12 +30,29 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libxcursor-dev libxinerama-dev libxkbcommon-dev
-      - name: Ninja on macOS
-        if: runner.os == 'macOS'
-        run: brew install ninja
       - name: Distribution
         shell: bash
         run: ./d --arch ${{ matrix.arch }}
+      - name: Install with install.sh
+        if: runner.os == 'Linux'
+        run: |
+          sh packaging/install.sh --archive dist/*.tar.gz --no-path
+          test -x ~/.local/share/simplecpu-8/bin/simplecpu-ide
+          test -f ~/.local/share/applications/simplecpu-8.desktop
+          test -f ~/.config/simplecpu-8/examples/README.md
+          ~/.local/share/simplecpu-8/bin/simplecpu-asm ~/.config/simplecpu-8/examples/assembly/hello/hello.asm -o "$RUNNER_TEMP/hello.rom"
+      # Windows PowerShell 5.1 is what `irm | iex` runs in on a fresh machine.
+      - name: Install with install.ps1
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $zip = (Get-Item dist\*.zip).FullName
+          & .\packaging\install.ps1 -Archive $zip -NoPath
+          if (-not (Test-Path "$env:LOCALAPPDATA\Programs\SimpleCPU-8\bin\simplecpu-ide.exe")) { throw "no simplecpu-ide.exe" }
+          if (-not (Test-Path "$env:APPDATA\SimpleCPU-8\examples\README.md")) { throw "no examples" }
+          if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\SimpleCPU-8.lnk")) { throw "no shortcut" }
+          & "$env:LOCALAPPDATA\Programs\SimpleCPU-8\bin\simplecpu-asm.exe" "$env:APPDATA\SimpleCPU-8\examples\assembly\hello\hello.asm" -o "$env:RUNNER_TEMP\hello.rom"
+          if ($LASTEXITCODE -ne 0) { throw "simplecpu-asm failed" }
       - uses: actions/upload-artifact@v4
         with:
           name: simplecpu-${{ matrix.name }}
@@ -45,3 +63,22 @@ jobs:
         with:
           name: simplecpu-${{ matrix.name }}-zip
           path: dist/*.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: archives
+          merge-multiple: true
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" archives/* --repo "$GITHUB_REPOSITORY" --draft \
+            --title "SimpleCPU-8 ${GITHUB_REF_NAME#v}" \
+            --notes "Draft: upload the macOS archives with ./d --arch arm64 --upload and ./d --arch x86_64 --upload, then publish."
