@@ -1055,6 +1055,24 @@ TEST_SUITE("CALL and JMP") {
     CHECK_EQ(printed(*s, "PRINT HEX$(PEEK(4), 2)"), "0F");
   }
 
+  // A function after CALL, JSR or JMP works out the address to call, and
+  // so does one as USR's routine. A routine name never has a bracket after
+  // it. The word at 0 is the bang vector, a routine that sets A to 0.
+  TEST_CASE("a function is the address to call, not a routine name") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "POKE 4, 9");
+    type(*s, "CALL DEEK(0)");
+    CHECK_FALSE(has(flat(*s), "ROUTINE NAME"));
+    CHECK_EQ(s->m->ram[4], 0);
+    type(*s, "POKE 4, 9");
+    type(*s, "JSR DEEK(0)");
+    CHECK_EQ(s->m->ram[4], 0);
+    CHECK_EQ(printed(*s, "PRINT USR(0, DEEK(0))"), "0");
+    CHECK_FALSE(has(flat(*s), "ROUTINE NAME"));
+    CHECK(s->m->status == Status::Running);
+  }
+
   TEST_CASE("a name at the prompt is a syntax error, because only a build knows labels") {
     auto s = boot();
     settle(*s);
@@ -2729,7 +2747,8 @@ TEST_SUITE("basic speed") {
          "1? THEN IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
         {"10 INPUT PRINT",
          "?"},
-        {"10 CALL PEEK(5)",
+        // Without a bracket: CALL PEEK(5) calls the slot PEEK(5) reads.
+        {"10 CALL PEEK",
          "? PEEK IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: USE ITS NUMBER HERE IN LINE 10 READY >"},
         {"10 LET PRINT 5",
          "? UNKNOWN WORD PRINT IN LINE 10 READY >"},
@@ -2925,5 +2944,162 @@ TEST_SUITE("basic speed") {
     CHECK_EQ(s->m->ram[basic::SYS_RUNNING], 0);
     CHECK_FALSE(has(text(*s), "L100"));
     CHECK_FALSE(has(text(*s), "?"));
+  }
+}
+
+// RUN empties the jump cache. It cleared two of its 512 bytes while the
+// compiler gave sizeof of an array as 2. A GOTO in the next program whose
+// number sat where an old one's had went to the old target. That ran the
+// previous program's tokens from the middle of a line.
+TEST_SUITE("the jump cache between programs") {
+  TEST_CASE("a GOTO in a new program goes where its own number says") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 GOTO 30\n20 PRINT \"TWO\"\n25 END\n30 PRINT \"ONE\"\n");
+    type(*s, "RUN", 8000000);
+    REQUIRE(has(after(text(*s), ">RUN\n"), "ONE"));
+    type(*s, "CLS");
+    setProgram(*s, "10 GOTO 20\n20 PRINT \"TWO\"\n25 END\n30 PRINT \"BAD\"\n");
+    type(*s, "RUN", 8000000);
+    const std::string out = after(text(*s), ">RUN\n");
+    CHECK(has(out, "TWO"));
+    CHECK_FALSE(has(out, "BAD"));
+  }
+}
+
+// CHECK reads every stored line once, in order, without running it. It
+// reports the first mistake RUN would report from the text alone, in RUN's
+// words. Mistakes that depend on values stay quiet: those only RUN finds.
+TEST_SUITE("CHECK") {
+  namespace {
+
+  // The first error message on the screen after the echo of a command, the
+  // rows run together, from its "? " up to the READY after it.
+  std::string messageAfter(const Session& s, const std::string& echo) {
+    const std::string t = after(flat(s), echo);
+    const size_t from = t.find("? ");
+    if (from == std::string::npos) return "";
+    const size_t to = t.find(" READY", from);
+    return t.substr(from, to == std::string::npos ? std::string::npos : to - from);
+  }
+
+  // What CHECK says about a program, and what RUN says about the same one.
+  std::string checkSays(const std::string& program, const std::string& command = "CHECK") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, program);
+    type(*s, command);
+    return messageAfter(*s, ">" + command);
+  }
+
+  std::string runSays(const std::string& program) {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, program);
+    type(*s, "RUN", 8000000);
+    return messageAfter(*s, ">RUN");
+  }
+
+  }  // namespace
+
+  TEST_CASE("an endless loop checks clean and prints nothing") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 PRINT \"HELLO\"\n20 GOTO 10\n");
+    type(*s, "CHECK");
+    CHECK_EQ(s->m->ram[basic::SYS_ERR], 0);
+    CHECK_EQ(s->m->ram[basic::SYS_RUNNING], 0);
+    CHECK_FALSE(has(text(*s), "HELLO"));
+    CHECK(has(after(text(*s), ">CHECK\n"), "READY"));
+  }
+
+  TEST_CASE("RUN in a program line is the unknown word RUN reports") {
+    const std::string program = "100 PRINT \"TEST\";\n110 RUN\n";
+    CHECK_EQ(checkSays(program), "? UNKNOWN WORD RUN IN LINE 110");
+    CHECK_EQ(checkSays(program), runSays(program));
+  }
+
+  TEST_CASE("a GOTO to a line that is not there, written as a number") {
+    CHECK_EQ(checkSays("10 GOTO 500\n"), "? THERE IS NO LINE 500 IN LINE 10");
+    CHECK_EQ(checkSays("10 GOSUB 500\n"), "? THERE IS NO LINE 500 IN LINE 10");
+    CHECK_EQ(checkSays("10 IF 1 THEN 500\n"), "? THERE IS NO LINE 500 IN LINE 10");
+  }
+
+  TEST_CASE("both sides of an IF are read") {
+    const std::string message = runSays("10 IF 1 THEN PRINT (\n");
+    REQUIRE_FALSE(message.empty());
+    CHECK_EQ(checkSays("10 IF 0 THEN PRINT (\n"), message);
+  }
+
+  TEST_CASE("a syntax error says what it expected, as RUN does") {
+    const std::string program = "10 FOR I = 1 10\n";
+    REQUIRE_FALSE(runSays(program).empty());
+    CHECK_EQ(checkSays(program), runSays(program));
+  }
+
+  TEST_CASE("END and STOP do not end the check") {
+    CHECK_EQ(checkSays("10 END\n20 PRINT (\n"), runSays("20 PRINT (\n"));
+    CHECK_EQ(checkSays("10 STOP\n20 PRINT (\n"), runSays("20 PRINT (\n"));
+  }
+
+  TEST_CASE("a DATA value out of a byte's range") {
+    const std::string program = "10 DATA 300\n";
+    REQUIRE_FALSE(runSays(program).empty());
+    CHECK_EQ(checkSays(program), runSays(program));
+  }
+
+  TEST_CASE("mistakes that depend on values are left to RUN") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s,
+               "10 PRINT 1/A\n20 RETURN\n30 NEXT I\n40 GOTO A*10\n50 X=USR(5,100)\n60 SETTEXT 9,9\n"
+               "70 READ B\n80 PRINT CHR$(300)\n");
+    type(*s, "CHECK");
+    CHECK_EQ(s->m->ram[basic::SYS_ERR], 0);
+    CHECK_EQ(messageAfter(*s, ">CHECK"), "");
+  }
+
+  TEST_CASE("nothing is carried out: no output, no POKE, no INPUT, no WAIT") {
+    auto s = boot();
+    settle(*s);
+    // $6000 is in the block SAVE and LOAD go through, which nothing here runs.
+    setProgram(*s, "10 PRINT \"XYZZY\"\n20 POKE 24576,7\n30 INPUT A\n40 WAIT 10000\n50 CLS\n");
+    const uint8_t was = s->m->ram[24576];
+    REQUIRE_NE(was, 7);
+    type(*s, "CHECK");
+    CHECK_EQ(s->m->ram[24576], was);
+    CHECK_FALSE(has(text(*s), "XYZZY"));
+    CHECK(has(after(text(*s), ">CHECK\n"), "READY"));
+    CHECK_EQ(s->m->ram[basic::SYS_RUNNING], 0);
+  }
+
+  TEST_CASE("the variables and the program are as they were after a CHECK") {
+    auto s = boot();
+    settle(*s);
+    type(*s, "A=7");
+    type(*s, "B$=\"KEEP\"");
+    setProgram(*s, "10 A=1\n20 B$=\"GONE\"\n30 FOR I=1 TO 5\n40 PRINT A;B$\n");
+    const std::vector<uint8_t> before(s->m->ram.begin() + sysWord(*s, basic::SYS_PROG),
+                                      s->m->ram.begin() + programEnd(*s));
+    type(*s, "CHECK");
+    CHECK_EQ(intVar(*s, 'A'), 7);
+    CHECK_EQ(printed(*s, "PRINT B$"), "KEEP");
+    const std::vector<uint8_t> after(s->m->ram.begin() + sysWord(*s, basic::SYS_PROG),
+                                     s->m->ram.begin() + programEnd(*s));
+    CHECK(before == after);
+  }
+
+  TEST_CASE("CHECK n starts at line n") {
+    const std::string program = "10 GOTO 999\n20 PRINT (\n";
+    CHECK_EQ(checkSays(program, "CHECK 20"), runSays("20 PRINT (\n"));
+  }
+
+  TEST_CASE("a program that runs after a CHECK runs as before") {
+    auto s = boot();
+    settle(*s);
+    setProgram(*s, "10 A=6\n20 PRINT A*7\n");
+    type(*s, "CHECK");
+    type(*s, "RUN", 8000000);
+    CHECK(has(after(text(*s), ">RUN\n"), "42"));
   }
 }

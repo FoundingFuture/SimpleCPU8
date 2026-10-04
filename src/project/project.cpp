@@ -16,6 +16,7 @@
 #include "core/microcode.h"
 #if SC8_HAVE_BASIC
 #include "basic/basic_rom.h"
+#include "basic/check.h"
 #include "basic/program.h"
 #endif
 
@@ -45,6 +46,28 @@ std::vector<fs::path> filesWith(const fs::path& dir, std::string_view ext) {
   }
   std::sort(out.begin(), out.end());
   return out;
+}
+
+// The line of a .bas file that holds BASIC line `number`, counted from 1,
+// or 0 when none does. A number given twice is the later line, which is
+// the one BASIC keeps.
+int fileLineOf(const std::string& text, int number) {
+  int found = 0;
+  int line = 0;
+  size_t at = 0;
+  while (at <= text.size() && number > 0) {
+    size_t end = text.find('\n', at);
+    if (end == std::string::npos) end = text.size();
+    line++;
+    size_t i = at;
+    while (i < end && text[i] == ' ') i++;
+    int n = 0;
+    const size_t digits = i;
+    while (i < end && text[i] >= '0' && text[i] <= '9' && n <= 65535) n = n * 10 + (text[i++] - '0');
+    if (i > digits && n == number) found = line;
+    at = end + 1;
+  }
+  return found;
 }
 
 // A slot name from a file name: the stem, uppercase, letters and digits,
@@ -817,6 +840,25 @@ Built buildSources(const std::vector<Source>& sources, const Assets& assets, con
     b.sources.push_back(p->name);
   }
   if (!b.errors.empty()) return b;
+#if SC8_HAVE_BASIC
+  // DESIGN: BASIC reads each file with its own CHECK, on this cartridge's
+  // interpreter. The build reports what RUN would report from the text,
+  // in RUN's words. An opened ROM's program may not be BASIC, so it is not
+  // booted to find out.
+  if (!onBase && (basicProject || mixedProject)) {
+    for (size_t i = 0; i < basFiles.size(); i++) {
+      const std::string& text = c.basic[c.basic.size() - basFiles.size() + i].second;
+      const std::string& name = basFiles[i]->name;
+      const basic::Checked checked = basic::checkProgram(c, text);
+      for (const basic::Issue& issue : checked.issues) {
+        const int line = fileLineOf(text, issue.line);
+        b.errors.push_back(at(name) + (line > 0 ? ":" + std::to_string(line) : "") + ": " + issue.message);
+      }
+      if (!checked.failure.empty()) b.errors.push_back(at(name) + ": " + checked.failure);
+    }
+    if (!b.errors.empty()) return b;
+  }
+#endif
   b.cartridge = std::move(c);
   return b;
 }

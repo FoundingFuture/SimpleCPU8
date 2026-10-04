@@ -37,6 +37,10 @@ unsigned int str_new(unsigned int len)
     unsigned int at;
     if (len > 255) { rt_error(E_STRLONG); return 0; }
     if (heap_top + len + 1 >= HEAPMAX) {
+        /* CHECK puts the heap's top back after each line, and a collection
+         * would move the strings it puts back to.
+         */
+        if (checking) return 0;
         str_collect();
         if (heap_top + len + 1 >= HEAPMAX) { rt_error(E_STRMEM); return 0; }
     }

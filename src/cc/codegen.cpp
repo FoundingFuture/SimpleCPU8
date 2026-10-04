@@ -1956,7 +1956,15 @@ class Gen {
       }
 
       case ExprKind::Sizeof: {
-        const CType t = e.ofType ? *e.ofType : typeOf(e.e);
+        // The operand of sizeof is where an array's name keeps its array
+        // type, so a name is looked up rather than typed, which decays it.
+        // This differs from codegen.ts, which gave every array 2. BASIC's
+        // RUN cleared 2 bytes of its jump cache that way.
+        CType t = e.ofType ? *e.ofType : CType{};
+        if (!e.ofType) {
+          const bool name = e.e->k == ExprKind::Id && !constantNamed(e.e->name);
+          t = name ? lookup(e.e->name, e.e->pos).type : typeOf(e.e);
+        }
         loadConst(slot, sizeOf(t), T(BaseType::UInt));
         return T(BaseType::UInt);
       }

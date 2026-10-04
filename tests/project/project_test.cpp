@@ -394,6 +394,54 @@ void unused_but_kept(void) { calls = 0; }
 }
 #endif
 
+// The build reads every .bas file with BASIC's own CHECK. A mistake RUN
+// would report from the text fails the build, in RUN's words, at the
+// file's line. src/basic/check.h.
+TEST_SUITE("a build checks its BASIC") {
+  // A build names a file by its path, so the tests read the end.
+  bool endsWith(const std::string& s, const std::string& tail) {
+    return s.size() >= tail.size() && s.compare(s.size() - tail.size(), tail.size(), tail) == 0;
+  }
+
+  TEST_CASE("RUN in a line fails the build at the file's line") {
+    TempDir t;
+    write(t.path / "src" / "autorun.bas", "100 PRINT \"TEST\";\n\n110 RUN\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_EQ(b.errors.size(), 1u);
+    CHECK_MESSAGE(endsWith(b.errors[0], "autorun.bas:3: UNKNOWN WORD RUN IN LINE 110"), b.errors[0]);
+  }
+
+  TEST_CASE("an endless loop builds") {
+    TempDir t;
+    write(t.path / "src" / "autorun.bas", "10 PRINT \"HELLO\"\n20 GOTO 10\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    CHECK(b.errors.empty());
+    CHECK(b.cartridge);
+  }
+
+  TEST_CASE("every .bas file is read, and every mistake in it") {
+    TempDir t;
+    write(t.path / "src" / "autorun.bas", "10 PRINT 1\n");
+    write(t.path / "src" / "other.bas", "10 GOTO 50\n20 LIST\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_EQ(b.errors.size(), 2u);
+    CHECK_MESSAGE(endsWith(b.errors[0], "other.bas:1: THERE IS NO LINE 50 IN LINE 10"), b.errors[0]);
+    CHECK_MESSAGE(endsWith(b.errors[1], "other.bas:2: UNKNOWN WORD LIST IN LINE 20"), b.errors[1]);
+  }
+
+  TEST_CASE("a project with BASIC and C is read on its own interpreter") {
+    TempDir t;
+    write(t.path / "src" / "twice.c", "int calls;\nvoid TWICE(void) { calls = calls + 1; }\n");
+    write(t.path / "src" / "autorun.bas", "10 CALL TWICE\n20 RENUM\n");
+    project::Built b = project::build(project::layoutOf(t.path), {});
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_EQ(b.errors.size(), 1u);
+    CHECK_MESSAGE(endsWith(b.errors[0], "autorun.bas:2: UNKNOWN WORD RENUM IN LINE 20"), b.errors[0]);
+  }
+}
+
 TEST_SUITE("calls across languages") {
   // BASIC calls C and assembly by name, assembly calls C, and C calls
   // assembly. The build reads the BASIC and the assembly for the names

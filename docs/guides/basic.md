@@ -871,6 +871,10 @@ with its BASIC words in small letters is put in capitals when it opens.
 keeps the old program until you save, and the Messages pane says so.
 Save writes the editor's text to the file.
 
+Build reads every `.bas` file of the project with `CHECK`. Each mistake
+shows in the Messages pane with the file and its line, as in
+`autorun.bas:3: UNKNOWN WORD RUN IN LINE 110`, and the build stops.
+
 ## Longer programs
 
 A few habits make a program of fifty lines readable.
@@ -905,6 +909,15 @@ will meet most:
 | `THE STRING IS TOO LONG` | a string longer than 255 characters |
 | `THE PROGRAM MEMORY IS FULL` | the program no longer fits |
 | `BREAK` | you pressed Escape or Ctrl-C |
+
+`CHECK` reads the whole program for mistakes without running it. It
+reads each line once, from the top, and stops at the first mistake with
+the message `RUN` would give. Nothing is printed or drawn, and a `GOTO`
+is never followed, so a program that loops for ever is read to its end.
+`CHECK 200` starts at line 200, which finds the next mistake once you
+have fixed one. Some mistakes depend on values and only show while the
+program runs. `DIVISION BY ZERO`, `RETURN WITHOUT A GOSUB` and
+`NEXT WITHOUT A FOR` are three of them. `CHECK` leaves those to `RUN`.
 
 ## A small game
 
@@ -1035,6 +1048,10 @@ Commands you type at the prompt:
 | `LIST` | prints the stored program, or part of it: `LIST 20`, `LIST 20-40`, `LIST -40`, `LIST 20-` |
 | `NEW` | throws the stored program away |
 | `RENUM s,i` | numbers the lines again from s in steps of i, 10 and 10 when left out |
+| `CHECK n` | reads the stored program for mistakes without running it, from line n when given |
+
+These five work only at the prompt. In a program line each one is an
+`UNKNOWN WORD`.
 
 Statements, in a program or at the prompt:
 

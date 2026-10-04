@@ -68,10 +68,11 @@ add_custom_command(
   COMMENT "Embedding the BASIC sources"
   VERBATIM)
 
-add_library(sc8_basic STATIC basic_rom.cpp program.cpp lines.cpp "${SC8_BASIC_DATA_H}" "${SC8_BASIC_ASM_H}"
-            "${SC8_BASIC_SRC_H}")
+add_library(sc8_basic STATIC basic_rom.cpp program.cpp lines.cpp check.cpp "${SC8_BASIC_DATA_H}"
+            "${SC8_BASIC_ASM_H}" "${SC8_BASIC_SRC_H}")
 target_include_directories(sc8_basic
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/.."
   PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-target_link_libraries(sc8_basic PRIVATE sc8_warnings)
+# check.cpp boots the interpreter on session.h's machine and its devices.
+target_link_libraries(sc8_basic PUBLIC sc8::devices PRIVATE sc8_warnings)
 add_library(sc8::basic ALIAS sc8_basic)
