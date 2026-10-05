@@ -35,6 +35,8 @@ constexpr uint16_t SYS_COL = 0x05;
 constexpr uint16_t SYS_ROW = 0x06;
 // Where READ takes its next value, 0 for the first one.
 constexpr uint16_t SYS_READ = 0x20;
+// 1 while BASIC waits for a line at its prompt, 0 otherwise.
+constexpr uint16_t SYS_PROMPT = 0x24;
 // The text grid's columns and rows, read from the GPU after every cell change.
 constexpr uint16_t SYS_COLS = 0x22;
 constexpr uint16_t SYS_ROWS = 0x23;
@@ -88,6 +90,11 @@ std::string refusal(std::string_view text);
 // fit is cut at the last line that does. A line refusedLine names is
 // left out. Each stored line is crunchLine of its body.
 std::vector<uint8_t> encodeProgram(const std::string& text);
+
+// True while BASIC waits for a line at its prompt. The program in memory
+// is whole then and nothing of BASIC's is half done, so the IDE may read
+// it or write a new one. Between two AUTORUN lines it is half stored.
+bool atPrompt(std::span<const uint8_t> ram);
 
 // The program into the interpreter's memory, where SYS_PROG says it sits,
 // with its length in SYS_PROG_LEN. READ starts again at the first value,

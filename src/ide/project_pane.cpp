@@ -729,11 +729,12 @@ void Ide::runInBasic() {
   setRunning(true);
 }
 
+// BASIC's own word that it waits at its prompt. No program running is not
+// enough: AUTORUN, LOAD and a typed line store lines with none running.
+// A program read or written between two of them came out mixed.
 bool Ide::basicAtReady() const {
   if (!basicBooted_ || computer_.machine().status != Status::Running) return false;
-  const auto& ram = computer_.machine().ram;
-  const int prog = (ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1];
-  return prog != 0 && ram[basic::SYS_RUNNING] == 0 && typingPos_ >= typing_.size();
+  return basic::atPrompt(computer_.machine().ram) && typingPos_ >= typing_.size();
 }
 
 void Ide::writeProgram(const std::vector<uint8_t>& bytes) {

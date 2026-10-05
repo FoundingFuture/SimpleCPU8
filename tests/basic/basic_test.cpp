@@ -1345,6 +1345,62 @@ TEST_SUITE("numbers") {
 }
 
 TEST_SUITE("the system page") {
+  // $24 is 1 while BASIC waits for a line at its prompt and 0 otherwise.
+  // The IDE writes the program into memory only then, basic::atPrompt.
+  TEST_CASE("the prompt flag at $24") {
+    auto s = boot();
+    settle(*s);
+    CHECK_EQ(s->m->ram[basic::SYS_PROMPT], 1);
+    CHECK(basic::atPrompt(s->m->ram));
+    // A program waiting at INPUT is not at the prompt.
+    setProgram(*s, "10 INPUT A\n");
+    type(*s, "RUN");
+    CHECK_EQ(s->m->ram[basic::SYS_RUNNING], 1);
+    CHECK_FALSE(basic::atPrompt(s->m->ram));
+    type(*s, "5");
+    CHECK(basic::atPrompt(s->m->ram));
+    // Nor is a program that loops.
+    setProgram(*s, "10 GOTO 10\n");
+    type(*s, "RUN");
+    CHECK_FALSE(basic::atPrompt(s->m->ram));
+    s->pushKey(27, false);
+    settle(*s);
+    CHECK(basic::atPrompt(s->m->ram));
+  }
+
+  // AUTORUN stores its lines one by one with no program running. Read
+  // between two of them, the program in memory is half of it.
+  TEST_CASE("the prompt flag stays 0 until AUTORUN has stored every line") {
+    std::string text;
+    for (int i = 1; i <= 40; i++) text += std::to_string(i * 10) + " REM LINE " + std::to_string(i) + "\n";
+    const std::vector<uint8_t> whole = basic::encodeProgram(text);
+    Cartridge c = Session().cart;
+    c.basic.push_back({"AUTORUN", text});
+    auto s = std::make_unique<Session>(std::move(c));
+    s->load();
+    bool sawPrompt = false;
+    for (int slice = 0; slice < 4000 && !sawPrompt; slice++) {
+      s->runBudget(2000);
+      if (!basic::atPrompt(s->m->ram)) continue;
+      sawPrompt = true;
+      CHECK_EQ(sysWord(*s, basic::SYS_PROG_LEN), static_cast<int>(whole.size()));
+    }
+    CHECK(sawPrompt);
+  }
+
+  // A reset restarts the CPU and keeps RAM, the 1 the prompt left there
+  // included. BASIC clears it as it starts.
+  TEST_CASE("the prompt flag is 0 from the first steps after a reset") {
+    auto s = boot();
+    settle(*s);
+    REQUIRE(basic::atPrompt(s->m->ram));
+    s->m->reset();
+    s->runBudget(2000);
+    CHECK_FALSE(basic::atPrompt(s->m->ram));
+    settle(*s);
+    CHECK(basic::atPrompt(s->m->ram));
+  }
+
   TEST_CASE("the cursor position lives at 5 and 6") {
     auto s = boot();
     settle(*s);

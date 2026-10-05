@@ -39,7 +39,14 @@ reads them.
 | $20 | SYS_READ | word | the offset in the program of READ's next value, 0 for the first value |
 | $22 | SYS_COLS | byte | the text grid's columns, 42 at power on |
 | $23 | SYS_ROWS | byte | the text grid's rows, 32 at power on |
-| $24 | reserved | 12 | kept free for BASIC, $24 to $2F |
+| $24 | SYS_PROMPT | byte | 1 while the prompt waits for a line, 0 otherwise |
+| $25 | reserved | 11 | kept free for BASIC, $25 to $2F |
+
+SYS_PROMPT is 0 from the start of BASIC's main until its first prompt.
+It is 0 again from the Enter that ends a line. AUTORUN, LOAD and a typed
+line store a program line by line with no program running. SYS_RUNNING
+at 0 does not mean the program is whole. The IDE reads and writes the
+program only while SYS_PROMPT is 1.
 
 The integer variables sit in 11 word slots per letter: the bare name first,
 then the digit forms 0 to 9. So `B` is slot 11 and `B7` is slot 19, and
@@ -116,7 +123,7 @@ A routine called this way has the contract a bang handler has. It may use
 the hardware stack in balance. It may not touch the zero page past the
 system page, which is BASIC's register file. The zero page from $30 to
 $FF is the interpreter's, and a routine reads and writes nothing there.
-$24 to $2F are reserved for future system page words, and they are not a
+$25 to $2F are reserved for future system page words, and they are not a
 routine's either.
 
 ## Asking a routine for an answer
