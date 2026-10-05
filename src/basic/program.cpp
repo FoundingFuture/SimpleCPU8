@@ -289,6 +289,8 @@ std::string canonicalText(std::string_view text, int skip) {
   return out;
 }
 
+bool atPrompt(std::span<const uint8_t> ram) { return ram.size() > SYS_PROMPT && ram[SYS_PROMPT] == 1; }
+
 void storeProgram(std::span<uint8_t> ram, std::span<const uint8_t> bytes) {
   const size_t prog = static_cast<size_t>((ram[SYS_PROG] << 8) | ram[SYS_PROG + 1]);
   if (prog + bytes.size() > ram.size()) return;

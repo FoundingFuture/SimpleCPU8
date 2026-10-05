@@ -32,15 +32,8 @@ class Runner {
   bool failed() const { return !failure.empty(); }
   std::string failure;
 
-  // True when BASIC waits at its prompt: no keys queued, no program
-  // running, and the cursor right after a > in the first column.
-  bool atPrompt() const {
-    const auto& ram = s_.m->ram;
-    const int cols = ram[SYS_COLS];
-    const int row = ram[SYS_ROW];
-    return s_.input.queued() == 0 && ram[SYS_RUNNING] == 0 && ram[SYS_COL] == 1 &&
-           ram[static_cast<size_t>(SCREEN + row * cols)] == '>';
-  }
+  // True when BASIC waits at its prompt with every key typed read.
+  bool atPrompt() const { return s_.input.queued() == 0 && basic::atPrompt(s_.m->ram); }
 
   void untilPrompt() {
     while (!failed() && !atPrompt()) run();
@@ -65,6 +58,10 @@ class Runner {
       const char c = keys[at++];
       s_.pushKey(c == '\r' ? 13 : static_cast<unsigned char>(c), false);
     }
+    // BASIC clears the flag once it has the line, a few instructions after
+    // the queue empties. Cleared here, it reads 1 again only at the prompt
+    // after the command.
+    ram[SYS_PROMPT] = 0;
     untilPrompt();
   }
 

@@ -277,6 +277,7 @@ int var_slot(void);
 #define SYS_READ        0x20  /* word: offset in the program of READ's next value, 0 for the first */
 #define SYS_COLS        0x22  /* byte: the text grid's columns, from the GPU */
 #define SYS_ROWS        0x23  /* byte: the text grid's rows, from the GPU */
+#define SYS_PROMPT      0x24  /* byte: 1 while the prompt waits for a line */
 /* $24 to $2F are reserved. */
 #define SYS_END         0x30  /* the first byte the compiler may use */
 
@@ -295,6 +296,7 @@ int var_slot(void);
 #define err_line  (*(int *)SYS_ERR_LINE)
 #define read_at   (*(unsigned int *)SYS_READ)
 #define running   (*(unsigned char *)SYS_RUNNING)
+#define at_prompt (*(unsigned char *)SYS_PROMPT)
 #define pc        (*(unsigned int *)SYS_PC)
 
 void bang_init(void);
