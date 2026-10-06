@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# make-icons: render simplecpu-8.svg into the icons the packages carry.
+#
+#   simplecpu-8.png    256 x 256, the Linux launcher's icon
+#   simplecpu-8.icns   the macOS app bundle's icon
+#   simplecpu-8.ico    the Windows executable's icon, 16 to 256
+#
+# The outputs are committed, so a build needs none of these tools. Run this
+# on a Mac after editing the SVG. It needs rsvg-convert (Homebrew librsvg),
+# iconutil and python3 with Pillow.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+svg=simplecpu-8.svg
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+rsvg-convert -w 256 -h 256 "$svg" -o simplecpu-8.png
+
+set_dir="$tmp/simplecpu-8.iconset"
+mkdir "$set_dir"
+for s in 16 32 128 256 512; do
+  rsvg-convert -w "$s" -h "$s" "$svg" -o "$set_dir/icon_${s}x${s}.png"
+  rsvg-convert -w $((s * 2)) -h $((s * 2)) "$svg" -o "$set_dir/icon_${s}x${s}@2x.png"
+done
+iconutil -c icns "$set_dir" -o simplecpu-8.icns
+
+# Pillow writes every size into the .ico from the largest picture. Each size
+# is rendered from the SVG first, so small sizes are drawn, not shrunk.
+for s in 16 24 32 48 64 128 256; do rsvg-convert -w "$s" -h "$s" "$svg" -o "$tmp/ico_$s.png"; done
+python3 - "$tmp" <<'PY'
+import sys
+from PIL import Image
+tmp = sys.argv[1]
+sizes = [16, 24, 32, 48, 64, 128, 256]
+images = [Image.open(f"{tmp}/ico_{s}.png") for s in sizes]
+images[-1].save("simplecpu-8.ico", sizes=[(s, s) for s in sizes], append_images=images[:-1])
+PY
+echo "simplecpu-8.png simplecpu-8.icns simplecpu-8.ico"

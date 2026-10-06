@@ -436,7 +436,7 @@ class Ide {
   // is Save project as, and a build stays in memory.
   bool example_ = false;
   // The examples File, Open example lists, read once at start from the
-  // checkout's examples/ by project::EXAMPLE_KINDS. A kind with no example
+  // settings folder's examples/ by project::EXAMPLE_KINDS. A kind with no example
   // has no group.
   struct Example {
     std::string name;

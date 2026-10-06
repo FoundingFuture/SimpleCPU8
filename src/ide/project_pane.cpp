@@ -66,9 +66,9 @@ std::vector<std::string> microcodeErrors(const McParsed& parsed) {
   return out;
 }
 
-// The checkout's examples/, which the build names. A distribution will
-// name another folder.
-fs::path examplesRoot() { return fs::path(SC8_EXAMPLES_DIR); }
+// The installed examples in the settings folder. A build from the
+// checkout reads them there too, so it shows what an install shows.
+fs::path examplesRoot() { return Settings::examplesDir(); }
 
 // True when dir is inside examples/, or is it, however it is spelled.
 bool insideExamples(const fs::path& dir) {

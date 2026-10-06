@@ -51,8 +51,19 @@ else()
   target_sources(simplecpu-ide PRIVATE native_window.cpp)
 endif()
 
+# On Windows the IDE is a GUI program, so the Start Menu opens it without a
+# console window. main() stays the entry point: MSVC is told so, and MinGW
+# finds it on its own. The resource gives the executable its icon.
+if(WIN32)
+  set(SC8_ICON_ICO "${CMAKE_SOURCE_DIR}/packaging/icon/simplecpu-8.ico")
+  configure_file("${CMAKE_SOURCE_DIR}/packaging/windows/simplecpu-ide.rc.in"
+                 "${CMAKE_CURRENT_BINARY_DIR}/simplecpu-ide.rc" @ONLY)
+  target_sources(simplecpu-ide PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/simplecpu-ide.rc")
+  set_target_properties(simplecpu-ide PROPERTIES WIN32_EXECUTABLE TRUE)
+  if(MSVC)
+    target_link_options(simplecpu-ide PRIVATE /ENTRY:mainCRTStartup)
+  endif()
+endif()
+
 target_include_directories(simplecpu-ide PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-# File, Open example lists the checkout's examples/, as the tests find it.
-# A distribution will look elsewhere.
-target_compile_definitions(simplecpu-ide PRIVATE SC8_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/examples")
 target_link_libraries(simplecpu-ide PRIVATE sc8::vm sc8::basic sc8::cc sc8::project rlimgui imgui sc8_warnings)

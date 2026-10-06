@@ -1053,7 +1053,10 @@ void Ide::menuBar() {
     }
     if (ImGui::BeginMenu("Open example")) {
       if (examples_.empty()) {
-        ImGui::MenuItem((std::string("No examples in ") + SC8_EXAMPLES_DIR).c_str(), nullptr, false, false);
+        const fs::path dir = Settings::examplesDir();
+        const std::string where = dir.empty() ? "no settings folder on this machine" : "none in " + dir.string();
+        ImGui::MenuItem(("No examples: " + where + ". The installer puts them there.").c_str(), nullptr, false,
+                        false);
       }
       for (const ExampleGroup& g : examples_) {
         if (!ImGui::BeginMenu(g.label.c_str())) continue;

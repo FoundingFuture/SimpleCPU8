@@ -3,7 +3,8 @@
 // on Windows, $XDG_CONFIG_HOME/simplecpu-8 or ~/.config/simplecpu-8
 // elsewhere. settings.txt holds the values as key = value lines,
 // layout.ini holds the pane layout, written only on Save layout, and
-// display.txt holds the screen's look.
+// display.txt holds the screen's look. examples/ holds the examples the
+// installer copies in, which File, Open example lists.
 #pragma once
 
 #include <filesystem>
@@ -23,6 +24,7 @@ struct Settings {
   static std::filesystem::path settingsFile() { return file("settings.txt"); }
   static std::filesystem::path layoutFile() { return file("layout.ini"); }
   static std::filesystem::path displayFile() { return file("display.txt"); }
+  static std::filesystem::path examplesDir() { return file("examples"); }
 
   // Read the file if there is one; a missing file leaves the defaults.
   void load();
