@@ -38,6 +38,15 @@ case "$hostarch" in
   aarch64|arm64) hostarch=arm64 ;;
   x86_64|AMD64|amd64) hostarch=x86_64 ;;
 esac
+# Git Bash can be an x64 program under emulation on ARM64 Windows, and its
+# uname -m then says x86_64. Windows itself knows the machine.
+if [ "$osname" = windows ]; then
+  winarch="$(powershell -NoProfile -Command '[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture' 2>/dev/null | tr -d '\r')"
+  case "$winarch" in
+    Arm64) hostarch=arm64 ;;
+    X64) hostarch=x86_64 ;;
+  esac
+fi
 
 arch=""
 clean=0
@@ -74,12 +83,22 @@ if [ "$osname" = macos ]; then
     arm64|x86_64) extra+=("-DCMAKE_OSX_ARCHITECTURES=$arch") ;;
   esac
 fi
-generator=""
-if command -v ninja >/dev/null 2>&1; then generator="-G Ninja"; fi
+generator=()
+if [ "$osname" = windows ]; then
+  # DESIGN: Eddie's decision, 2026-10-08. Windows builds with MSVC and the
+  # static C runtime, so each .exe stands alone and needs no redistributable.
+  # Ninja is left out here: on a runner it finds MinGW's GCC first.
+  case "$arch" in
+    arm64) generator=(-G "Visual Studio 17 2022" -A ARM64) ;;
+    *) generator=(-G "Visual Studio 17 2022" -A x64) ;;
+  esac
+  extra+=("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded")
+elif command -v ninja >/dev/null 2>&1; then
+  generator=(-G Ninja)
+fi
 # Configured every time, so a flag added here reaches an existing cache.
-if [ -f "$build/CMakeCache.txt" ]; then generator=""; fi
-# shellcheck disable=SC2086
-cmake -S . -B "$build" $generator -DCMAKE_BUILD_TYPE=Release -DSC8_BUILD_TESTS=OFF ${extra[@]+"${extra[@]}"}
+if [ -f "$build/CMakeCache.txt" ]; then generator=(); fi
+cmake -S . -B "$build" ${generator[@]+"${generator[@]}"} -DCMAKE_BUILD_TYPE=Release -DSC8_BUILD_TESTS=OFF ${extra[@]+"${extra[@]}"}
 cmake --build "$build" --config Release --parallel
 
 out="dist/$name"
