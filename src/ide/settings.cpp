@@ -7,15 +7,29 @@ namespace fs = std::filesystem;
 
 namespace sc8 {
 
+std::optional<std::string> envVar(const char* name) {
+#if defined(_WIN32)
+  char* value = nullptr;
+  size_t size = 0;
+  if (_dupenv_s(&value, &size, name) != 0 || value == nullptr) return std::nullopt;
+  std::string out(value);
+  std::free(value);
+  return out;
+#else
+  if (const char* value = std::getenv(name)) return std::string(value);
+  return std::nullopt;
+#endif
+}
+
 fs::path Settings::dir() {
   fs::path base;
 #if defined(_WIN32)
-  if (const char* appdata = std::getenv("APPDATA")) base = fs::path(appdata) / "SimpleCPU-8";
+  if (const auto appdata = envVar("APPDATA")) base = fs::path(*appdata) / "SimpleCPU-8";
 #elif defined(__APPLE__)
-  if (const char* home = std::getenv("HOME")) base = fs::path(home) / "Library" / "Application Support" / "SimpleCPU-8";
+  if (const auto home = envVar("HOME")) base = fs::path(*home) / "Library" / "Application Support" / "SimpleCPU-8";
 #else
-  if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg) base = fs::path(xdg) / "simplecpu-8";
-  else if (const char* home = std::getenv("HOME")) base = fs::path(home) / ".config" / "simplecpu-8";
+  if (const auto xdg = envVar("XDG_CONFIG_HOME"); xdg && !xdg->empty()) base = fs::path(*xdg) / "simplecpu-8";
+  else if (const auto home = envVar("HOME")) base = fs::path(*home) / ".config" / "simplecpu-8";
 #endif
   if (base.empty()) return base;
   std::error_code ec;

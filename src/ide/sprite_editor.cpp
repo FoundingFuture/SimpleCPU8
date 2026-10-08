@@ -8,6 +8,7 @@
 
 #include "assets/assets.h"
 #include "assets/font.h"
+#include "ide/ini_line.h"
 #include "ide/panes.h"
 
 namespace sc8 {
@@ -339,49 +340,48 @@ void SpriteEditor::setView(const std::string& line) {
   const bool fontKey = line.starts_with("Font.");
   if (!fontKey && !line.starts_with("Sprite.")) return;
   const std::string key = line.substr(fontKey ? 5 : 7);
-  const char* t = key.c_str();
   View& v = views_[static_cast<size_t>(fontKey ? Mode::Font : Mode::Sprite)];
-  if (std::sscanf(t, "Tool=%d", &a) == 1) {
+  if (readInts(key, "Tool", a)) {
     // A tool the mode lacks falls back to the pencil.
     const Mode was = mode_;
     mode_ = fontKey ? Mode::Font : Mode::Sprite;
     const auto tool = static_cast<Tool>(std::clamp(a, 0, static_cast<int>(Tool::HalfCircle)));
     v.tool = hasTool(tool) ? tool : Tool::Pencil;
     mode_ = was;
-  } else if (std::sscanf(t, "Zoom=%d", &a) == 1) {
+  } else if (readInts(key, "Zoom", a)) {
     // A saved zoom stands; the fit to the canvas is for a zoom not chosen.
     v.zoom = static_cast<float>(std::clamp(a, static_cast<int>(MIN_ZOOM), static_cast<int>(MAX_ZOOM)));
     v.keepZoom = true;
-  } else if (std::sscanf(t, "Grid=%d", &a) == 1) {
+  } else if (readInts(key, "Grid", a)) {
     v.grid = a != 0;
-  } else if (std::sscanf(t, "Onion=%d", &a) == 1) {
+  } else if (readInts(key, "Onion", a)) {
     v.onion = a != 0;
-  } else if (std::sscanf(t, "Filled=%d", &a) == 1) {
+  } else if (readInts(key, "Filled", a)) {
     v.filled = a != 0;
   } else if (fontKey) {
-    if (std::sscanf(t, "Ink=%d", &a) == 1) {
+    if (readInts(key, "Ink", a)) {
       ink_ = a != 0;
-    } else if (std::sscanf(t, "Facing=%d", &a) == 1) {
+    } else if (readInts(key, "Facing", a)) {
       facing_ = static_cast<sprite::Facing>(std::clamp(a, 0, 3));
     } else if (key.starts_with("View=")) {
       if (const std::optional<FontView> fv = fontViewNamed(key.substr(5))) fontView_ = *fv;
-    } else if (std::sscanf(t, "Fps=%d", &a) == 1) {
+    } else if (readInts(key, "Fps", a)) {
       fontFps_ = std::clamp(a, 1, 60);
     } else if (key.starts_with("Sample=")) {
       sample_ = key.substr(7);
     }
-  } else if (std::sscanf(t, "Dither=%d", &a) == 1) {
+  } else if (readInts(key, "Dither", a)) {
     dither_ = a != 0;
-  } else if (std::sscanf(t, "Colours=%d,%d", &a, &b) == 2) {
+  } else if (readInts(key, "Colours", a, b)) {
     primary_ = static_cast<uint8_t>(std::clamp(a, 0, 255));
     secondary_ = static_cast<uint8_t>(std::clamp(b, 0, 255));
-  } else if (std::sscanf(t, "PreviewSize=%d", &a) == 1) {
+  } else if (readInts(key, "PreviewSize", a)) {
     previewScale_ = std::clamp(a, 1, 4);
-  } else if (std::sscanf(t, "Backdrop=%d", &a) == 1) {
+  } else if (readInts(key, "Backdrop", a)) {
     backdrop_ = static_cast<uint8_t>(std::clamp(a, 0, 255));
-  } else if (std::sscanf(t, "PingPong=%d", &a) == 1) {
+  } else if (readInts(key, "PingPong", a)) {
     pingPong_ = a != 0;
-  } else if (std::sscanf(t, "OnScreen=%d", &a) == 1) {
+  } else if (readInts(key, "OnScreen", a)) {
     onScreen_ = a != 0;
   }
 }

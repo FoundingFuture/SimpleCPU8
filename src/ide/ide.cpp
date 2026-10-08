@@ -19,6 +19,7 @@
 #include "basic/program.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
+#include "ide/ini_line.h"
 #include "ide/native_window.h"
 #include "ide/panes.h"
 #include "project/breakpoints.h"
@@ -182,20 +183,20 @@ void Ide::registerLayoutHandler() {
   w.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void* entry, const char* text) {
     WindowPlace& p = static_cast<Ide*>(entry)->savedWindow_;
     int a = 0, b = 0;
-    if (std::sscanf(text, "Pos=%d,%d", &a, &b) == 2) {
+    if (readInts(text, "Pos", a, b)) {
       p.x = a;
       p.y = b;
-    } else if (std::sscanf(text, "Size=%d,%d", &a, &b) == 2) {
+    } else if (readInts(text, "Size", a, b)) {
       p.w = a;
       p.h = b;
       p.known = a > 0 && b > 0;
-    } else if (std::sscanf(text, "Monitor=%d", &a) == 1) {
+    } else if (readInts(text, "Monitor", a)) {
       p.monitor = a;
-    } else if (std::sscanf(text, "Maximized=%d", &a) == 1) {
+    } else if (readInts(text, "Maximized", a)) {
       p.maximized = a != 0;
-    } else if (std::sscanf(text, "Fullscreen=%d", &a) == 1) {
+    } else if (readInts(text, "Fullscreen", a)) {
       p.fullscreen = a != 0;
-    } else if (std::sscanf(text, "NativeFullscreen=%d", &a) == 1) {
+    } else if (readInts(text, "NativeFullscreen", a)) {
       p.native = a != 0;
     }
   };

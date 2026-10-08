@@ -8,9 +8,14 @@
 #pragma once
 
 #include <filesystem>
+#include <optional>
 #include <string>
 
 namespace sc8 {
+
+// An environment variable's value, or nothing when it is not set. MSVC
+// deprecates std::getenv as unsafe (C4996), so Windows reads with _dupenv_s.
+std::optional<std::string> envVar(const char* name);
 
 struct Settings {
   std::string projectsDir;  // where New project and Open project start
