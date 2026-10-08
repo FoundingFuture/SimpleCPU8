@@ -129,4 +129,8 @@ if(TARGET sc8_basic)
     DEPENDS simplecpu-asm "${SC8_BASIC_ASM}" "${SC8_DRIVER_DIR}/driver.asm" "${SC8_DRIVER_DIR}/demo.bas"
     COMMENT "Burning basic-driver.rom")
   add_custom_target(basic_driver_rom ALL DEPENDS "${SC8_DRIVER_ROM}")
+  # basic.rom and basic.asm come from src/basic's rules. Ninja orders a file
+  # across directories, Visual Studio only a target, so both name sc8_basic.
+  add_dependencies(basic_rom_copy sc8_basic)
+  add_dependencies(basic_driver_rom sc8_basic)
 endif()
