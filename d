@@ -38,13 +38,14 @@ case "$hostarch" in
   aarch64|arm64) hostarch=arm64 ;;
   x86_64|AMD64|amd64) hostarch=x86_64 ;;
 esac
-# Git Bash can be an x64 program under emulation on ARM64 Windows, and its
-# uname -m then says x86_64. Windows itself knows the machine.
+# Git Bash can be an x64 program under emulation on ARM64 Windows. Then
+# uname -m, PROCESSOR_ARCHITECTURE and PowerShell, which inherits the
+# emulation, all say x64. The machine's own value is in the registry.
 if [ "$osname" = windows ]; then
-  winarch="$(powershell -NoProfile -Command '[System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture' 2>/dev/null | tr -d '\r')"
+  winarch="$(reg query 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' //v PROCESSOR_ARCHITECTURE 2>/dev/null | tr -d '\r' | awk '/PROCESSOR_ARCHITECTURE/ {print $NF}')"
   case "$winarch" in
-    Arm64) hostarch=arm64 ;;
-    X64) hostarch=x86_64 ;;
+    ARM64) hostarch=arm64 ;;
+    AMD64) hostarch=x86_64 ;;
   esac
 fi
 
