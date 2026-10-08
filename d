@@ -86,14 +86,29 @@ if [ "$osname" = macos ]; then
 fi
 generator=()
 if [ "$osname" = windows ]; then
-  # DESIGN: Eddie's decision, 2026-10-08. Windows builds with MSVC and the
-  # static C runtime, so each .exe stands alone and needs no redistributable.
-  # Ninja is left out here: on a runner it finds MinGW's GCC first.
+  # DESIGN: MSVC from the newest Visual Studio that has the C++ tools for
+  # this machine, VS 2022 or VS 2026. Ninja is left out: on a runner it
+  # finds MinGW's GCC first. CMakeLists.txt links the C runtime statically.
   case "$arch" in
-    arm64) generator=(-G "Visual Studio 17 2022" -A ARM64) ;;
-    *) generator=(-G "Visual Studio 17 2022" -A x64) ;;
+    arm64) vsarch=ARM64; vstools=Microsoft.VisualStudio.Component.VC.Tools.ARM64 ;;
+    *) vsarch=x64; vstools=Microsoft.VisualStudio.Component.VC.Tools.x86.x64 ;;
   esac
-  extra+=("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded")
+  vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+  vs() { "$vswhere" -latest -products '*' -requires "$vstools" -property "$1" | tr -d '\r'; }
+  vspath="$(vs installationPath)"
+  if [ -z "$vspath" ]; then
+    echo "d: no Visual Studio here has the $vsarch C++ tools" >&2
+    exit 1
+  fi
+  vsversion="$(vs installationVersion)"
+  msvc="$(tr -d '\r' < "$(cygpath -u "$vspath")/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt")"
+  case "${vsversion%%.*}" in
+    17) vsgen="Visual Studio 17 2022" ;;
+    18) vsgen="Visual Studio 18 2026" ;;
+    *) echo "d: Visual Studio $vsversion has no CMake generator named here" >&2; exit 1 ;;
+  esac
+  echo "d: $(vs displayName) $vsversion, MSVC $msvc, for $vsarch"
+  generator=(-G "$vsgen" -A "$vsarch" "-DCMAKE_GENERATOR_INSTANCE=$vspath")
 elif command -v ninja >/dev/null 2>&1; then
   generator=(-G Ninja)
 fi
