@@ -1,5 +1,6 @@
 #include <doctest.h>
 
+#include <ostream>
 #include <regex>
 
 #include "asm/asm.h"
