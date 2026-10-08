@@ -21,6 +21,23 @@ TEST_SUITE("inlining") {
     CHECK_EQ(ran(src).u8("r"), 42);
   }
 
+  // A return in an inlined body whose value inlines another call. The
+  // return held a reference into the stack of expansions, which the inner
+  // expansion grew and moved. libc++ left the old bytes readable. Linux's
+  // libstdc++ crashed compiling BASIC, and a sanitizer stops at the read.
+  TEST_CASE("an inlined return whose value is itself an inlined call") {
+    const std::string src =
+        "static unsigned char one(unsigned char c) { return c + 1; }\n"
+        "static unsigned char two(unsigned char c) { return one(c) + 2; }\n"
+        "static unsigned char three(unsigned char c) { return two(c) + 3; }\n"
+        "static unsigned char four(unsigned char c) { return three(c) + 4; }\n"
+        "static unsigned char five(unsigned char c) { return four(c) + 5; }\n"
+        "unsigned char r;\n"
+        "int main(void) { r = five(10); return 0; }\n";
+    CHECK_FALSE(has(compile(src), "JSR one"));
+    CHECK_EQ(ran(src).u8("r"), 25);
+  }
+
   TEST_CASE("a function that is not static stays a call") {
     CHECK(has(compile("unsigned char twice(unsigned char c) { return c + c; }\n"
                       "unsigned char r; int main(void) { r = twice(21); return 0; }\n"),

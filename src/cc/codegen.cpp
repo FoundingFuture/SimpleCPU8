@@ -1247,7 +1247,9 @@ class Gen {
         if (!inl_.empty()) {
           // An inlined function's return leaves its value where the call
           // wants it and jumps to the end of the expansion.
-          const Inline& in = inl_.back();
+          // A copy: the value can inline another call, whose push_back
+          // moves inl_ and would leave a reference pointing at freed memory.
+          const Inline in = inl_.back();
           if (s.e && sizeOf(in.ret) > 0) {
             if (sizeOf(in.ret) == 1 && in.ret.ptr == 0 && !romRef(s.e) && !isFloat(typeOf(s.e))) {
               genLow(s.e, in.slot);
