@@ -704,7 +704,13 @@ TEST_SUITE("examples/basic/font") {
     const fs::path rom = t.path / "font.rom";
     const std::string cmd = "\"" + std::string(SC8_SIMPLECPU_MAKE) + "\" \"" + example.string() + "\" -o \"" +
                             rom.string() + "\" > \"" + (t.path / "make.txt").string() + "\" 2>&1";
+#if defined(_WIN32)
+    // cmd /c drops the first and last quote of a line that starts with one,
+    // so the whole line goes inside one more pair.
+    REQUIRE_EQ(std::system(("\"" + cmd + "\"").c_str()), 0);
+#else
     REQUIRE_EQ(std::system(cmd.c_str()), 0);
+#endif
     std::ifstream in(rom, std::ios::binary);
     const CartridgeResult r = decodeCartridge(std::vector<uint8_t>(std::istreambuf_iterator<char>(in), {}));
     REQUIRE_MESSAGE(r.cartridge, r.error);
