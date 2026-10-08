@@ -84,6 +84,8 @@ std::string slotNameFor(const fs::path& p) {
 std::string titleFor(const Layout& l) {
   if (auto readme = readText(l.root / "README.md")) {
     std::string first = readme->substr(0, readme->find('\n'));
+    // A README saved on Windows ends the line with CR LF.
+    if (!first.empty() && first.back() == '\r') first.pop_back();
     while (!first.empty() && (first.front() == '#' || first.front() == ' ')) first.erase(first.begin());
     if (!first.empty()) return first;
   }
