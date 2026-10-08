@@ -256,3 +256,16 @@ TEST_SUITE("a function cannot be named like a function-like macro") {
     CHECK(has(text("void show(int n) { }"), "void show(int n) { }"));
   }
 }
+
+// A file saved on Windows ends its lines with CR LF. A git checkout there
+// makes the project's own sources so, and BASIC's keywords.h continues
+// one #define over many lines.
+TEST_SUITE("CR LF line ends") {
+  TEST_CASE("a backslash before CR LF continues a #define") {
+    CHECK(text("#define WORDS \"A \" \\\r\n  \"B\"\r\nchar *w = WORDS;\r\n") == "char *w = \"A \" \"B\";");
+  }
+
+  TEST_CASE("a CR before the line end is no part of the line") {
+    CHECK(text("#define N 4\r\nint a = N;\r\n") == "int a = 4;");
+  }
+}
