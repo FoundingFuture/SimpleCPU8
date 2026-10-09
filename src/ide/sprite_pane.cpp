@@ -14,6 +14,7 @@
 #include "assets/font.h"
 #include "ide/ide.h"
 #include "ide/panes.h"
+#include "project/text_file.h"
 
 namespace fs = std::filesystem;
 
@@ -272,8 +273,7 @@ void Ide::loadDisplay() {
 void Ide::saveDisplay() {
   const fs::path file = Settings::displayFile();
   if (file.empty()) return;
-  std::ofstream o(file);
-  o << "# SimpleCPU-8 IDE display\n" << display.toText();
+  writeText(file, "# SimpleCPU-8 IDE display\n" + display.toText());
 }
 
 }  // namespace sc8

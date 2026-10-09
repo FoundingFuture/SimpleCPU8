@@ -287,15 +287,20 @@ void Preprocessor::file(const std::string& src, const std::string& fileName) {
     return true;
   };
 
-  // split("\n") keeps a trailing empty piece, and so does this.
+  // split("\n") keeps a trailing empty piece, and so does this. A CR
+  // before the line end is dropped: a file saved on Windows ends its lines
+  // with CR LF, and the CR would hide a backslash that continues a line.
+  // This differs from pp.ts, which split on "\n" alone.
   std::vector<std::string> raw;
   {
     const std::string stripped = stripComments(src);
     size_t start = 0;
     for (;;) {
       const size_t nl = stripped.find('\n', start);
-      if (nl == std::string::npos) { raw.push_back(stripped.substr(start)); break; }
-      raw.push_back(stripped.substr(start, nl - start));
+      std::string line = stripped.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
+      if (!line.empty() && line.back() == '\r') line.pop_back();
+      raw.push_back(std::move(line));
+      if (nl == std::string::npos) break;
       start = nl + 1;
     }
   }

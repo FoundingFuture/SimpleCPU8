@@ -159,8 +159,8 @@ uint32_t Gpu::cartAddr(size_t i) const {
 uint8_t Gpu::cartByte(uint32_t addr) const { return addr < cart_.size() ? cart_[addr] : 0; }
 
 void Gpu::powerOn() {
-  std::fill(vram.begin(), vram.end(), 0);
-  std::fill(backbuffer.begin(), backbuffer.end(), 0);
+  std::fill(vram.begin(), vram.end(), uint8_t{0});
+  std::fill(backbuffer.begin(), backbuffer.end(), uint8_t{0});
   palette = default332();
   data.fill(0);
   cmdMod = 0;
@@ -201,7 +201,7 @@ void Gpu::powerOn() {
   videoMode = MODE_GRAPHICS;
   textBase = 0;
   textMapped = false;
-  std::fill(worldRam.begin(), worldRam.end(), 0);
+  std::fill(worldRam.begin(), worldRam.end(), uint8_t{0});
   meshTable_.fill(MeshInfo{});
   worldTop_ = 0;
   sceneBase_ = 0;
@@ -240,7 +240,7 @@ void Gpu::write(uint8_t port, uint8_t value) {
       if ((cmdMod & MOD_STICKY) == 0) {
         // The arguments go. Anything the command left as a result stays,
         // or reading it back would be impossible.
-        std::fill(data.begin() + static_cast<std::ptrdiff_t>(std::min(resultBytes_, data.size())), data.end(), 0);
+        std::fill(data.begin() + static_cast<std::ptrdiff_t>(std::min(resultBytes_, data.size())), data.end(), uint8_t{0});
       }
       // MOD_INC0 walks an indexed resource. DATA0 is the index on every
       // command that takes one, so a sprite or palette walk sets it once.

@@ -1,5 +1,7 @@
 #include <doctest.h>
 
+#include <ostream>
+
 #include "asm/expr.h"
 
 using namespace sc8;

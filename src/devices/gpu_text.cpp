@@ -109,7 +109,7 @@ void Gpu::scrollText() {
   const auto cols = static_cast<std::ptrdiff_t>(textCols());
   const auto grid = cols * textRows();
   std::copy(overlayChar.begin() + cols, overlayChar.begin() + grid, overlayChar.begin());
-  std::fill(overlayChar.begin() + grid - cols, overlayChar.begin() + grid, 0);
+  std::fill(overlayChar.begin() + grid - cols, overlayChar.begin() + grid, uint8_t{0});
 }
 
 // Draw one glyph into a screen buffer at a cell, in the given foreground.

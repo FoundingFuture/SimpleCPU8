@@ -33,6 +33,32 @@ jobs:
       - name: Distribution
         shell: bash
         run: ./d --arch ${{ matrix.arch }}
+      # The C runtime is linked statically, so every program imports Windows
+      # system DLLs alone. This is the allowed list. A Visual C++ runtime DLL,
+      # or any DLL not on the list, fails the job.
+      - name: Imports are Windows system DLLs only
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $allowed = @('KERNEL32.dll', 'USER32.dll', 'GDI32.dll', 'SHELL32.dll', 'WINMM.dll', 'IMM32.dll')
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -products * -find 'VC\Tools\MSVC\**\bin\Host*\*\dumpbin.exe' | Select-Object -First 1
+          if (-not $dumpbin) { throw "no dumpbin.exe" }
+          $exes = @(Get-ChildItem dist\simplecpu-*\bin\*.exe)
+          if ($exes.Count -ne 6) { throw "expected the six programs, found $($exes.Count)" }
+          $bad = @()
+          foreach ($exe in $exes) {
+            $dlls = @()
+            foreach ($line in (& $dumpbin /nologo /dependents $exe.FullName)) {
+              if ($line -match '^\s+(\S+\.dll)\s*$') { $dlls += $Matches[1] }
+            }
+            Write-Host "$($exe.Name): $($dlls -join ', ')"
+            foreach ($dll in $dlls) {
+              if ($dll -match '^(vcruntime|msvcp|ucrtbase|api-ms-win-crt-)') { $bad += "$($exe.Name) links the C runtime as a DLL: $dll" }
+              elseif ($allowed -notcontains $dll) { $bad += "$($exe.Name) imports $dll, which is not on the allowed list" }
+            }
+          }
+          if ($bad.Count -gt 0) { $bad | ForEach-Object { Write-Host $_ }; throw "imports outside the allowed list" }
       - name: Install with install.sh
         if: runner.os == 'Linux'
         run: |
@@ -40,6 +66,7 @@ jobs:
           test -x ~/.local/share/simplecpu-8/bin/simplecpu-ide
           test -f ~/.local/share/applications/simplecpu-8.desktop
           test -f ~/.config/simplecpu-8/examples/README.md
+          for f in README raylib miniaudio imgui doctest stb; do test -f ~/.local/share/simplecpu-8/LICENSES/$f.txt; done
           ~/.local/share/simplecpu-8/bin/simplecpu-asm ~/.config/simplecpu-8/examples/assembly/hello/hello.asm -o "$RUNNER_TEMP/hello.rom"
       # Windows PowerShell 5.1 is what `irm | iex` runs in on a fresh machine.
       - name: Install with install.ps1
@@ -51,6 +78,9 @@ jobs:
           if (-not (Test-Path "$env:LOCALAPPDATA\Programs\SimpleCPU-8\bin\simplecpu-ide.exe")) { throw "no simplecpu-ide.exe" }
           if (-not (Test-Path "$env:APPDATA\SimpleCPU-8\examples\README.md")) { throw "no examples" }
           if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\SimpleCPU-8.lnk")) { throw "no shortcut" }
+          foreach ($f in 'README', 'raylib', 'miniaudio', 'imgui', 'doctest', 'stb') {
+            if (-not (Test-Path "$env:LOCALAPPDATA\Programs\SimpleCPU-8\LICENSES\$f.txt")) { throw "no LICENSES\$f.txt" }
+          }
           & "$env:LOCALAPPDATA\Programs\SimpleCPU-8\bin\simplecpu-asm.exe" "$env:APPDATA\SimpleCPU-8\examples\assembly\hello\hello.asm" -o "$env:RUNNER_TEMP\hello.rom"
           if ($LASTEXITCODE -ne 0) { throw "simplecpu-asm failed" }
       - uses: actions/upload-artifact@v4

@@ -19,9 +19,11 @@
 #include "basic/program.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
+#include "ide/ini_line.h"
 #include "ide/native_window.h"
 #include "ide/panes.h"
 #include "project/breakpoints.h"
+#include "project/text_file.h"
 
 namespace fs = std::filesystem;
 
@@ -182,20 +184,20 @@ void Ide::registerLayoutHandler() {
   w.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void* entry, const char* text) {
     WindowPlace& p = static_cast<Ide*>(entry)->savedWindow_;
     int a = 0, b = 0;
-    if (std::sscanf(text, "Pos=%d,%d", &a, &b) == 2) {
+    if (readInts(text, "Pos", a, b)) {
       p.x = a;
       p.y = b;
-    } else if (std::sscanf(text, "Size=%d,%d", &a, &b) == 2) {
+    } else if (readInts(text, "Size", a, b)) {
       p.w = a;
       p.h = b;
       p.known = a > 0 && b > 0;
-    } else if (std::sscanf(text, "Monitor=%d", &a) == 1) {
+    } else if (readInts(text, "Monitor", a)) {
       p.monitor = a;
-    } else if (std::sscanf(text, "Maximized=%d", &a) == 1) {
+    } else if (readInts(text, "Maximized", a)) {
       p.maximized = a != 0;
-    } else if (std::sscanf(text, "Fullscreen=%d", &a) == 1) {
+    } else if (readInts(text, "Fullscreen", a)) {
       p.fullscreen = a != 0;
-    } else if (std::sscanf(text, "NativeFullscreen=%d", &a) == 1) {
+    } else if (readInts(text, "NativeFullscreen", a)) {
       p.native = a != 0;
     }
   };
@@ -1171,8 +1173,11 @@ void Ide::menuBar() {
       if (f.empty()) {
         note("no settings folder is known on this machine, so the layout cannot be saved");
       } else {
-        ImGui::SaveIniSettingsToDisk(f.string().c_str());
-        note("layout saved to " + f.string());
+        // ImGui writes its file in text mode, CR LF on Windows.
+        size_t size = 0;
+        const char* ini = ImGui::SaveIniSettingsToMemory(&size);
+        if (writeText(f, std::string_view(ini, size))) note("layout saved to " + f.string());
+        else note("cannot write " + f.string());
       }
     }
     if (ImGui::IsItemHovered()) {

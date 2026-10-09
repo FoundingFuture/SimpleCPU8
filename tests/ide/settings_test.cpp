@@ -3,6 +3,9 @@
 #include <doctest.h>
 
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <string>
 
 #include "fake_home.h"
 #include "ide/settings.h"
@@ -45,5 +48,17 @@ TEST_SUITE("the settings folder") {
     CHECK(Settings::layoutFile().empty());
     CHECK(Settings::displayFile().empty());
     CHECK(Settings::examplesDir().empty());
+  }
+
+  // A text-mode stream on Windows writes CR LF. This fails there alone.
+  TEST_CASE("settings.txt has LF line ends") {
+    FakeHome home;
+    Settings s;
+    s.projectsDir = "projects";
+    REQUIRE(s.save());
+    std::ifstream in(Settings::settingsFile(), std::ios::binary);
+    const std::string text(std::istreambuf_iterator<char>(in), {});
+    CHECK(text.find("projects = projects\n") != std::string::npos);
+    CHECK(text.find('\r') == std::string::npos);
   }
 }

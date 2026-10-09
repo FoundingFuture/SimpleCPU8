@@ -134,12 +134,14 @@ int main(int argc, char** argv) {
   CcResult r = compile(inputs, opts);
   for (const std::string& e : r.errors) std::fprintf(stderr, "%s\n", e.c_str());
   if (!r.errors.empty()) return 1;
+  // DESIGN: LF on every platform, as simplecpu-asm writes, so basic.asm
+  // is the same bytes everywhere. The readers take CR LF as well.
   if (!romHeaderPath.empty()) {
-    std::ofstream h(romHeaderPath);
+    std::ofstream h(romHeaderPath, std::ios::binary);
     h << r.romHeader;
     if (!h) return 1;
   }
-  std::ofstream o(out);
+  std::ofstream o(out, std::ios::binary);
   o << r.assembly;
   return o ? 0 : 1;
 }

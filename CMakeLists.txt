@@ -22,6 +22,11 @@ option(SC8_BUILD_IDE "Build the sc8 IDE (needs raylib, Dear ImGui and a display)
 option(SC8_BUILD_TOOLS "Build the command line tools" ON)
 option(SC8_BUILD_TESTS "Build the doctest suite" ON)
 
+# DESIGN: the static C runtime on Windows, /MT and /MTd for Debug, so each
+# .exe stands alone and needs no Visual C++ redistributable. Set before
+# Dependencies, so every FetchContent library follows it.
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Warnings)
 include(Dependencies)

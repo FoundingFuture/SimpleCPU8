@@ -1,6 +1,7 @@
 #include <doctest.h>
 
 #include <functional>
+#include <ostream>
 
 #include "asm/asm.h"
 #include "core/machine.h"

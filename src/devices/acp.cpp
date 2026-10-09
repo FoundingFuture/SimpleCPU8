@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace sc8 {
 
@@ -373,6 +374,13 @@ Cx cxDiv(Cx a, Cx b) {
   const double r = b.re / b.im;
   const double d = b.re * r + b.im;
   return {(a.re * r + a.im) / d, (a.im * r - a.re) / d};
+}
+
+// A part over zero, the way JavaScript's p / 0 gives it. MSVC refuses a
+// constant divide by zero as warning C4723, so the result is spelled out.
+double overZero(double v) {
+  if (v == 0 || std::isnan(v)) return std::nan("");
+  return std::copysign(std::numeric_limits<double>::infinity(), v);
 }
 
 double cxAbs(Cx a) { return std::hypot(a.re, a.im); }
@@ -908,7 +916,7 @@ Val Acp::oneOp(uint8_t cmd, Kind kind, const Val& x, const Val& y) {
     case ACP_DIV:
       if (q.re == 0 && q.im == 0) {
         pendingDivzero_ = true;
-        return Val::ofCx({p.re / 0.0, p.im / 0.0});
+        return Val::ofCx({overZero(p.re), overZero(p.im)});
       }
       return Val::ofCx(cxDiv(p, q));
     case ACP_NEG: return Val::ofCx({-p.re, -p.im});

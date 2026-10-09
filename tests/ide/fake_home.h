@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <string>
 
+#include "ide/settings.h"
+
 namespace sc8test {
 
 namespace fs = std::filesystem;
@@ -35,9 +37,9 @@ struct NoHome {
   bool had[3] = {};
   NoHome() {
     for (int i = 0; i < 3; i++) {
-      if (const char* v = std::getenv(NAMES[i])) {
+      if (const auto v = sc8::envVar(NAMES[i])) {
         had[i] = true;
-        saved[i] = v;
+        saved[i] = *v;
       }
       unsetEnv(NAMES[i]);
     }

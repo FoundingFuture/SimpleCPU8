@@ -1,6 +1,7 @@
 #include <doctest.h>
 
 #include <algorithm>
+#include <ostream>
 
 #include "core/conflicts.h"
 #include "core/isa.h"

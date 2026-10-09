@@ -1,4 +1,5 @@
 #include "project/project.h"
+#include "project/text_file.h"
 
 #include <algorithm>
 #include <cctype>
@@ -30,6 +31,17 @@ std::optional<std::string> readText(const fs::path& p) {
   std::ifstream in(p);
   if (!in) return std::nullopt;
   return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+// The text files a ROM carries, by name: the sources and the README. A
+// file under assets/ is kept byte for byte, whatever its name.
+bool isSourceName(const std::string& name) {
+  const std::string ext = fs::path(name).extension().string();
+  return ext == ".c" || ext == ".h" || ext == ".asm" || ext == ".bas" || name == "microcode.txt";
+}
+
+bool isTextName(const std::string& name) {
+  return name.find('/') == std::string::npos && (isSourceName(name) || name == "README.md");
 }
 
 std::optional<std::vector<uint8_t>> readBytes(const fs::path& p) {
@@ -84,6 +96,8 @@ std::string slotNameFor(const fs::path& p) {
 std::string titleFor(const Layout& l) {
   if (auto readme = readText(l.root / "README.md")) {
     std::string first = readme->substr(0, readme->find('\n'));
+    // A README saved on Windows ends the line with CR LF.
+    if (!first.empty() && first.back() == '\r') first.pop_back();
     while (!first.empty() && (first.front() == '#' || first.front() == ' ')) first.erase(first.begin());
     if (!first.empty()) return first;
   }
@@ -277,9 +291,7 @@ std::vector<fs::path> assetFiles(const Layout& layout) {
   for (const auto& entry : fs::directory_iterator(layout.sources, ec)) {
     if (!entry.is_regular_file()) continue;
     const std::string name = entry.path().filename().string();
-    const std::string ext = entry.path().extension().string();
-    const bool source = ext == ".c" || ext == ".h" || ext == ".asm" || ext == ".bas" || name == "microcode.txt";
-    if (source || ext == ".rom" || name == "README.md") continue;
+    if (isTextName(name) || entry.path().extension() == ".rom") continue;
     out.push_back(entry.path());
   }
   std::sort(out.begin(), out.end());
@@ -452,10 +464,7 @@ Assets loadersFrom(const Cartridge& rom, std::vector<std::string>* notes) {
 Carried carried(const Cartridge& rom) {
   Carried out;
   for (const auto& [name, bytes] : rom.sources) {
-    const std::string ext = fs::path(name).extension().string();
-    const bool source = name.find('/') == std::string::npos &&
-                        (ext == ".c" || ext == ".h" || ext == ".asm" || ext == ".bas" || name == "microcode.txt");
-    if (source) out.sources.push_back({name, std::string(bytes.begin(), bytes.end())});
+    if (name.find('/') == std::string::npos && isSourceName(name)) out.sources.push_back({name, std::string(bytes.begin(), bytes.end())});
     else out.files.emplace_back(name, bytes);
   }
   return out;
@@ -464,8 +473,15 @@ Carried carried(const Cartridge& rom) {
 void embed(Cartridge& c, const std::vector<Source>& sources,
            const std::vector<std::pair<std::string, std::vector<uint8_t>>>& files) {
   c.sources.clear();
-  for (const Source& src : sources) c.sources.emplace_back(src.name, std::vector<uint8_t>(src.text.begin(), src.text.end()));
-  for (const auto& f : files) c.sources.push_back(f);
+  auto text = [](const std::string& t) {
+    const std::string l = lf(t);
+    return std::vector<uint8_t>(l.begin(), l.end());
+  };
+  for (const Source& src : sources) c.sources.emplace_back(src.name, text(src.text));
+  for (const auto& [name, bytes] : files) {
+    if (isTextName(name)) c.sources.emplace_back(name, text(std::string(bytes.begin(), bytes.end())));
+    else c.sources.emplace_back(name, bytes);
+  }
 }
 
 Created unpack(const Cartridge& rom, const fs::path& dir) {
@@ -486,15 +502,22 @@ Created unpack(const Cartridge& rom, const fs::path& dir) {
     if (name.empty() || name.find("..") != std::string::npos || name.front() == '/') continue;
     const fs::path at = name.find('/') == std::string::npos && name != "README.md" ? dir / "src" / name : dir / name;
     fs::create_directories(at.parent_path(), ec);
-    std::ofstream o(at, std::ios::binary);
-    o.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    if (!o) {
+    bool written;
+    // A ROM from before the tools wrote LF may carry CR LF.
+    if (isTextName(name)) {
+      written = writeText(at, std::string(bytes.begin(), bytes.end()));
+    } else {
+      std::ofstream o(at, std::ios::binary);
+      o.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+      written = static_cast<bool>(o);
+    }
+    if (!written) {
       out.error = "cannot write " + at.string();
       return out;
     }
     out.files.push_back(at);
   }
-  std::ofstream(dir / ".gitignore") << "build/\n";
+  writeText(dir / ".gitignore", "build/\n");
   out.files.push_back(dir / ".gitignore");
   return out;
 }
@@ -632,9 +655,13 @@ std::string cyclesUnit(const std::string& microcodeText, std::vector<std::string
   return "; cycles.asm: generated by the build from the microcode set. Do not edit.\n" + ram + data;
 }
 
-Built buildSources(const std::vector<Source>& sources, const Assets& assets, const Options& opts,
+Built buildSources(const std::vector<Source>& given, const Assets& assets, const Options& opts,
                    const std::string& title, const std::string& where, const std::optional<Cartridge>& base,
                    const std::vector<std::string>& assetNames) {
+  // The sources as LF, so a file saved with CR LF builds the same ROM,
+  // its BASIC slots and its SRC chunk included, and the same listing.
+  std::vector<Source> sources;
+  for (const Source& src : given) sources.push_back({src.name, lf(src.text)});
   Built b;
   auto ext = [](const std::string& n) { return fs::path(n).extension().string(); };
   std::vector<const Source*> cFiles, hFiles, asmFiles, basFiles;
@@ -1180,9 +1207,7 @@ the number drop.
 void put(const fs::path& p, std::string text, const std::string& name, Created& out) {
   size_t at;
   while ((at = text.find("%NAME%")) != std::string::npos) text.replace(at, 6, name);
-  std::ofstream o(p);
-  o << text;
-  if (!o) out.error = "cannot write " + p.string();
+  if (!writeText(p, text)) out.error = "cannot write " + p.string();
   else out.files.push_back(p);
 }
 
@@ -1237,10 +1262,7 @@ Written buildAndWrite(const Layout& layout, const Options& opts, fs::path out) {
   std::error_code ec;
   fs::create_directories(layout.build, ec);
   if (out.empty()) out = layout.build / (layout.name + ".rom");
-  if (opts.keepAsm) {
-    std::ofstream o(layout.build / (layout.name + ".asm"));
-    o << w.built.assembly;
-  }
+  if (opts.keepAsm) writeText(layout.build / (layout.name + ".asm"), w.built.assembly);
   std::vector<uint8_t> bytes = encodeCartridge(*w.built.cartridge);
   std::ofstream o(out, std::ios::binary);
   o.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));

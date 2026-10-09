@@ -404,6 +404,17 @@ TEST_SUITE("ACP complex") {
     CHECK(has(r.flags(), ACP_DIVZERO));
   }
 
+  TEST_CASE("divides a zero part by zero into NaN, as JavaScript's 0 / 0") {
+    Rig r(ACP_C64);
+    putC(r, BASE, 0, 2);
+    putC(r, BASE + 16, 0, 0);
+    r.run(ACP_DIV);
+    const auto [re, im] = getC(r, BASE + 32);
+    CHECK(std::isnan(re));
+    CHECK_EQ(im, INF);
+    CHECK(has(r.flags(), ACP_DIVZERO));
+  }
+
   TEST_CASE("gives the magnitude and the angle as reals") {
     Rig r(ACP_C64, 1, 1, ACP_F64);
     putC(r, BASE, 3, 4);

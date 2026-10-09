@@ -19,7 +19,8 @@
 # The release is published by hand once all six archives are on it.
 #
 # The distribution holds the six programs, every example ROM, the example
-# sources, the docs and the README. On macOS they sit in SimpleCPU-8.app:
+# sources, the docs, the README and the libraries' licence texts in
+# LICENSES. On macOS they sit in SimpleCPU-8.app:
 # the programs in Contents/MacOS, the rest in Contents/Resources. The
 # bundle targets macOS 13 and later and is signed ad hoc. Linux adds the
 # launcher's icon. install.sh and install.ps1 read these layouts.
@@ -38,6 +39,16 @@ case "$hostarch" in
   aarch64|arm64) hostarch=arm64 ;;
   x86_64|AMD64|amd64) hostarch=x86_64 ;;
 esac
+# Git Bash can be an x64 program under emulation on ARM64 Windows. Then
+# uname -m, PROCESSOR_ARCHITECTURE and PowerShell, which inherits the
+# emulation, all say x64. The machine's own value is in the registry.
+if [ "$osname" = windows ]; then
+  winarch="$(reg query 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' //v PROCESSOR_ARCHITECTURE 2>/dev/null | tr -d '\r' | awk '/PROCESSOR_ARCHITECTURE/ {print $NF}')"
+  case "$winarch" in
+    ARM64) hostarch=arm64 ;;
+    AMD64) hostarch=x86_64 ;;
+  esac
+fi
 
 arch=""
 clean=0
@@ -74,12 +85,37 @@ if [ "$osname" = macos ]; then
     arm64|x86_64) extra+=("-DCMAKE_OSX_ARCHITECTURES=$arch") ;;
   esac
 fi
-generator=""
-if command -v ninja >/dev/null 2>&1; then generator="-G Ninja"; fi
+generator=()
+if [ "$osname" = windows ]; then
+  # DESIGN: MSVC from the newest Visual Studio that has the C++ tools for
+  # this machine, VS 2022 or VS 2026. Ninja is left out: on a runner it
+  # finds MinGW's GCC first. CMakeLists.txt links the C runtime statically.
+  case "$arch" in
+    arm64) vsarch=ARM64; vstools=Microsoft.VisualStudio.Component.VC.Tools.ARM64 ;;
+    *) vsarch=x64; vstools=Microsoft.VisualStudio.Component.VC.Tools.x86.x64 ;;
+  esac
+  vswhere="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+  vs() { "$vswhere" -latest -products '*' -requires "$vstools" -property "$1" | tr -d '\r'; }
+  vspath="$(vs installationPath)"
+  if [ -z "$vspath" ]; then
+    echo "d: no Visual Studio here has the $vsarch C++ tools" >&2
+    exit 1
+  fi
+  vsversion="$(vs installationVersion)"
+  msvc="$(tr -d '\r' < "$(cygpath -u "$vspath")/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt")"
+  case "${vsversion%%.*}" in
+    17) vsgen="Visual Studio 17 2022" ;;
+    18) vsgen="Visual Studio 18 2026" ;;
+    *) echo "d: Visual Studio $vsversion has no CMake generator named here" >&2; exit 1 ;;
+  esac
+  echo "d: $(vs displayName) $vsversion, MSVC $msvc, for $vsarch"
+  generator=(-G "$vsgen" -A "$vsarch" "-DCMAKE_GENERATOR_INSTANCE=$vspath")
+elif command -v ninja >/dev/null 2>&1; then
+  generator=(-G Ninja)
+fi
 # Configured every time, so a flag added here reaches an existing cache.
-if [ -f "$build/CMakeCache.txt" ]; then generator=""; fi
-# shellcheck disable=SC2086
-cmake -S . -B "$build" $generator -DCMAKE_BUILD_TYPE=Release -DSC8_BUILD_TESTS=OFF ${extra[@]+"${extra[@]}"}
+if [ -f "$build/CMakeCache.txt" ]; then generator=(); fi
+cmake -S . -B "$build" ${generator[@]+"${generator[@]}"} -DCMAKE_BUILD_TYPE=Release -DSC8_BUILD_TESTS=OFF ${extra[@]+"${extra[@]}"}
 cmake --build "$build" --config Release --parallel
 
 out="dist/$name"
@@ -115,6 +151,7 @@ rm -f "$share/examples/CMakeLists.txt" "$share/examples/extract-demos.mjs"
 find "$share/examples" -type d -name build -prune -exec rm -rf {} +
 cp -R docs/. "$share/docs/"
 cp README.md "$share/"
+cp -R packaging/licenses "$share/LICENSES"
 case "$osname" in
   macos)
     sed "s/@VERSION@/$version/g" packaging/macos/Info.plist.in > "$app/Contents/Info.plist"
