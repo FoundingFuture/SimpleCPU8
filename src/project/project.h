@@ -100,12 +100,12 @@ struct Carried {
 Carried carried(const Cartridge& rom);
 
 // Write the project a ROM carries into a folder in the larger layout:
-// src/, assets/, README.md. The folder must not exist yet. The files
-// written come back, or an error message.
+// src/, assets/, README.md, the text files with LF line ends. The folder
+// must not exist yet. The files written come back, or an error message.
 Created unpack(const Cartridge& rom, const std::filesystem::path& dir);
 
-// Put a project into a cartridge's SRC chunk: the sources as text, the
-// other files as bytes.
+// Put a project into a cartridge's SRC chunk: the sources and the README
+// as text with LF line ends, the other files as bytes.
 void embed(Cartridge& c, const std::vector<Source>& sources,
            const std::vector<std::pair<std::string, std::vector<uint8_t>>>& files);
 

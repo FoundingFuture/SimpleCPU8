@@ -23,6 +23,7 @@
 #include "ide/native_window.h"
 #include "ide/panes.h"
 #include "project/breakpoints.h"
+#include "project/text_file.h"
 
 namespace fs = std::filesystem;
 
@@ -1172,8 +1173,11 @@ void Ide::menuBar() {
       if (f.empty()) {
         note("no settings folder is known on this machine, so the layout cannot be saved");
       } else {
-        ImGui::SaveIniSettingsToDisk(f.string().c_str());
-        note("layout saved to " + f.string());
+        // ImGui writes its file in text mode, CR LF on Windows.
+        size_t size = 0;
+        const char* ini = ImGui::SaveIniSettingsToMemory(&size);
+        if (writeText(f, std::string_view(ini, size))) note("layout saved to " + f.string());
+        else note("cannot write " + f.string());
       }
     }
     if (ImGui::IsItemHovered()) {

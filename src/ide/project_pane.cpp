@@ -17,6 +17,7 @@
 #include "ide/highlight.h"
 #include "ide/ide.h"
 #include "ide/panes.h"
+#include "project/text_file.h"
 
 namespace fs = std::filesystem;
 
@@ -451,8 +452,8 @@ void Ide::saveProjectAs(const std::string& dir) {
       return;
     }
   }
-  if (!fs::exists(root / "README.md", ec)) std::ofstream(root / "README.md") << "# " << root.filename().string() << "\n";
-  if (!fs::exists(root / ".gitignore", ec)) std::ofstream(root / ".gitignore") << "build/\n";
+  if (!fs::exists(root / "README.md", ec)) writeText(root / "README.md", "# " + root.filename().string() + "\n");
+  if (!fs::exists(root / ".gitignore", ec)) writeText(root / ".gitignore", "build/\n");
   projectDir_ = root.string();
   example_ = false;
   projectTitle_ = root.filename().string();
@@ -509,9 +510,7 @@ void Ide::saveDoc(Doc& doc) {
   const project::Layout l = layout();
   std::error_code ec;
   fs::create_directories(l.sources, ec);
-  std::ofstream o(l.sources / doc.name);
-  o << doc.text;
-  if (o) {
+  if (writeText(l.sources / doc.name, doc.text)) {
     doc.dirty = false;
     note("saved " + (l.sources / doc.name).string());
   } else {

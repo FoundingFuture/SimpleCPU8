@@ -1,6 +1,8 @@
 // A source with CR LF line ends builds what the same source with LF
 // builds, and its errors name the same lines. The tools write LF on every
-// platform, but a file saved by a Windows editor carries CR LF.
+// platform, but a file saved by a Windows editor carries CR LF. A text
+// file written in text mode on Windows gets CR LF, so the file tests here
+// fail there and pass elsewhere.
 
 #include <doctest.h>
 
@@ -14,7 +16,10 @@
 #include "basic/program.h"
 #include "cc/cc.h"
 #include "core/cartridge.h"
+#include "core/microcode.h"
+#include "core/mcparse.h"
 #include "project/project.h"
+#include "project/text_file.h"
 
 namespace fs = std::filesystem;
 using namespace sc8;
@@ -42,6 +47,23 @@ std::vector<int> errorLines(const Assembled& a) {
 void writeExact(const fs::path& p, const std::string& text) {
   fs::create_directories(p.parent_path());
   std::ofstream(p, std::ios::binary) << text;
+}
+
+std::string readExact(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+std::vector<uint8_t> bytesOf(const std::string& s) { return {s.begin(), s.end()}; }
+
+// A PNG's signature holds CR LF, which a file kept byte for byte keeps.
+const std::string PNG_BYTES = std::string("\x89PNG\r\n\x1a\n", 8) + "\r\nnot a picture\r\n";
+
+const std::vector<uint8_t>* carried(const Cartridge& c, const std::string& name) {
+  for (const auto& [n, bytes] : c.sources) {
+    if (n == name) return &bytes;
+  }
+  return nullptr;
 }
 
 // The errors with the folder taken out, so two folders' errors compare.
@@ -135,8 +157,6 @@ TEST_SUITE("CR LF line ends") {
     CHECK(basic::encodeProgram(crlf(text)) == basic::encodeProgram(text));
   }
 
-  // The SRC chunk carries each file as it is on disk, so the ROMs differ
-  // there. Everything the program runs from is the same.
   TEST_CASE("a project builds the same program, under the same title") {
     Folder lf("lf"), cr("cr");
     const std::string readme = "# Line ends\nA test.\n";
@@ -178,4 +198,92 @@ TEST_SUITE("CR LF line ends") {
     CHECK(inFolder(b.errors, cr.path) == inFolder(a.errors, lf.path));
   }
 #endif
+
+  TEST_CASE("writeText writes LF on every platform") {
+    Folder f("write");
+    fs::create_directories(f.path);
+    REQUIRE(writeText(f.path / "a.txt", "one\r\ntwo\nthree\r\n"));
+    CHECK(readExact(f.path / "a.txt") == "one\ntwo\nthree\n");
+  }
+
+  TEST_CASE("a CR LF project and its LF copy build the same ROM, every chunk included") {
+    Folder lf("lf"), cr("cr");
+    const std::string readme = "# Line ends\nA test.\n";
+    const std::string microcode = "# The naive set.\n" + serializeMicrocode(buildNaive());
+    for (const auto& [dir, conv] : {std::pair{lf.path, false}, std::pair{cr.path, true}}) {
+      auto text = [&](const std::string& t) { return conv ? crlf(t) : t; };
+      writeExact(dir / "README.md", text(readme));
+      writeExact(dir / "src" / "main.asm", text(ASM));
+      writeExact(dir / "src" / "microcode.txt", text(microcode));
+      writeExact(dir / "assets" / "pic.png", PNG_BYTES);
+    }
+    const project::Built a = project::build(project::layoutOf(lf.path), {});
+    const project::Built b = project::build(project::layoutOf(cr.path), {});
+    REQUIRE_MESSAGE(a.cartridge, (a.errors.empty() ? std::string() : a.errors[0]));
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    CHECK(encodeCartridge(*b.cartridge, false) == encodeCartridge(*a.cartridge, false));
+    const std::vector<uint8_t>* png = carried(*b.cartridge, "assets/pic.png");
+    REQUIRE(png);
+    CHECK(*png == bytesOf(PNG_BYTES));
+    const std::vector<uint8_t>* asmText = carried(*b.cartridge, "main.asm");
+    REQUIRE(asmText);
+    CHECK(*asmText == bytesOf(ASM));
+  }
+
+#if SC8_HAVE_BASIC
+  TEST_CASE("a CR LF BASIC project and its LF copy build the same ROM, slots included") {
+    Folder lf("lf"), cr("cr");
+    const std::string autorun = "10 PRINT \"HI\"\n20 END\n";
+    const std::string more = "10 PRINT \"MORE\"\n";
+    for (const auto& [dir, conv] : {std::pair{lf.path, false}, std::pair{cr.path, true}}) {
+      auto text = [&](const std::string& t) { return conv ? crlf(t) : t; };
+      writeExact(dir / "README.md", text("# Slots\n"));
+      writeExact(dir / "src" / "autorun.bas", text(autorun));
+      writeExact(dir / "src" / "more.bas", text(more));
+    }
+    const project::Built a = project::build(project::layoutOf(lf.path), {});
+    const project::Built b = project::build(project::layoutOf(cr.path), {});
+    REQUIRE_MESSAGE(a.cartridge, (a.errors.empty() ? std::string() : a.errors[0]));
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    CHECK(b.cartridge->basic == a.cartridge->basic);
+    CHECK(encodeCartridge(*b.cartridge, false) == encodeCartridge(*a.cartridge, false));
+  }
+#endif
+
+  TEST_CASE("unpack writes the text files LF and the other files byte for byte") {
+    Cartridge rom;
+    rom.sources = {{"main.asm", bytesOf(crlf(ASM))},
+                   {"README.md", bytesOf(crlf("# Unpacked\n"))},
+                   {"assets/pic.png", bytesOf(PNG_BYTES)}};
+    Folder f("unpack");
+    const project::Created c = project::unpack(rom, f.path);
+    REQUIRE_MESSAGE(c.error.empty(), c.error);
+    CHECK(readExact(f.path / "src" / "main.asm") == ASM);
+    CHECK(readExact(f.path / "README.md") == "# Unpacked\n");
+    CHECK(readExact(f.path / ".gitignore") == "build/\n");
+    CHECK(readExact(f.path / "assets" / "pic.png") == PNG_BYTES);
+  }
+
+  TEST_CASE("create() writes LF for every kind") {
+    for (const project::Kind kind :
+         {project::Kind::C, project::Kind::Basic, project::Kind::Assembly, project::Kind::Microcode}) {
+      Folder f("create");
+      const project::Created c = project::create(f.path, kind);
+      REQUIRE_MESSAGE(c.error.empty(), c.error);
+      REQUIRE_FALSE(c.files.empty());
+      for (const fs::path& p : c.files) CHECK_MESSAGE(readExact(p).find('\r') == std::string::npos, p.string());
+    }
+  }
+
+  TEST_CASE("simplecpu-make's assembly listing is LF") {
+    Folder f("listing");
+    writeExact(f.path / "src" / "main.asm", crlf(ASM));
+    project::Options opts;
+    opts.keepAsm = true;
+    const project::Written w = project::buildAndWrite(project::layoutOf(f.path), opts);
+    REQUIRE_MESSAGE(!w.rom.empty(), (w.built.errors.empty() ? std::string() : w.built.errors[0]));
+    const std::string listing = readExact(f.path / "build" / (project::layoutOf(f.path).name + ".asm"));
+    CHECK_FALSE(listing.empty());
+    CHECK(listing.find('\r') == std::string::npos);
+  }
 }

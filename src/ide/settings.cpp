@@ -1,7 +1,10 @@
 #include "ide/settings.h"
 
+#include "project/text_file.h"
+
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -73,13 +76,13 @@ void Settings::load() {
 bool Settings::save() const {
   const fs::path file = settingsFile();
   if (file.empty()) return false;
-  std::ofstream o(file);
+  std::ostringstream o;
   o << "# SimpleCPU-8 IDE settings\n";
   o << "projects = " << projectsDir << "\n";
   o << "scale = " << uiScale << "\n";
   o << "format_asm = " << (formatAssembly ? 1 : 0) << "\n";
   o << "error_sound = " << (errorSound ? 1 : 0) << "\n";
-  return static_cast<bool>(o);
+  return writeText(file, o.str());
 }
 
 }  // namespace sc8
