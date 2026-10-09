@@ -11,3 +11,9 @@ stb.txt        stb_image and stb_image_write: the pictures, and the
                zlib codec that compresses a ROM file on disk.
 doctest.txt    doctest: the test framework. It runs the tests and is
                in none of the programs.
+
+Two more libraries are compiled in. Both are under the zlib licence,
+which asks for no notice in a binary, so their texts are not here:
+
+rlImGui        the raylib backend for Dear ImGui, in the IDE.
+GLFW           the window and input layer inside raylib.

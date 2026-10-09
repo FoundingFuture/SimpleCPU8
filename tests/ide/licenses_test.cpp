@@ -61,6 +61,12 @@ TEST_SUITE("the licence texts") {
     CHECK(fs::is_regular_file(dir / "README.txt"));
   }
 
+  TEST_CASE("the README names the libraries whose text is not in the folder") {
+    const std::string readme = readAll(fs::path(SC8_PACKAGING_DIR) / "licenses" / "README.txt");
+    CHECK(readme.find("rlImGui") != std::string::npos);
+    CHECK(readme.find("GLFW") != std::string::npos);
+  }
+
   TEST_CASE("each text is the fetched library's own") {
     const fs::path dir = fs::path(SC8_PACKAGING_DIR) / "licenses";
     for (const Licence& l : LICENCES) {
