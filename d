@@ -19,7 +19,8 @@
 # The release is published by hand once all six archives are on it.
 #
 # The distribution holds the six programs, every example ROM, the example
-# sources, the docs and the README. On macOS they sit in SimpleCPU-8.app:
+# sources, the docs, the README and the libraries' licence texts in
+# LICENSES. On macOS they sit in SimpleCPU-8.app:
 # the programs in Contents/MacOS, the rest in Contents/Resources. The
 # bundle targets macOS 13 and later and is signed ad hoc. Linux adds the
 # launcher's icon. install.sh and install.ps1 read these layouts.
@@ -150,6 +151,7 @@ rm -f "$share/examples/CMakeLists.txt" "$share/examples/extract-demos.mjs"
 find "$share/examples" -type d -name build -prune -exec rm -rf {} +
 cp -R docs/. "$share/docs/"
 cp README.md "$share/"
+cp -R packaging/licenses "$share/LICENSES"
 case "$osname" in
   macos)
     sed "s/@VERSION@/$version/g" packaging/macos/Info.plist.in > "$app/Contents/Info.plist"
