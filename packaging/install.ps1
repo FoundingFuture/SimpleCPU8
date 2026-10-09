@@ -1,13 +1,27 @@
 # install.ps1: install SimpleCPU-8 for this user on Windows.
 #
-#   irm <url>/install.ps1 | iex
-#   & ([scriptblock]::Create((irm <url>/install.ps1))) -Path     put the programs on PATH
-#   & ([scriptblock]::Create((irm <url>/install.ps1))) -NoPath   and do not ask
-#   .\install.ps1 -Version 0.1.0                                   a given release
-#   .\install.ps1 -Archive dist\simplecpu-0.1.0-windows-x86_64.zip
+# In PowerShell:
+#
+#   irm https://foundingfuture.com/downloads/install.ps1 | iex
+#
+# From cmd.exe:
+#
+#   powershell -c "irm https://foundingfuture.com/downloads/install.ps1 | iex"
+#
+# A pipe into iex passes no parameters. Run the script as a script block
+# to give them:
+#
+#   & ([scriptblock]::Create((irm https://foundingfuture.com/downloads/install.ps1))) -Path
+#   -Path                  put the programs on PATH
+#   -NoPath                leave PATH alone, and do not ask
+#   -Version 0.1.0         a given release
+#   -Archive <file>        an archive on disk, with no download, as
+#                          .\install.ps1 -Archive dist\simplecpu-0.1.0-windows-x86_64.zip
 #
 # The archive comes from the GitHub release for this machine, arm64 or
-# x86_64. Without -Version that is the latest release.
+# x86_64. Without -Version that is the latest release. GitHub never counts
+# a pre-release as the latest, so a pre-release installs by its version
+# alone.
 #
 # %LOCALAPPDATA%\Programs\SimpleCPU-8 holds the programs, the ROMs and the
 # docs. The Start Menu gets SimpleCPU-8 for the IDE. -Path puts the bin

@@ -83,6 +83,20 @@ int install(const Archive& a, const fs::path& root, const std::string& flags, co
 }  // namespace
 
 TEST_SUITE("install.sh") {
+  // The usage is the header comment, every line of it after the #! line.
+  TEST_CASE("--help prints the whole header") {
+    FakeHome home;
+    std::ifstream in(SC8_PACKAGING_DIR "/install.sh");
+    std::string line, header;
+    std::getline(in, line);
+    while (std::getline(in, line) && line.rfind("#", 0) == 0) header += line + "\n";
+    REQUIRE(header.find("--archive") != std::string::npos);
+    const fs::path out = home.root / "help.txt";
+    const std::string cmd = "sh \"" SC8_PACKAGING_DIR "/install.sh\" --help > \"" + out.string() + "\"";
+    REQUIRE(std::system(cmd.c_str()) == 0);
+    CHECK(read(out) == header);
+  }
+
   TEST_CASE("the examples replace what the settings folder held") {
     FakeHome home;
     setEnv("HOME", home.root.string());
