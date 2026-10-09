@@ -2,6 +2,9 @@
 # temporary folder, for each of the four kinds.
 sc8_add_test(sc8_project_tests project_test.cpp breakpoints_test.cpp line_ends_test.cpp)
 target_link_libraries(sc8_project_tests PRIVATE sc8::project)
+# The line ends tests burn a ROM with the simplecpu-asm executable.
+target_compile_definitions(sc8_project_tests PRIVATE "SC8_SIMPLECPU_ASM=\"$<TARGET_FILE:simplecpu-asm>\"")
+add_dependencies(sc8_project_tests simplecpu-asm)
 if(TARGET sc8_basic)
   target_compile_definitions(sc8_project_tests PRIVATE SC8_HAVE_BASIC=1)
   # examples/basic/font is built by the simplecpu-make executable and run on the
