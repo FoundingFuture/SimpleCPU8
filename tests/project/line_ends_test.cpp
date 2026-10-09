@@ -6,6 +6,7 @@
 
 #include <doctest.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <ostream>
@@ -228,6 +229,25 @@ TEST_SUITE("CR LF line ends") {
     const std::vector<uint8_t>* asmText = carried(*b.cartridge, "main.asm");
     REQUIRE(asmText);
     CHECK(*asmText == bytesOf(ASM));
+  }
+
+  TEST_CASE("simplecpu-asm burns the same ROM from CR LF files as from LF ones") {
+    Folder lf("lf"), cr("cr");
+    const std::string microcode = "# The naive set.\n" + serializeMicrocode(buildNaive());
+    for (const auto& [dir, conv] : {std::pair{lf.path, false}, std::pair{cr.path, true}}) {
+      auto text = [&](const std::string& t) { return conv ? crlf(t) : t; };
+      writeExact(dir / "main.asm", text(ASM));
+      writeExact(dir / "demo.bas", text("10 PRINT \"HI\"\n"));
+      writeExact(dir / "microcode.txt", text(microcode));
+      const std::string cmd = std::string("\"") + SC8_SIMPLECPU_ASM + "\" \"" + (dir / "main.asm").string() +
+                              "\" --microcode \"" + (dir / "microcode.txt").string() + "\" --bas \"DEMO=" +
+                              (dir / "demo.bas").string() + "\" -o \"" + (dir / "out.rom").string() + "\"";
+      REQUIRE(std::system(cmd.c_str()) == 0);
+    }
+    const std::string a = readExact(lf.path / "out.rom");
+    const std::string b = readExact(cr.path / "out.rom");
+    CHECK_FALSE(a.empty());
+    CHECK(b == a);
   }
 
 #if SC8_HAVE_BASIC

@@ -28,6 +28,7 @@
 #include "assets/assets.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
+#include "project/text_file.h"
 
 namespace fs = std::filesystem;
 using namespace sc8;
@@ -77,7 +78,7 @@ int main(int argc, char** argv) {
           std::fprintf(stderr, "cannot read microcode file %s\n", m.c_str());
           return 1;
         }
-        microcode.assign(std::istreambuf_iterator<char>(in), {});
+        microcode = lf(std::string(std::istreambuf_iterator<char>(in), {}));
         McParsed parsed = parseMicrocode(microcode);
         for (const McError& e : parsed.errors) {
           std::fprintf(stderr, "%s:%d: %s\n", m.c_str(), e.line, e.message.c_str());
@@ -100,7 +101,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "cannot read %s\n", spec.substr(eq + 1).c_str());
         return 1;
       }
-      basicSlots.emplace_back(spec.substr(0, eq), std::string(std::istreambuf_iterator<char>(in), {}));
+      basicSlots.emplace_back(spec.substr(0, eq), lf(std::string(std::istreambuf_iterator<char>(in), {})));
     }
     else if (a == "-h" || a == "--help") return usage();
     else if (!a.empty() && a[0] == '-') {
@@ -202,9 +203,14 @@ int main(int argc, char** argv) {
   c.microcode = microcode;
   c.meta = meta;
   c.basic = basicSlots;
+  // The text in the ROM is LF, so a CR LF file burns the ROM its LF copy
+  // burns. The assets stay byte for byte.
   if (embedSources) {
     for (const fs::path& src : sources) {
-      if (auto raw = readBytes(src)) c.sources.emplace_back(src.filename().string(), *raw);
+      if (auto raw = readBytes(src)) {
+        const std::string asLf = lf(std::string(raw->begin(), raw->end()));
+        c.sources.emplace_back(src.filename().string(), std::vector<uint8_t>(asLf.begin(), asLf.end()));
+      }
     }
     for (auto& f : carried) c.sources.push_back(std::move(f));
   }
