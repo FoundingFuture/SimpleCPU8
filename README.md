@@ -24,11 +24,9 @@ On Windows, run this in PowerShell:
 irm https://foundingfuture.com/downloads/install.ps1 | iex
 ```
 
-From cmd.exe on Windows, run PowerShell with the same line:
-
-```bat
-powershell -c "irm https://foundingfuture.com/downloads/install.ps1 | iex"
-```
+In cmd.exe, type `powershell` first, then the same line. Microsoft
+Defender stops the line when cmd.exe passes it to PowerShell on the
+command line, and cmd prints only "Access is denied".
 
 The script downloads the latest GitHub release for the machine's system
 and processor, arm64 or x86_64. It installs for the current user and
