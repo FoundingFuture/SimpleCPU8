@@ -1,6 +1,8 @@
+simplecpu-8.txt  SimpleCPU-8 itself, under the MIT licence.
+
 SimpleCPU-8 is built with these libraries, at the versions pinned in
-cmake/Dependencies.cmake. Each file in this folder holds the library's
-own licence text.
+cmake/Dependencies.cmake. Each file below holds the library's own
+licence text.
 
 raylib.txt     raylib: the window, the input and the drawing.
 miniaudio.txt  miniaudio: the sound device and the sample decoder.

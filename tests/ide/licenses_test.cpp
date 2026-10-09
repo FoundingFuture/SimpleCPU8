@@ -1,6 +1,6 @@
-// The licence texts ./d puts in each archive's LICENSES folder. Each is
-// the library's own file, as FetchContent brought it at the pinned tag.
-// A preset that does not fetch a library skips its comparison.
+// The licence texts ./d puts in each archive's LICENSES folder: the
+// repository's own LICENSE, and each library's file as FetchContent brought
+// it at the pinned tag. A preset that does not fetch a library skips it.
 
 #include <doctest.h>
 
@@ -35,6 +35,22 @@ const Licence LICENCES[] = {
 }  // namespace
 
 TEST_SUITE("the licence texts") {
+  TEST_CASE("SimpleCPU-8 is under the MIT licence of Founding Future") {
+    const std::string text = readAll(SC8_LICENSE_FILE);
+    CHECK(text.rfind("MIT License\n\nCopyright (c) 2026 Founding Future\n", 0) == 0);
+    CHECK(text.find("Permission is hereby granted, free of charge, to any person obtaining a copy") !=
+          std::string::npos);
+  }
+
+  TEST_CASE("the folder's README names every file") {
+    const std::string readme = readAll(fs::path(SC8_PACKAGING_DIR) / "licenses" / "README.txt");
+    CHECK(readme.find("simplecpu-8.txt") != std::string::npos);
+    for (const Licence& l : LICENCES) {
+      CAPTURE(l.file);
+      CHECK(readme.find(l.file) != std::string::npos);
+    }
+  }
+
   TEST_CASE("each library's text is in packaging/licenses") {
     const fs::path dir = fs::path(SC8_PACKAGING_DIR) / "licenses";
     for (const Licence& l : LICENCES) {
