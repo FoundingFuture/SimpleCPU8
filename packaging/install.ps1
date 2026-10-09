@@ -4,9 +4,9 @@
 #
 #   irm https://foundingfuture.com/downloads/install.ps1 | iex
 #
-# From cmd.exe:
-#
-#   powershell -c "irm https://foundingfuture.com/downloads/install.ps1 | iex"
+# From cmd.exe, type powershell first, then the line. Microsoft Defender
+# stops the line passed to PowerShell on its command line as a trojan,
+# and cmd prints only "Access is denied".
 #
 # A pipe into iex passes no parameters. Run the script as a script block
 # to give them:
