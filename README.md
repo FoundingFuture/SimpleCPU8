@@ -12,21 +12,51 @@ docs/standalone.md records what this version adds.
 
 ## Install
 
-packaging/install.sh installs the latest GitHub release on macOS and Linux.
-packaging/install.ps1 does the same on Windows. Each one picks the archive for
-the machine's system and processor, arm64 or x86_64. Each install installs
-for the current user and needs no administrator rights.
+On macOS or Linux, run this in a terminal:
 
 ```bash
-sh packaging/install.sh                 # asks whether to add the programs to PATH
-sh packaging/install.sh --path          # adds them without asking
-sh packaging/install.sh --version 0.1.0
-sh packaging/install.sh --archive dist/simplecpu-0.1.0-macos-arm64.tar.gz
+curl -fsSL https://foundingfuture.com/downloads/install.sh | sh
+```
+
+On Windows, run this in PowerShell:
+
+```powershell
+irm https://foundingfuture.com/downloads/install.ps1 | iex
+```
+
+From cmd.exe on Windows, run PowerShell with the same line:
+
+```bat
+powershell -c "irm https://foundingfuture.com/downloads/install.ps1 | iex"
+```
+
+The script downloads the latest GitHub release for the machine's system
+and processor, arm64 or x86_64. It installs for the current user and
+needs no administrator rights. It asks whether to put the programs on
+PATH.
+
+| install.sh | install.ps1 | Effect |
+|---|---|---|
+| `--path` | `-Path` | Put the programs on PATH without asking |
+| `--no-path` | `-NoPath` | Leave PATH alone without asking |
+| `--version 0.1.0` | `-Version 0.1.0` | Install that release |
+| `--archive <file>` | `-Archive <file>` | Install an archive on disk, with no download |
+
+Give install.sh its options after `sh -s --`. A pipe into `iex` passes
+no parameters, so run install.ps1 as a script block to give it options:
+
+```bash
+curl -fsSL https://foundingfuture.com/downloads/install.sh | sh -s -- --version 0.1.0
 ```
 
 ```powershell
-.\packaging\install.ps1 -Path
+& ([scriptblock]::Create((irm https://foundingfuture.com/downloads/install.ps1))) -Version 0.1.0
 ```
+
+GitHub never counts a pre-release as the latest release. Install a
+pre-release, such as 0.1.0, by its version. From a checkout, run
+`sh packaging/install.sh` or `.\packaging\install.ps1` with the same
+options.
 
 | System | Programs | Examples |
 |---|---|---|

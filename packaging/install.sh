@@ -1,14 +1,23 @@
 #!/bin/sh
 # install.sh: install SimpleCPU-8 for this user, on macOS or Linux.
 #
-#   curl -fsSL <url>/install.sh | sh
-#   curl -fsSL <url>/install.sh | sh -s -- --path     put the programs on PATH
-#   curl -fsSL <url>/install.sh | sh -s -- --no-path  and do not ask
-#   sh install.sh --version 0.1.0                       a given release
-#   sh install.sh --archive dist/simplecpu-0.1.0-macos-arm64.tar.gz
+# In a terminal:
+#
+#   curl -fsSL https://foundingfuture.com/downloads/install.sh | sh
+#
+# Flags go after `sh -s --`:
+#
+#   curl -fsSL https://foundingfuture.com/downloads/install.sh | sh -s -- --path
+#   --path                 put the programs on PATH
+#   --no-path              leave PATH alone, and do not ask
+#   --version 0.1.0        a given release
+#   --archive <file>       an archive on disk, with no download, as
+#                          sh install.sh --archive dist/simplecpu-0.1.0-macos-arm64.tar.gz
 #
 # The archive comes from the GitHub release for this machine: macOS or
 # Linux, arm64 or x86_64. Without --version that is the latest release.
+# GitHub never counts a pre-release as the latest, so a pre-release
+# installs by its version alone.
 #
 # macOS   ~/Applications/SimpleCPU-8.app holds everything. The programs sit
 #         in Contents/MacOS, so --path adds that folder to the shell's
@@ -214,7 +223,7 @@ main() {
       --path) path_choice=yes ;;
       --no-path) path_choice=no ;;
       -h|--help)
-        if [ -f "$0" ]; then sed -n '2,29p' "$0"; else say "flags: --path --no-path --version <v> --archive <file>"; fi
+        if [ -f "$0" ]; then awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0"; else say "flags: --path --no-path --version <v> --archive <file>"; fi
         exit 0 ;;
       *) fail "unknown flag $1" ;;
     esac
