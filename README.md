@@ -162,6 +162,11 @@ examples/           programs to assemble and run
 src/CMakeLists.txt names each layer. docs/standalone.md describes the
 targets and what depends on what.
 
+## Licence
+
+SimpleCPU-8 is under the MIT licence, in LICENSE. An installed copy keeps
+it in LICENSES beside the licence texts of the libraries it is built with.
+
 ## Status
 
 The core, the assembler and the ROM format are ported and tested. The

@@ -66,7 +66,7 @@ jobs:
           test -x ~/.local/share/simplecpu-8/bin/simplecpu-ide
           test -f ~/.local/share/applications/simplecpu-8.desktop
           test -f ~/.config/simplecpu-8/examples/README.md
-          for f in README raylib miniaudio imgui doctest stb; do test -f ~/.local/share/simplecpu-8/LICENSES/$f.txt; done
+          for f in README simplecpu-8 raylib miniaudio imgui doctest stb; do test -f ~/.local/share/simplecpu-8/LICENSES/$f.txt; done
           ~/.local/share/simplecpu-8/bin/simplecpu-asm ~/.config/simplecpu-8/examples/assembly/hello/hello.asm -o "$RUNNER_TEMP/hello.rom"
       # Windows PowerShell 5.1 is what `irm | iex` runs in on a fresh machine.
       - name: Install with install.ps1
@@ -78,7 +78,7 @@ jobs:
           if (-not (Test-Path "$env:LOCALAPPDATA\Programs\SimpleCPU-8\bin\simplecpu-ide.exe")) { throw "no simplecpu-ide.exe" }
           if (-not (Test-Path "$env:APPDATA\SimpleCPU-8\examples\README.md")) { throw "no examples" }
           if (-not (Test-Path "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\SimpleCPU-8.lnk")) { throw "no shortcut" }
-          foreach ($f in 'README', 'raylib', 'miniaudio', 'imgui', 'doctest', 'stb') {
+          foreach ($f in 'README', 'simplecpu-8', 'raylib', 'miniaudio', 'imgui', 'doctest', 'stb') {
             if (-not (Test-Path "$env:LOCALAPPDATA\Programs\SimpleCPU-8\LICENSES\$f.txt")) { throw "no LICENSES\$f.txt" }
           }
           & "$env:LOCALAPPDATA\Programs\SimpleCPU-8\bin\simplecpu-asm.exe" "$env:APPDATA\SimpleCPU-8\examples\assembly\hello\hello.asm" -o "$env:RUNNER_TEMP\hello.rom"
