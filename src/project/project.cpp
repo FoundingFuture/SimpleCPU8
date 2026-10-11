@@ -607,15 +607,38 @@ std::optional<std::string> readProgramFile(const fs::path& file) {
   for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   std::error_code ec;
   if (ext != ".bas" || !fs::is_regular_file(file, ec)) return std::nullopt;
-  // The size is asked before a byte is read: a program in the machine
-  // must not make the host take a large file into memory.
-  const uintmax_t size = fs::file_size(file, ec);
-  if (ec || size > static_cast<uintmax_t>(storage::TEXT_MAX)) return std::nullopt;
   std::ifstream in(file, std::ios::binary);
   if (!in) return std::nullopt;
-  std::string text((std::istreambuf_iterator<char>(in)), {});
+  // DESIGN: the read itself is bounded, one byte past what a slot holds.
+  // A size asked first could be stale by the time the file is read, and
+  // a program in the machine must not make the host take a large file
+  // into memory.
+  constexpr size_t LIMIT = static_cast<size_t>(storage::TEXT_MAX);
+  std::string text(LIMIT + 1, '\0');
+  in.read(text.data(), static_cast<std::streamsize>(text.size()));
+  const auto got = static_cast<size_t>(in.gcount());
+  if (got > LIMIT) return std::nullopt;
+  text.resize(got);
   text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
   return text;
+}
+
+std::optional<std::string> readProgramFileIn(const fs::path& file, const std::vector<fs::path>& roots) {
+  std::error_code ec;
+  // canonical follows every link and .., and fails for a missing file.
+  const fs::path real = fs::canonical(file, ec);
+  if (ec) return std::nullopt;
+  for (const fs::path& root : roots) {
+    if (root.empty()) continue;
+    const fs::path base = fs::canonical(root, ec);
+    if (ec) continue;
+    // Inside means every part of the root's path opens the file's.
+    auto r = base.begin();
+    auto f = real.begin();
+    for (; r != base.end() && f != real.end() && *r == *f; ++r, ++f) {}
+    if (r == base.end() && f != real.end()) return readProgramFile(real);
+  }
+  return std::nullopt;
 }
 
 fs::path defaultLibraries(const fs::path& projectsFolder) {

@@ -167,6 +167,14 @@ constexpr ExampleKind EXAMPLE_KINDS[] = {
 // any other file.
 std::optional<std::string> readProgramFile(const std::filesystem::path& file);
 
+// The same for a path the running machine gave, as LOAD "../lib/x.bas"
+// does. The file is read only when it lies inside one of `roots`, after
+// every .. and every link in the path is followed. So a path, or a link
+// in a project somebody else made, reaches no file outside them. No
+// roots, no file.
+std::optional<std::string> readProgramFileIn(const std::filesystem::path& file,
+                                             const std::vector<std::filesystem::path>& roots);
+
 // A microcode set's text checked without a build: the parser's errors,
 // then every row through checkRow. Each message opens with its line in
 // the text and a colon. The IDE's CHECK in the MICROCODE view shows them.

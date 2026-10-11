@@ -143,13 +143,18 @@ void Ide::hostStorage() {
     if (isPath(name)) {
       // A path is read from the disk, against the project's folder.
       // DESIGN: the program in the machine names the path, and it may be
-      // a ROM somebody else wrote. readProgramFile reads a .bas file of
-      // a slot's size at most, so the machine cannot ask for any file.
-      const fs::path base = projectDir_.empty() ? fs::current_path() : fs::path(projectDir_);
-      const fs::path file = fs::path(name).is_absolute() ? fs::path(name) : base / name;
-      if (std::optional<std::string> text = project::readProgramFile(file)) return text;
+      // a ROM or a project somebody else made. So a path reaches a .bas
+      // file of a slot's size at most. The file must lie inside the
+      // folder the project sits in, the projects folder or a libraries
+      // folder. That is where a sibling project and a library are. A project with no
+      // folder has no path to resolve, as a ROM in simplecpu has none.
+      if (projectDir_.empty()) return std::nullopt;
+      std::vector<fs::path> roots = libraryFolders();
+      roots.push_back(fs::path(projectDir_).parent_path());
+      if (!settings_.projectsDir.empty()) roots.emplace_back(settings_.projectsDir);
+      const fs::path file = fs::path(name).is_absolute() ? fs::path(name) : fs::path(projectDir_) / name;
       // No such file: the device tries the slot the path's stem names.
-      return std::nullopt;
+      return project::readProgramFileIn(file, roots);
     }
     std::string file = name;
     for (char& c : file) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));

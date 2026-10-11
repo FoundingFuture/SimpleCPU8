@@ -377,6 +377,50 @@ TEST_SUITE("simplecpu-make new") {
     CHECK_FALSE(project::readProgramFile(t.path / "lib"));
   }
 
+  // A LOAD by path may reach a sibling project or a library, and no
+  // further: the program that names the path may be somebody else's.
+  TEST_CASE("a program file by path is read only from inside the folders it may come from") {
+    TempDir t;
+    const fs::path projects = t.path / "projects";
+    write(projects / "game" / "src" / "game.bas", "10 REM GAME\n");
+    write(projects / "graphlib" / "graphics.bas", "10 REM LIB\n");
+    write(t.path / "outside" / "private.bas", "10 REM PRIVATE\n");
+    const std::vector<fs::path> roots = {projects};
+    const fs::path game = projects / "game";
+    CHECK(project::readProgramFileIn(game / "../graphlib/graphics.bas", roots) == std::string("10 REM LIB\n"));
+    CHECK(project::readProgramFileIn(game / "src/game.bas", roots) == std::string("10 REM GAME\n"));
+    // Out of the folder by .. or by an absolute path.
+    CHECK_FALSE(project::readProgramFileIn(game / "../../outside/private.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(t.path / "outside" / "private.bas", roots));
+    // No folder to read from, no file.
+    CHECK_FALSE(project::readProgramFileIn(projects / "graphlib" / "graphics.bas", {}));
+    // A name that only starts like the folder's is another folder.
+    write(t.path / "projects-old" / "old.bas", "10 REM OLD\n");
+    CHECK_FALSE(project::readProgramFileIn(t.path / "projects-old" / "old.bas", roots));
+  }
+
+  TEST_CASE("a link inside the folder to a file outside it is not read") {
+    TempDir t;
+    const fs::path projects = t.path / "projects";
+    write(projects / "game" / "src" / "game.bas", "10 REM GAME\n");
+    write(t.path / "outside" / "private.bas", "10 REM PRIVATE\n");
+    std::error_code ec;
+    fs::create_symlink(t.path / "outside" / "private.bas", projects / "game" / "link.bas", ec);
+    // A system that makes no links here has nothing to check.
+    if (!ec) CHECK_FALSE(project::readProgramFileIn(projects / "game" / "link.bas", {projects}));
+  }
+
+  // The size is not trusted to stay what it was when it was asked.
+  TEST_CASE("a program file's text is never more than a slot holds") {
+    TempDir t;
+    write(t.path / "edge.bas", std::string(65535, 'X'));
+    write(t.path / "over.bas", std::string(65536, 'X'));
+    const auto edge = project::readProgramFile(t.path / "edge.bas");
+    REQUIRE(edge);
+    CHECK(edge->size() == 65535);
+    CHECK_FALSE(project::readProgramFile(t.path / "over.bas"));
+  }
+
   TEST_CASE("the default libraries folder is libraries in the projects folder, and nothing without one") {
     CHECK(project::defaultLibraries("/home/me/projects") == fs::path("/home/me/projects") / "libraries");
     CHECK(project::defaultLibraries({}).empty());
