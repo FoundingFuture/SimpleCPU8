@@ -28,6 +28,29 @@
 #define HEAPMAX  3072
 #define LINEMAX  80
 
+/* The program store holds up to FILEMAX files in the one PROGMAX buffer.
+ * A table at its head names them, and each file's lines follow as one
+ * block. docs/basic-system-page.md has the layout, and edit.c keeps it.
+ *
+ * A table entry is a name of up to 16 characters and a zero, then the
+ * offset of the file's first record as a word. An offset of 0 is a file
+ * a line names that is not loaded yet.
+ */
+#define FILEMAX  8
+#define FNAME    17
+#define FT_ENTRY 19
+#define FT_SIZE  154
+#define FT_AT(f) (2 + (f) * FT_ENTRY)
+
+/* A stored line: the file's index, the line number as a word, the
+ * record's length, the text and a zero. A record numbered 0 ends its
+ * file's block, and it is R_END bytes.
+ */
+#define R_NUM    1
+#define R_LEN    3
+#define R_TEXT   4
+#define R_END    4
+
 /* A variable is a letter and an optional digit: A, or A0 through A9. */
 #define NVARS    286
 #define NSTRS    26
@@ -90,6 +113,8 @@ extern unsigned char lx_raw;
  * for every other token. A stored line holds a keyword as that byte.
  */
 extern unsigned char lx_kw;
+/* The file's index, when the token is a stored jump target. */
+extern unsigned char lx_file;
 
 #define T_END    0
 #define T_NUM    1
@@ -97,6 +122,8 @@ extern unsigned char lx_kw;
 #define T_STR    3
 #define T_PUNCT  4
 #define T_KEY    5
+/* A stored jump target: lx_num is its line and lx_file its file. */
+#define T_TARGET 6
 
 /* Fill the keyword table. Once, before anything reads a line. */
 void lx_init(void);
@@ -163,11 +190,39 @@ extern unsigned char prog[PROGMAX];
  */
 extern char ed_line[256];
 
+/* Empty the whole store: one file, MAIN, with no lines. */
+void ed_reset(void);
+/* Empty the current file. The other files stay. */
 void ed_new(void);
+/* A line into the current file, as typed. */
 void ed_store(int line, char *text);
-/* The stored line text as LIST shows it, into o, with its length. */
-unsigned int ed_expand(unsigned char *t, char *o);
+/* The stored line text as LIST shows it, into o, with its length. own is
+ * the file the line is in: a target in another file gets that file's name.
+ */
+unsigned int ed_expand(unsigned char *t, char *o, unsigned char own);
+/* Where a line of the current file is, or where it would go. */
 unsigned int ed_find(int line);
+/* The same in file f. 0 when that file is not loaded. */
+unsigned int ed_find_in(unsigned char f, int line);
+/* The first line of the whole store and the line after one, across the
+ * files in the order their blocks lie. 0 past the last line.
+ */
+unsigned int ed_first(void);
+unsigned int ed_next(unsigned int p);
+/* Where file f's first record is, 0 when it is not loaded. */
+unsigned int ed_file_start(unsigned char f);
+char *ed_file_name(unsigned char f);
+/* The file called name, n characters in any case, or 255. With add set,
+ * a name the table lacks gets an entry that is not loaded yet.
+ */
+unsigned char ed_file_find(char *name, unsigned char n, unsigned char add);
+/* Give file f an empty block at the end of the store. Returns 0 with
+ * E_MEMORY when it does not fit.
+ */
+unsigned char ed_file_open(unsigned char f);
+/* Take file f's block out again. Its name keeps its entry. */
+void ed_file_close(unsigned char f);
+void ed_file_rename(unsigned char f, char *name, unsigned char n);
 void ed_list(unsigned int first, unsigned int last);
 /* Number the lines again from start in steps of step, and change the
  * line numbers after GOTO, GOSUB, THEN and RESTORE to match, and inside
@@ -223,12 +278,25 @@ unsigned char rt_lone_before(unsigned char close);
 #define E_HEXWIDTH 31 /* HEX$'s width is not 1 to 4 */
 #define E_TEXTSIZE 32 /* SETTEXT's width or height is not 4 to 8 */
 #define E_NOFONT  33  /* LOADFONT named no font on the cartridge */
+#define E_NOFILE  34  /* INCLUDE or a file:line names a file that is not there */
+#define E_FILES   35  /* more files than FILEMAX */
 
 /* CALL, JMP and USR take a routine's slot. A name there works only in a
  * project the builder resolved, so a name that is no variable gets its
  * own message. True when that error was raised.
  */
 unsigned char rt_routine_name(void);
+
+/* The INCLUDE lines of every loaded file, so each file a program names
+ * is in the store before its first line runs. store.c.
+ */
+void sto_includes(void);
+/* INCLUDE typed at the prompt: the file named at text, now. */
+void sto_include(char *text);
+/* FILE: make the file named at text current, loading or starting it.
+ * With no name, print the current file's.
+ */
+void sto_file(char *text);
 
 void rt_run(void);
 void rt_line(char *text);
@@ -278,7 +346,9 @@ int var_slot(void);
 #define SYS_COLS        0x22  /* byte: the text grid's columns, from the GPU */
 #define SYS_ROWS        0x23  /* byte: the text grid's rows, from the GPU */
 #define SYS_PROMPT      0x24  /* byte: 1 while the prompt waits for a line */
-/* $24 to $2F are reserved. */
+#define SYS_FILE        0x25  /* word: the index of the file the running line is in */
+#define SYS_EDIT        0x27  /* byte: the index of the current file, which a typed line goes into */
+/* $28 to $2F are reserved. */
 #define SYS_END         0x30  /* the first byte the compiler may use */
 
 /* A word into the page, high byte first, the way DOKE stores one. */
@@ -298,6 +368,9 @@ int var_slot(void);
 #define running   (*(unsigned char *)SYS_RUNNING)
 #define at_prompt (*(unsigned char *)SYS_PROMPT)
 #define pc        (*(unsigned int *)SYS_PC)
+/* The low byte of SYS_FILE. No file's index needs the high one. */
+#define run_file  (*(unsigned char *)(SYS_FILE + 1))
+#define edit_file (*(unsigned char *)SYS_EDIT)
 
 void bang_init(void);
 void bang_run(char *text);
@@ -319,8 +392,10 @@ int dt_addr(int line);
 /* The next DATA value for READ, into a number or a string. */
 int dt_read_int(void);
 unsigned int dt_read_str(void);
-/* READ starts again at the first value, or at the first of line n. */
+/* READ starts again at the first value, or at the first of line n of
+ * file f.
+ */
 void dt_restore(void);
-void dt_restore_line(int line);
+void dt_restore_line(unsigned char f, int line);
 
 #endif

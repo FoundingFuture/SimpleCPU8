@@ -2,15 +2,22 @@
 #include "basic.h"
 #include "keywords.h"
 
-/* A line is two bytes of number, one of record length, then the text. A line
- * number of zero ends the program, and BASIC has no line zero, so nothing is
- * lost by using it as the terminator.
+/* The store is one buffer. A table at its head names up to FILEMAX
+ * files, and each loaded file has a block of records after it. A record
+ * is the file's index, two bytes of line number, one of record length,
+ * then the text. A record numbered zero ends its block, and BASIC has no
+ * line zero, so nothing is lost by using it as the terminator. So the
+ * line after a file's last is never another file's: RUN stops there.
+ *
+ * DESIGN: a new file's block goes at the end of the store. Loading one
+ * moves no record of another, so every offset a program holds stays good.
  *
  * The text holds each keyword as one byte, KW_ in keywords.h, so the lexer
  * reads a keyword in one load. A number holds its value behind a marker,
- * KW_LITERAL, ahead of its digits, so the lexer never converts them. LIST,
- * SAVE and RENUM read the text back with ed_expand. Strings, the rest of a
- * line after REM or a bang, and a DATA line stay as typed.
+ * KW_LITERAL, ahead of its digits, so the lexer never converts them. A
+ * jump target is KW_TARGET, its file's index and its line. LIST, SAVE and
+ * RENUM read the text back with ed_expand. Strings, the rest of a line
+ * after REM, INCLUDE, FILE or a bang, and a DATA line stay as typed.
  * docs/design/basic-speed.md, proposals 2 and 4.
  */
 unsigned char prog[PROGMAX];
@@ -20,40 +27,177 @@ char ed_line[256];
 
 static unsigned int crunch(unsigned char *t, unsigned char *o);
 
-void ed_new(void)
+static unsigned int lineno_at(unsigned int p)
 {
-    prog[0] = 0;
-    prog[1] = 0;
-    prog[2] = 3;
-    prog_len = 3;
+    return (prog[p + R_NUM] << 8) | prog[p + R_NUM + 1];
+}
+
+unsigned int ed_file_start(unsigned char f)
+{
+    return (prog[FT_AT(f) + FNAME] << 8) | prog[FT_AT(f) + FNAME + 1];
+}
+
+static void set_start(unsigned char f, unsigned int at)
+{
+    prog[FT_AT(f) + FNAME] = at >> 8;
+    prog[FT_AT(f) + FNAME + 1] = at;
+}
+
+char *ed_file_name(unsigned char f)
+{
+    return (char *)&prog[FT_AT(f)];
+}
+
+static unsigned char upper_of(unsigned char c)
+{
+    if (c >= 97 && c <= 122) return c - 32;
+    return c;
+}
+
+void ed_file_rename(unsigned char f, char *name, unsigned char n)
+{
+    unsigned char i;
+    char *o;
+    o = ed_file_name(f);
+    if (n > FNAME - 1) n = FNAME - 1;
+    for (i = 0; i < n; i++) o[i] = upper_of(name[i]);
+    for (i = n; i < FNAME; i++) o[i] = 0;
+}
+
+unsigned char ed_file_find(char *name, unsigned char n, unsigned char add)
+{
+    unsigned char f;
+    unsigned char i;
+    char *have;
+    for (f = 0; f < prog[0]; f++) {
+        have = ed_file_name(f);
+        i = 0;
+        while (i < n && have[i] == upper_of(name[i])) i = i + 1;
+        if (i == n && have[n] == 0) return f;
+    }
+    if (!add || n == 0 || n > FNAME - 1) return 255;
+    if (prog[0] >= FILEMAX) { rt_error(E_FILES); return 255; }
+    f = prog[0];
+    prog[0] = f + 1;
+    ed_file_rename(f, name, n);
+    set_start(f, 0);
+    return f;
+}
+
+unsigned char ed_file_open(unsigned char f)
+{
+    unsigned int at;
+    if (ed_file_start(f)) return 1;
+    at = prog_len;
+    if (at + R_END >= PROGMAX) { rt_error(E_MEMORY); return 0; }
+    prog[at] = f;
+    prog[at + R_NUM] = 0;
+    prog[at + R_NUM + 1] = 0;
+    prog[at + R_LEN] = R_END;
+    prog_len = at + R_END;
+    set_start(f, at);
+    return 1;
+}
+
+/* The files whose blocks lie after at move by delta bytes. */
+static void shift_files(unsigned int at, int delta)
+{
+    unsigned char f;
+    unsigned int s;
+    for (f = 0; f < prog[0]; f++) {
+        s = ed_file_start(f);
+        if (s > at) set_start(f, s + delta);
+    }
+}
+
+/* Take len bytes out of the store at p. */
+static void cut_at(unsigned int p, unsigned int len)
+{
+    memmove(&prog[p], &prog[p + len], prog_len - p - len);
+    prog_len = prog_len - len;
+    shift_files(p, 0 - len);
+}
+
+/* Where file f's block ends: on its end record. */
+static unsigned int file_end(unsigned char f)
+{
+    unsigned int p;
+    p = ed_file_start(f);
+    while (lineno_at(p)) p = p + prog[p + R_LEN];
+    return p;
+}
+
+void ed_file_close(unsigned char f)
+{
+    unsigned int s;
+    s = ed_file_start(f);
+    if (s == 0) return;
+    set_start(f, 0);
+    cut_at(s, file_end(f) + R_END - s);
     dt_restore();
 }
 
-static unsigned int lineno_at(unsigned int p)
+void ed_reset(void)
 {
-    return (prog[p] << 8) | prog[p + 1];
+    memset(prog, 0, FT_SIZE);
+    prog[0] = 1;
+    ed_file_rename(0, "MAIN", 4);
+    prog_len = FT_SIZE;
+    ed_file_open(0);
+    edit_file = 0;
+    run_file = 0;
+    dt_restore();
+}
+
+void ed_new(void)
+{
+    unsigned int s;
+    s = ed_file_start(edit_file);
+    cut_at(s, file_end(edit_file) - s);
+    dt_restore();
 }
 
 /* Where a line is, or where it would go. Lines are kept in order, so RUN and
  * LIST are a walk and GOTO is a search that can stop early.
  */
-unsigned int ed_find(int line)
+unsigned int ed_find_in(unsigned char f, int line)
 {
     unsigned int p;
-    p = 0;
+    p = ed_file_start(f);
+    if (p == 0) return 0;
     while (lineno_at(p)) {
         if (lineno_at(p) >= line) return p;
-        p = p + prog[p + 2];
+        p = p + prog[p + R_LEN];
     }
     return p;
 }
 
+unsigned int ed_find(int line)
+{
+    return ed_find_in(edit_file, line);
+}
+
+/* Past the end records at p to the next line, or 0 at the store's end. */
+static unsigned int skip_ends(unsigned int p)
+{
+    while (p < prog_len && lineno_at(p) == 0) p = p + R_END;
+    if (p >= prog_len) return 0;
+    return p;
+}
+
+unsigned int ed_first(void)
+{
+    return skip_ends(FT_SIZE);
+}
+
+unsigned int ed_next(unsigned int p)
+{
+    return skip_ends(p + prog[p + R_LEN]);
+}
+
 static void remove_at(unsigned int p)
 {
-    unsigned int len;
-    len = prog[p + 2];
-    memmove(&prog[p], &prog[p + len], prog_len - p - len);
-    prog_len = prog_len - len;
+    cut_at(p, prog[p + R_LEN]);
 }
 
 static void keywords_up(unsigned char *t);
@@ -79,21 +223,24 @@ void ed_store(int line, char *text)
     if (n == 0) return;
     if (n > 250) { rt_error(E_LINELONG); return; }
     n = crunch((unsigned char *)text, (unsigned char *)ed_line);
-    rec = n + 4;
+    if (err) return;
+    rec = n + R_TEXT + 1;
     if (prog_len + rec >= PROGMAX) { rt_error(E_MEMORY); return; }
 
     memmove(&prog[p + rec], &prog[p], prog_len - p);
-    prog[p] = line >> 8;
-    prog[p + 1] = line;
-    prog[p + 2] = rec;
-    for (i = 0; i <= n; i++) prog[p + 3 + i] = ed_line[i];
+    shift_files(p, rec);
+    prog[p] = edit_file;
+    prog[p + R_NUM] = line >> 8;
+    prog[p + R_NUM + 1] = line;
+    prog[p + R_LEN] = rec;
+    for (i = 0; i <= n; i++) prog[p + R_TEXT + i] = ed_line[i];
     prog_len = prog_len + rec;
     dt_restore();
 }
 
-/* LIST shows the lines numbered from first to last, both included. The
- * walk starts at the first line not below first and stops at the first
- * line past last, since lines are in order.
+/* LIST shows the current file's lines numbered from first to last, both
+ * included. The walk starts at the first line not below first and stops
+ * at the first line past last, since lines are in order.
  */
 void ed_list(unsigned int first, unsigned int last)
 {
@@ -103,23 +250,17 @@ void ed_list(unsigned int first, unsigned int last)
     while (lineno_at(p) && lineno_at(p) <= last) {
         term_putn(lineno_at(p));
         term_putc(32);
-        ed_expand(&prog[p + 3], ed_line);
+        ed_expand(&prog[p + R_TEXT], ed_line, edit_file);
         i = 0;
         while (ed_line[i]) { term_putc(ed_line[i]); i = i + 1; }
         term_nl();
-        p = p + prog[p + 2];
+        p = p + prog[p + R_LEN];
     }
 }
 
 /* ---- RENUM ---- */
 
 static char renum_buf[256];
-
-static unsigned char upper_of(unsigned char c)
-{
-    if (c >= 97 && c <= 122) return c - 32;
-    return c;
-}
 
 static unsigned char is_letter(unsigned char c)
 {
@@ -240,13 +381,79 @@ static unsigned int lit_end(unsigned char *t, unsigned int i)
     return i;
 }
 
-/* How many numbers the last crunch_pass met. */
+/* How many numbers and jump targets the last crunch_pass met. */
 static unsigned char lit_count;
+
+/* crunch_pass's place in the typed text and in the stored line, which
+ * crunch_target moves on.
+ */
+static unsigned int cr_i;
+static unsigned int cr_n;
+
+/* After GOTO, GOSUB, THEN or RESTORE, with cr_i on the text after the
+ * word: a line number, or a file's name, a colon and a line number. It
+ * becomes KW_TARGET, the file's index and the line. A bare number names
+ * the file the line is stored into. A number is a target only when the
+ * end of the line or a colon follows it, so GOTO 10 * N stays an
+ * expression. After THEN a number is always a line.
+ *
+ * A name the table lacks gets an entry here, not loaded, so the index
+ * stands when the file comes in at RUN. A target past `marks` stays text,
+ * which the statements still read.
+ */
+static void crunch_target(unsigned char *t, unsigned char *o, unsigned char marks, unsigned char then)
+{
+    unsigned int q;
+    unsigned int s;
+    unsigned int e;
+    unsigned int v;
+    unsigned char f;
+    unsigned char named;
+    q = cr_i;
+    while (t[q] == 32) q = q + 1;
+    s = q;
+    named = 0;
+    if (is_letter(t[q])) {
+        while (is_letter(t[q]) || is_digit(t[q])) q = q + 1;
+        if (t[q] != 58 || !is_digit(t[q + 1]) || q - s > FNAME - 1) return;
+        named = 1;
+        q = q + 1;
+    }
+    if (!is_digit(t[q])) return;
+    e = q;
+    v = 0;
+    while (is_digit(t[e])) { v = v * 10 + (t[e] - 48); e = e + 1; }
+    if (!named && !then) {
+        q = e;
+        while (t[q] == 32) q = q + 1;
+        if (t[q] != 0 && t[q] != 58) return;
+    }
+    lit_count = lit_count + 1;
+    f = edit_file;
+    if (lit_count <= marks && named) {
+        q = s;
+        while (t[q] != 58) q = q + 1;
+        f = ed_file_find((char *)&t[s], q - s, 1);
+    }
+    if (lit_count > marks || f == 255) {
+        /* As typed, name and all: the name is not a keyword here. */
+        while (cr_i < e) { o[cr_n] = t[cr_i]; cr_n = cr_n + 1; cr_i = cr_i + 1; }
+        return;
+    }
+    while (cr_i < s) { o[cr_n] = 32; cr_n = cr_n + 1; cr_i = cr_i + 1; }
+    o[cr_n] = KW_TARGET;
+    o[cr_n + 1] = f;
+    o[cr_n + 2] = v >> 8;
+    o[cr_n + 3] = v;
+    cr_n = cr_n + 4;
+    cr_i = e;
+}
 
 /* The typed text t as a stored line at o, with its length returned. The
  * walk is keywords_up's, and a keyword it would put in capitals becomes
- * its byte. The first marks numbers get their value behind KW_LITERAL.
- * A DATA line stays text, which data.c reads as it always has.
+ * its byte. The first marks numbers and jump targets get their value
+ * behind KW_LITERAL or KW_TARGET. A DATA line stays text, which data.c
+ * reads as it always has.
  */
 static unsigned int crunch_pass(unsigned char *t, unsigned char *o, unsigned char marks)
 {
@@ -295,8 +502,19 @@ static unsigned int crunch_pass(unsigned char *t, unsigned char *o, unsigned cha
                 o[n] = k;
                 n = n + 1;
                 i = j;
-                /* The rest of a REM line is not BASIC. */
-                if (k == KW_REM) j = i + 250;
+                /* The rest of a REM line is not BASIC, and a file's name
+                 * after INCLUDE or FILE is no keyword.
+                 */
+                if (k == KW_REM || k == KW_INCLUDE || k == KW_FILE) j = i + 250;
+                if (k == KW_GOTO || k == KW_GOSUB || k == KW_THEN || k == KW_RESTORE) {
+                    cr_i = i;
+                    cr_n = n;
+                    crunch_target(t, o, marks, k == KW_THEN);
+                    if (err) return n;
+                    i = cr_i;
+                    n = cr_n;
+                    j = i;
+                }
             }
         } else if (t[i] == 33) {
             j = i + 250;
@@ -311,9 +529,10 @@ static unsigned int crunch_pass(unsigned char *t, unsigned char *o, unsigned cha
  * crunchLine in program.cpp is the IDE's copy of this rule, and a test
  * holds the two to one result.
  *
- * DESIGN: a number's value costs 3 bytes, and a stored line holds 250 at
- * most. The first numbers of the line get their value while the line
- * fits. A number past that stays digits, which the lexer still reads.
+ * DESIGN: a number's value costs 3 bytes and a target at most 3 more than
+ * its digits, and a stored line holds 250 at most. The first numbers and
+ * targets of the line get their marker while the line fits. One past
+ * that stays text, which the lexer and the statements still read.
  */
 static unsigned int crunch(unsigned char *t, unsigned char *o)
 {
@@ -326,18 +545,40 @@ static unsigned int crunch(unsigned char *t, unsigned char *o)
     return crunch_pass(t, o, marks);
 }
 
-unsigned int ed_expand(unsigned char *t, char *o)
+/* ed_expand's place in its answer. A line that would pass 250 characters
+ * is cut there, since ed_line holds 256.
+ */
+static char *ex_o;
+static unsigned int ex_n;
+
+static void ex_put(unsigned char c)
+{
+    if (ex_n >= 250) return;
+    ex_o[ex_n] = c;
+    ex_n = ex_n + 1;
+}
+
+static void ex_number(unsigned int v)
+{
+    unsigned char digits[6];
+    unsigned char d;
+    d = 0;
+    do { digits[d] = 48 + (v % 10); v = v / 10; d = d + 1; } while (v);
+    while (d) { d = d - 1; ex_put(digits[d]); }
+}
+
+unsigned int ed_expand(unsigned char *t, char *o, unsigned char own)
 {
     unsigned int i;
-    unsigned int n;
     unsigned char c;
     char *w;
     i = 0;
-    n = 0;
+    ex_o = o;
+    ex_n = 0;
     if (data_line(t)) {
-        while (t[i]) { o[n] = t[i]; n = n + 1; i = i + 1; }
-        o[n] = 0;
-        return n;
+        while (t[i]) { ex_put(t[i]); i = i + 1; }
+        o[ex_n] = 0;
+        return ex_n;
     }
     while (t[i]) {
         c = t[i];
@@ -349,23 +590,35 @@ unsigned int ed_expand(unsigned char *t, char *o)
             i = i + 2;
             continue;
         }
+        /* A jump target: the file's name and a colon when the file is
+         * another one, then the line.
+         */
+        if (c == KW_TARGET) {
+            if (t[i] != own) {
+                w = ed_file_name(t[i]);
+                while (*w) { ex_put(*w); w = w + 1; }
+                ex_put(58);
+            }
+            ex_number((t[i + 1] << 8) | t[i + 2]);
+            i = i + 3;
+            continue;
+        }
         if (c >= KW_FIRST) {
             w = kw_text(c);
-            while (*w != 32) { o[n] = *w; n = n + 1; w = w + 1; }
-            if (c == KW_REM) c = 33;
+            while (*w != 32) { ex_put(*w); w = w + 1; }
+            if (c == KW_REM || c == KW_INCLUDE || c == KW_FILE) c = 33;
         } else {
-            o[n] = c;
-            n = n + 1;
+            ex_put(c);
         }
         if (c == 34) {
-            while (t[i] && t[i] != 34) { o[n] = t[i]; n = n + 1; i = i + 1; }
-            if (t[i]) { o[n] = 34; n = n + 1; i = i + 1; }
+            while (t[i] && t[i] != 34) { ex_put(t[i]); i = i + 1; }
+            if (t[i]) { ex_put(34); i = i + 1; }
         } else if (c == 33) {
-            while (t[i]) { o[n] = t[i]; n = n + 1; i = i + 1; }
+            while (t[i]) { ex_put(t[i]); i = i + 1; }
         }
     }
-    o[n] = 0;
-    return n;
+    o[ex_n] = 0;
+    return ex_n;
 }
 
 /* The number line `old` gets, or 0 when there is no such line. */
@@ -373,14 +626,47 @@ static unsigned int renum_of(unsigned int old, unsigned int start, unsigned int 
 {
     unsigned int p;
     unsigned int n;
-    p = 0;
+    p = ed_file_start(edit_file);
     n = start;
     while (lineno_at(p)) {
         if (lineno_at(p) == old) return n;
         n = n + step;
-        p = p + prog[p + 2];
+        p = p + prog[p + R_LEN];
     }
     return 0;
+}
+
+/* The targets in the record at p that name a line of the current file,
+ * given their new numbers. A target keeps its size, so nothing moves.
+ * The lines of the other files are changed this way.
+ */
+static void renum_targets(unsigned int p, unsigned int start, unsigned int step)
+{
+    unsigned char *t;
+    unsigned int i;
+    unsigned int nn;
+    unsigned char c;
+    t = &prog[p + R_TEXT];
+    if (data_line(t)) return;
+    i = 0;
+    while (t[i]) {
+        c = t[i];
+        if (c == KW_LITERAL) { i = i + 3; continue; }
+        if (c == KW_TARGET) {
+            if (t[i + 1] == edit_file) {
+                nn = renum_of((t[i + 2] << 8) | t[i + 3], start, step);
+                if (nn) { t[i + 2] = nn >> 8; t[i + 3] = nn; }
+            }
+            i = i + 4;
+            continue;
+        }
+        if (c == KW_REM || c == KW_INCLUDE || c == KW_FILE || c == 33) return;
+        i = i + 1;
+        if (c == 34) {
+            while (t[i] && t[i] != 34) i = i + 1;
+            if (t[i]) i = i + 1;
+        }
+    }
 }
 
 /* The text of the line at p with its references renumbered, into
@@ -405,7 +691,7 @@ static unsigned int renum_text(unsigned int p, unsigned int start, unsigned int 
     unsigned char dp;
     unsigned int k;
     /* The words as text, so the scan below reads what LIST shows. */
-    ed_expand(&prog[p + 3], ed_line);
+    ed_expand(&prog[p + R_TEXT], ed_line, edit_file);
     src = (unsigned char *)ed_line;
     i = 0;
     o = 0;
@@ -472,17 +758,19 @@ static unsigned int renum_text(unsigned int p, unsigned int start, unsigned int 
 
 void ed_renum(unsigned int start, unsigned int step)
 {
+    unsigned int first;
     unsigned int p;
     unsigned int n;
     unsigned int len;
     unsigned int total;
 
+    first = ed_file_start(edit_file);
     dt_restore();
     /* The last number must fit: stop before any addition passes 65535. */
-    p = 0;
+    p = first;
     n = start;
     while (lineno_at(p)) {
-        p = p + prog[p + 2];
+        p = p + prog[p + R_LEN];
         if (lineno_at(p)) {
             if (n > 65535 - step) { rt_error(E_RENUM); return; }
             n = n + step;
@@ -491,34 +779,42 @@ void ed_renum(unsigned int start, unsigned int step)
     /* Measure first, so a line or the program that would grow too long
      * stops RENUM before anything has changed.
      */
-    p = 0;
+    p = first;
     total = prog_len;
     while (lineno_at(p)) {
         len = renum_text(p, start, step);
         if (len > 250) { rt_error(E_LINELONG); return; }
         len = crunch((unsigned char *)renum_buf, (unsigned char *)ed_line);
-        total = total + len + 4 - prog[p + 2];
+        total = total + len + R_TEXT + 1 - prog[p + R_LEN];
         if (total >= PROGMAX) { rt_error(E_MEMORY); return; }
-        p = p + prog[p + 2];
+        p = p + prog[p + R_LEN];
     }
-    /* The references, while the lines still have their old numbers. The
-     * text is stored again as a typed line is.
+    /* The other files' targets into this one, while its lines still have
+     * their old numbers.
      */
-    p = 0;
+    p = ed_first();
+    while (p) {
+        if (prog[p] != edit_file) renum_targets(p, start, step);
+        p = ed_next(p);
+    }
+    /* This file's own references. The text is stored again as a typed
+     * line is, and a line stored again moves the ones after it.
+     */
+    p = ed_file_start(edit_file);
     while (lineno_at(p)) {
         renum_text(p, start, step);
         len = crunch((unsigned char *)renum_buf, (unsigned char *)ed_line);
-        if (len + 4 != prog[p + 2]) ed_store(lineno_at(p), renum_buf);
-        else memcpy(&prog[p + 3], ed_line, len);
-        p = p + prog[p + 2];
+        if (len + R_TEXT + 1 != prog[p + R_LEN]) ed_store(lineno_at(p), renum_buf);
+        else memcpy(&prog[p + R_TEXT], ed_line, len);
+        p = p + prog[p + R_LEN];
     }
     /* Then the numbers themselves. */
-    p = 0;
+    p = ed_file_start(edit_file);
     n = start;
     while (lineno_at(p)) {
-        prog[p] = n >> 8;
-        prog[p + 1] = n;
+        prog[p + R_NUM] = n >> 8;
+        prog[p + R_NUM + 1] = n;
         n = n + step;
-        p = p + prog[p + 2];
+        p = p + prog[p + R_LEN];
     }
 }

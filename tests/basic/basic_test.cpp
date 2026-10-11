@@ -171,17 +171,35 @@ int sysWord(const Session& s, uint16_t at) {
   return (s.m->ram[at] << 8) | s.m->ram[at + 1];
 }
 
-// The offset in the program of line n's record, or -1.
-int lineOffset(const Session& s, int n) {
+// The offset in the store of file f's first record, from the file table
+// at the store's head. 0 for a file that is not loaded.
+int fileStart(const Session& s, int f = 0) {
+  const auto& ram = s.m->ram;
+  const size_t entry = static_cast<size_t>(sysWord(s, basic::SYS_PROG)) + 2 + static_cast<size_t>(f) * basic::FILE_ENTRY;
+  return (ram[entry + basic::FILE_NAME] << 8) | ram[entry + basic::FILE_NAME + 1];
+}
+
+// The offset in the store of line n's record in file f, or -1. A record
+// is the file's index, the line number, the record's length and the text.
+int lineOffset(const Session& s, int n, int f = 0) {
   const auto& ram = s.m->ram;
   const size_t prog = static_cast<size_t>(sysWord(s, basic::SYS_PROG));
-  size_t p = 0;
+  size_t p = static_cast<size_t>(fileStart(s, f));
+  if (p == 0) return -1;
   while (true) {
-    const int line = (ram[prog + p] << 8) | ram[prog + p + 1];
+    const int line = (ram[prog + p + 1] << 8) | ram[prog + p + 2];
     if (line == 0) return -1;
     if (line == n) return static_cast<int>(p);
-    p += ram[prog + p + 2];
+    p += ram[prog + p + 3];
   }
+}
+
+// The main file's records of a store, without the table before them and
+// the record that ends them. Two stores that hold the same program under
+// two names agree on these.
+std::vector<uint8_t> mainRecords(std::span<const uint8_t> store) {
+  const basic::Store read = basic::readStore(store);
+  return read.files.empty() ? std::vector<uint8_t>{} : read.files.front().lines;
 }
 
 // Where the program ends in memory, which is where its data area starts.
@@ -1454,8 +1472,8 @@ TEST_SUITE("the system page") {
     CHECK(prog > 0x20);
     CHECK(len > 0);
     type(*s, "NEW");
-    // An empty program is its three byte end marker.
-    CHECK_EQ((s->m->ram[10] << 8) | s->m->ram[11], 3);
+    // An empty program is the file table and the main file's end record.
+    CHECK_EQ((s->m->ram[10] << 8) | s->m->ram[11], static_cast<int>(basic::EMPTY_PROGRAM));
   }
 
   TEST_CASE("the variables are reachable through the pointer at 12") {
@@ -1530,7 +1548,15 @@ TEST_SUITE("basic program codec") {
   TEST_CASE("encode sorts, replaces, deletes and skips unnumbered lines") {
     const std::vector<uint8_t> p = basic::encodeProgram("  20 B\r\nnot a line\n10 A\n20 C\n30 D\n30\n");
     CHECK(basic::decodeProgram(p) == "10 A\n20 C\n");
-    CHECK(p == std::vector<uint8_t>{0, 10, 5, 'A', 0, 0, 20, 5, 'C', 0, 0, 0, 3});
+    // Each record: the file's index, the number, the length, the text.
+    CHECK(mainRecords(p) == std::vector<uint8_t>{0, 0, 10, 6, 'A', 0, 0, 0, 20, 6, 'C', 0});
+    // The table names the one file and says where its records start. The
+    // record numbered zero ends them.
+    REQUIRE(p.size() == basic::EMPTY_PROGRAM + 12);
+    CHECK(p[0] == 1);
+    CHECK(std::string(p.begin() + 2, p.begin() + 6) == "MAIN");
+    CHECK(((p[2 + basic::FILE_NAME] << 8) | p[3 + basic::FILE_NAME]) == static_cast<int>(basic::TABLE_SIZE));
+    CHECK(std::vector<uint8_t>(p.end() - 4, p.end()) == std::vector<uint8_t>{0, 0, 0, 4});
   }
   TEST_CASE("a program that does not fit is cut at a whole line") {
     std::string text;
@@ -1584,7 +1610,7 @@ TEST_SUITE("basic program codec") {
   }
   TEST_CASE("a line already in capitals encodes to the same bytes") {
     const std::vector<uint8_t> p = basic::encodeProgram("10 PRINT \"x\"\n");
-    CHECK(p == std::vector<uint8_t>{0, 10, 9, KW_PRINT, ' ', '"', 'x', '"', 0, 0, 0, 3});
+    CHECK(mainRecords(p) == std::vector<uint8_t>{0, 0, 10, 10, KW_PRINT, ' ', '"', 'x', '"', 0});
     CHECK(basic::encodeProgram("10 print \"x\"\n") == p);
   }
   TEST_CASE("a lowercase document keeps its spelling where the machine did not change it") {
@@ -1711,11 +1737,12 @@ TEST_SUITE("DATA, READ and RESTORE") {
   TEST_CASE("DATA that does not fit after the program stops RUN") {
     auto s = boot();
     settle(*s);
-    // 65 remarks of 246 bytes, one of 99 and a DATA line of 248 leave 44
-    // bytes free, and the line holds 120 values.
+    // The table and the end record take 158 bytes. 64 remarks of 247
+    // bytes, one of 125 and a DATA line of 249 leave 44 bytes free, and
+    // the line holds 120 values.
     std::string program;
-    for (int n = 1; n <= 65; n++) program += std::to_string(n) + " REM " + std::string(240, 'X') + "\n";
-    program += "66 REM " + std::string(93, 'X') + "\n";
+    for (int n = 1; n <= 64; n++) program += std::to_string(n) + " REM " + std::string(240, 'X') + "\n";
+    program += "66 REM " + std::string(118, 'X') + "\n";
     program += "1000 DATA 1";
     for (int i = 1; i < 120; i++) program += ",1";
     program += "\n";
@@ -1907,8 +1934,8 @@ TEST_SUITE("DATA, READ and RESTORE") {
     type(*s, "100 DATA 1,2");
     CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
     type(*s, "READ A");
-    // Past "DATA 1," in line 100's text, which starts 3 bytes into its record.
-    CHECK_EQ(sysWord(*s, basic::SYS_READ), lineOffset(*s, 100) + 3 + 7);
+    // Past "DATA 1," in line 100's text, which starts 4 bytes into its record.
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), lineOffset(*s, 100) + 4 + 7);
     type(*s, "RESTORE");
     CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
     type(*s, "READ A");
@@ -1944,6 +1971,14 @@ TEST_SUITE("DATA, READ and RESTORE") {
     type(*s, "100 DATA 1,2");
     type(*s, "READ A");
     CHECK_EQ(intVar(*s, 'A'), 1);
+    // The main file has a line, so TABLE comes in beside it. READ starts
+    // again at the store's first value, which is the main file's.
+    type(*s, "!LOAD \"TABLE\"");
+    CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
+    type(*s, "READ B");
+    CHECK_EQ(intVar(*s, 'B'), 1);
+    // Into an empty store TABLE is the main file, and its value the first.
+    type(*s, "NEW ALL");
     type(*s, "!LOAD \"TABLE\"");
     CHECK_EQ(sysWord(*s, basic::SYS_READ), 0);
     type(*s, "READ B");
@@ -2568,11 +2603,13 @@ TEST_SUITE("basic speed") {
         {KW_DOKE, "DOKE"},
         {KW_DRAW, "DRAW"},
         {KW_END, "END"},
+        {KW_FILE, "FILE"},
         {KW_FOR, "FOR"},
         {KW_GOSUB, "GOSUB"},
         {KW_GOTO, "GOTO"},
         {KW_HEXS, "HEX$"},
         {KW_IF, "IF"},
+        {KW_INCLUDE, "INCLUDE"},
         {KW_INK, "INK"},
         {KW_INKEYS, "INKEY$"},
         {KW_INPUT, "INPUT"},
@@ -2714,7 +2751,7 @@ TEST_SUITE("basic speed") {
     type(*s, "NEW");
     type(*s, "!LOAD \"KW\"", 40000000);
     CHECK(listed(*s) == want);
-    CHECK(storedProgram(*s) == basic::encodeProgram(program));
+    CHECK(mainRecords(storedProgram(*s)) == mainRecords(basic::encodeProgram(program)));
   }
 
   TEST_CASE("the machine and the IDE store a line to the same bytes") {
@@ -2797,8 +2834,9 @@ TEST_SUITE("basic speed") {
     const std::vector<std::pair<std::string, std::string>> before = {
         {"10 TO = 5",
          "? TO IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
+        // LOAD is a statement now, the bang's command without the bang.
         {"10 LOAD \"X\"",
-         "? UNKNOWN WORD LOAD IN LINE 10 READY >"},
+         "? NO PROGRAM CALLED X ON THE CARTRIDGE IN LINE 10 READY >"},
         {"10 PRINT 1 THEN",
          "1? THEN IS NOT A VARIABLE: A VARIABLE IS ONE LETTER, OR A LETTER AND A DIGIT IN LINE 10 READY >"},
         {"10 INPUT PRINT",
@@ -2889,7 +2927,7 @@ TEST_SUITE("basic speed") {
     type(*s, "NEW");
     type(*s, "!LOAD \"NUM\"", 40000000);
     CHECK(listed(*s) == lines);
-    CHECK(storedProgram(*s) == basic::encodeProgram(program));
+    CHECK(mainRecords(storedProgram(*s)) == mainRecords(basic::encodeProgram(program)));
     CHECK_EQ(basic::decodeProgram(storedProgram(*s)), program);
     // The IDE's reading of the machine's memory, line by line.
     const auto back = basic::programLines(storedProgram(*s));
@@ -2911,7 +2949,8 @@ TEST_SUITE("basic speed") {
     CHECK(storedProgram(*s) == basic::encodeProgram(program));
     // A number keeps its value behind the marker: 61440 is $F000.
     const auto p = basic::encodeProgram("10 A=61440\n");
-    CHECK(p == std::vector<uint8_t>{0, 10, 14, 'A', '=', KW_LITERAL, 0xF0, 0x00, '6', '1', '4', '4', '0', 0, 0, 0, 3});
+    CHECK(mainRecords(p) ==
+          std::vector<uint8_t>{0, 0, 10, 15, 'A', '=', KW_LITERAL, 0xF0, 0x00, '6', '1', '4', '4', '0', 0});
   }
 
   TEST_CASE("a number runs as its value in every written form") {
@@ -2953,8 +2992,8 @@ TEST_SUITE("basic speed") {
     REQUIRE(s->slots.size() == 2);
     CHECK_EQ(s->slots[1].second, line + "\n");
     const std::vector<uint8_t> stored = storedProgram(*s);
-    CHECK(stored.size() <= 250 + 4 + 3);
-    CHECK(stored == basic::encodeProgram(line + "\n"));
+    CHECK(mainRecords(stored).size() <= 250 + 5);
+    CHECK(mainRecords(stored) == mainRecords(basic::encodeProgram(line + "\n")));
     type(*s, "RUN", 40000000);
     CHECK(has(text(*s), ">RUN\n7\nREADY"));
   }
@@ -3157,5 +3196,495 @@ TEST_SUITE("CHECK") {
     type(*s, "CHECK");
     type(*s, "RUN", 8000000);
     CHECK(has(after(text(*s), ">RUN\n"), "42"));
+  }
+}
+
+// BASIC across files. A program names the files it uses with INCLUDE and
+// calls into them with GOSUB NAME:line. The store keeps every file's
+// lines, each with its file's index, behind a table of the files' names.
+TEST_SUITE("files") {
+  namespace {
+
+  const char* const GRAPHICS = "1000 PRINT \"IN LIB\"\n1010 RETURN\n";
+
+  // A machine at its prompt with slots on the cartridge, name then text.
+  std::unique_ptr<Session> bootWith(const std::vector<std::pair<std::string, std::string>>& slots) {
+    auto s = boot();
+    for (const auto& slot : slots) s->slots.push_back(slot);
+    settle(*s);
+    return s;
+  }
+
+  // The store's bytes in the interpreter's memory.
+  std::vector<uint8_t> storeOf(const Session& s) {
+    const auto& ram = s.m->ram;
+    const auto at = static_cast<std::ptrdiff_t>(sysWord(s, basic::SYS_PROG));
+    return std::vector<uint8_t>(ram.begin() + at, ram.begin() + at + sysWord(s, basic::SYS_PROG_LEN));
+  }
+
+  // The rows LIST prints, up to the READY under them.
+  std::vector<std::string> listing(Session& s) {
+    type(s, "CLS");
+    type(s, "LIST", 20000000);
+    std::vector<std::string> out;
+    bool in = false;
+    for (const std::string& row : screen(s)) {
+      if (!in) {
+        in = row.size() >= 5 && row.substr(row.size() - 5) == ">LIST";
+        continue;
+      }
+      if (row == "READY") break;
+      out.push_back(row);
+    }
+    return out;
+  }
+
+  // Press one key and let the interpreter act on it.
+  void press(Session& s, char key) {
+    s.pushKey(static_cast<unsigned char>(key), false);
+    s.runBudget(6000000);
+  }
+
+  // The slot called name, or a text that says it is missing.
+  std::string slotText(const Session& s, const std::string& name) {
+    for (const auto& slot : s.slots) {
+      if (slot.first == name) return slot.second;
+    }
+    return "(no slot " + name + ")";
+  }
+
+  }  // namespace
+
+  TEST_CASE("a GOSUB into an included file runs its lines, and RETURN comes back") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "10 INCLUDE GRAPHICS");
+    type(*s, "20 GOSUB GRAPHICS:1000");
+    type(*s, "30 PRINT \"BACK\"");
+    type(*s, "RUN", 20000000);
+    CHECK(has(text(*s), ">RUN\nIN LIB\nBACK\nREADY"));
+    // RUN leaves the main file the current one, with the plain prompt.
+    CHECK_EQ(s->m->ram[basic::SYS_EDIT], 0);
+    CHECK_EQ(screen(*s)[s->m->ram[basic::SYS_ROW]].substr(0, 1), ">");
+  }
+
+  TEST_CASE("an error in the included file is named by file") {
+    auto s = bootWith({{"GRAPHICS", "1000 PRINT 1\n1010 PRINT (\n1020 RETURN\n"}});
+    type(*s, "10 INCLUDE GRAPHICS");
+    type(*s, "20 GOSUB GRAPHICS:1000");
+    type(*s, "RUN", 20000000);
+    CHECK(has(flat(*s), "SYNTAX ERROR IN GRAPHICS:1010: EXPECTED"));
+    CHECK_EQ(sysWord(*s, basic::SYS_ERR_LINE), 1010);
+    // The word at $25 is the index of the file the line is in.
+    CHECK_EQ(sysWord(*s, basic::SYS_FILE), 1);
+  }
+
+  TEST_CASE("an error in the main file keeps its IN LINE, with an included file beside it") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "10 INCLUDE GRAPHICS");
+    type(*s, "20 PRINT (");
+    type(*s, "RUN", 20000000);
+    CHECK(has(flat(*s), "SYNTAX ERROR IN LINE 20: EXPECTED"));
+    CHECK_EQ(sysWord(*s, basic::SYS_FILE), 0);
+  }
+
+  TEST_CASE("FILE makes the second file current, and LIST shows that file") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "10 INCLUDE GRAPHICS");
+    type(*s, "20 GOSUB GRAPHICS:1000");
+    type(*s, "RUN", 20000000);
+    type(*s, "FILE GRAPHICS");
+    CHECK_EQ(s->m->ram[basic::SYS_EDIT], 1);
+    CHECK(listing(*s) == std::vector<std::string>{"1000 PRINT \"IN LIB\"", "1010 RETURN"});
+    // The prompt names a file that is not the main one, and FILE alone
+    // prints the current file's name.
+    type(*s, "FILE");
+    CHECK(has(text(*s), "GRAPHICS>FILE\nGRAPHICS\n"));
+    // .BAS on the name is allowed and ignored, and so is the case.
+    type(*s, "FILE main.bas");
+    CHECK_EQ(s->m->ram[basic::SYS_EDIT], 0);
+    CHECK(listing(*s) == std::vector<std::string>{"10 INCLUDE GRAPHICS", "20 GOSUB GRAPHICS:1000"});
+  }
+
+  TEST_CASE("a line typed after FILE goes into that file") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "10 PRINT \"MAIN\"");
+    type(*s, "FILE GRAPHICS");
+    type(*s, "1005 PRINT \"MORE\"");
+    CHECK(listing(*s) == std::vector<std::string>{"1000 PRINT \"IN LIB\"", "1005 PRINT \"MORE\"", "1010 RETURN"});
+    type(*s, "FILE MAIN");
+    CHECK(listing(*s) == std::vector<std::string>{"10 PRINT \"MAIN\""});
+  }
+
+  TEST_CASE("FILE with a name found nowhere starts a new empty file") {
+    auto s = bootWith({});
+    type(*s, "10 GOSUB TOOLS:100");
+    type(*s, "FILE TOOLS");
+    CHECK_EQ(s->m->ram[basic::SYS_EDIT], 1);
+    CHECK(listing(*s).empty());
+    type(*s, "100 PRINT \"TOOL\":RETURN");
+    type(*s, "RUN", 20000000);
+    CHECK(has(text(*s), ">RUN\nTOOL\nREADY"));
+    type(*s, "FILE TOOLS");
+    type(*s, "SAVE");
+    // A new slot is written without a question.
+    CHECK_FALSE(has(flat(*s), "OVERWRITE"));
+    CHECK_EQ(slotText(*s, "TOOLS"), "100 PRINT \"TOOL\":RETURN\n");
+  }
+
+  TEST_CASE("SAVE asks before it overwrites: N keeps the slot and Y writes it") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "FILE GRAPHICS");
+    type(*s, "1005 PRINT \"MORE\"");
+    type(*s, "SAVE");
+    CHECK(has(flat(*s), "OVERWRITE GRAPHICS (Y/N)?"));
+    press(*s, 'N');
+    CHECK_EQ(slotText(*s, "GRAPHICS"), GRAPHICS);
+    CHECK_EQ(s->changes, 0);
+    type(*s, "SAVE");
+    press(*s, 'Y');
+    CHECK_EQ(slotText(*s, "GRAPHICS"), "1000 PRINT \"IN LIB\"\n1005 PRINT \"MORE\"\n1010 RETURN\n");
+    CHECK_EQ(s->changes, 1);
+    CHECK_EQ(s->m->ram[basic::SYS_ERR], 0);
+  }
+
+  TEST_CASE("SAVE with a name saves the current file under it, with the same question") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}, {"OLD", "1 REM OLD\n"}});
+    type(*s, "FILE GRAPHICS");
+    type(*s, "!SAVE \"COPY\"");
+    CHECK_FALSE(has(flat(*s), "OVERWRITE"));
+    CHECK_EQ(slotText(*s, "COPY"), GRAPHICS);
+    type(*s, "SAVE \"OLD\"");
+    CHECK(has(flat(*s), "OVERWRITE OLD (Y/N)?"));
+    press(*s, 'y');
+    CHECK_EQ(slotText(*s, "OLD"), GRAPHICS);
+    // The file keeps its own name.
+    type(*s, "FILE");
+    CHECK(has(text(*s), "GRAPHICS>FILE\nGRAPHICS\n"));
+  }
+
+  TEST_CASE("LOAD beside a program brings a file in and makes it current, and RUN runs the main file") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "10 PRINT \"MAIN RUNS\"");
+    type(*s, "LOAD \"GRAPHICS\"");
+    CHECK_EQ(s->m->ram[basic::SYS_EDIT], 1);
+    CHECK(listing(*s) == std::vector<std::string>{"1000 PRINT \"IN LIB\"", "1010 RETURN"});
+    type(*s, "CLS");
+    type(*s, "RUN", 20000000);
+    CHECK(has(text(*s), "MAIN RUNS\nREADY"));
+    CHECK_FALSE(has(text(*s), "IN LIB"));
+    CHECK_EQ(s->m->ram[basic::SYS_EDIT], 0);
+  }
+
+  TEST_CASE("LOAD of a file in the store reads it again from its slot") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "10 PRINT 1");
+    type(*s, "FILE GRAPHICS");
+    type(*s, "1000");
+    CHECK(listing(*s) == std::vector<std::string>{"1010 RETURN"});
+    type(*s, "LOAD \"GRAPHICS\"");
+    CHECK(listing(*s) == std::vector<std::string>{"1000 PRINT \"IN LIB\"", "1010 RETURN"});
+    CHECK_EQ(basic::readStore(storeOf(*s)).files.size(), 2u);
+  }
+
+  TEST_CASE("INCLUDE of a file nobody has is a file not found error on its line") {
+    auto s = bootWith({});
+    type(*s, "10 PRINT 1");
+    type(*s, "20 INCLUDE NOPE");
+    type(*s, "RUN", 20000000);
+    CHECK(has(flat(*s), "? FILE NOT FOUND: NOPE IN LINE 20"));
+    // Nothing ran: the files come in before line 1.
+    CHECK_FALSE(has(text(*s), ">RUN\n1\n"));
+  }
+
+  TEST_CASE("a line of a file that is not loaded is a file not found error") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "10 GOSUB GRAPHICS:1000");
+    type(*s, "RUN", 20000000);
+    CHECK(has(flat(*s), "? FILE NOT FOUND: GRAPHICS IN LINE 10"));
+  }
+
+  TEST_CASE("an included file's own INCLUDE lines run too, and a cycle ends") {
+    auto s = bootWith({{"AA", "10 INCLUDE BB\n20 RETURN\n"}, {"BB", "10 INCLUDE AA\n15 PRINT \"IN BB\"\n20 RETURN\n"}});
+    type(*s, "10 INCLUDE AA");
+    type(*s, "20 GOSUB BB:10");
+    type(*s, "RUN", 20000000);
+    CHECK(has(text(*s), ">RUN\nIN BB\nREADY"));
+    CHECK_EQ(basic::readStore(storeOf(*s)).files.size(), 3u);
+  }
+
+  TEST_CASE("INCLUDE of a file already in the store does nothing") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "10 INCLUDE GRAPHICS");
+    type(*s, "20 INCLUDE GRAPHICS");
+    type(*s, "30 GOSUB GRAPHICS:1000");
+    type(*s, "RUN", 20000000);
+    type(*s, "RUN", 20000000);
+    CHECK(has(text(*s), ">RUN\nIN LIB\nREADY"));
+    CHECK_EQ(basic::readStore(storeOf(*s)).files.size(), 2u);
+  }
+
+  TEST_CASE("INCLUDE typed at the prompt brings the file in now") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "INCLUDE graphics");
+    const basic::Store store = basic::readStore(storeOf(*s));
+    REQUIRE(store.files.size() == 2);
+    CHECK(store.files[1].name == "GRAPHICS");
+    CHECK(store.files[1].loaded);
+    // The main file stays the current one.
+    CHECK_EQ(s->m->ram[basic::SYS_EDIT], 0);
+  }
+
+  TEST_CASE("LIST prints a target's file only when it is another file") {
+    auto s = bootWith({});
+    type(*s, "10 gosub graphics:1000");
+    type(*s, "20 GOTO 0010");
+    type(*s, "30 IF A THEN MAIN:20");
+    type(*s, "40 GOTO 10 * A");
+    CHECK(listing(*s) == std::vector<std::string>{"10 GOSUB GRAPHICS:1000", "20 GOTO 10", "30 IF A THEN 20",
+                                                  "40 GOTO 10 * A"});
+    // Stored as the marker, the file's index and the line: 1000 is $03E8.
+    const std::vector<uint8_t> main = mainRecords(storeOf(*s));
+    const std::vector<uint8_t> want = {0, 0, 10, 11, KW_GOSUB, ' ', KW_TARGET, 1, 0x03, 0xE8, 0};
+    REQUIRE(main.size() > want.size());
+    CHECK(std::vector<uint8_t>(main.begin(), main.begin() + static_cast<std::ptrdiff_t>(want.size())) == want);
+    // The name got an entry in the table that is not loaded yet.
+    const basic::Store store = basic::readStore(storeOf(*s));
+    REQUIRE(store.files.size() == 2);
+    CHECK(store.files[1].name == "GRAPHICS");
+    CHECK_FALSE(store.files[1].loaded);
+  }
+
+  TEST_CASE("the machine and the IDE store a target to the same bytes") {
+    const std::vector<std::string> lines = {"10 INCLUDE graphics", "20 GOSUB graphics:1000", "30 IF A THEN tools:5",
+                                            "40 RESTORE 20", "50 GOTO 10", "60 GOTO A", "70 IF B THEN 20: PRINT 1",
+                                            "80 FOR I=1 TO 3:GOSUB tools:7"};
+    auto s = bootWith({});
+    std::string program;
+    for (const std::string& l : lines) {
+      type(*s, l);
+      program += l + "\n";
+    }
+    basic::FileTable files{{"MAIN"}};
+    const std::vector<uint8_t> ide = basic::encodeLines(program, files, 0);
+    CHECK(mainRecords(storeOf(*s)) == ide);
+    CHECK(basic::readStore(storeOf(*s)).table().names == files.names);
+    CHECK(files.names == std::vector<std::string>{"MAIN", "GRAPHICS", "TOOLS"});
+    // And back to the text LIST prints.
+    CHECK_EQ(basic::decodeLines(ide, files, 0),
+             "10 INCLUDE graphics\n20 GOSUB GRAPHICS:1000\n30 IF A THEN TOOLS:5\n40 RESTORE 20\n50 GOTO 10\n"
+             "60 GOTO A\n70 IF B THEN 20: PRINT 1\n80 FOR I=1 TO 3:GOSUB TOOLS:7\n");
+  }
+
+  TEST_CASE("RENUM of a file renumbers the other files' calls into it") {
+    auto s = bootWith({{"GRAPHICS", "1000 PRINT \"IN LIB\"\n1010 GOTO 1020\n1020 RETURN\n"}});
+    type(*s, "10 INCLUDE GRAPHICS");
+    type(*s, "20 GOSUB GRAPHICS:1000");
+    type(*s, "30 GOTO 20");
+    type(*s, "FILE GRAPHICS");
+    type(*s, "RENUM 100, 5");
+    CHECK(listing(*s) == std::vector<std::string>{"100 PRINT \"IN LIB\"", "105 GOTO 110", "110 RETURN"});
+    type(*s, "FILE MAIN");
+    // The main file's own lines keep their numbers.
+    CHECK(listing(*s) == std::vector<std::string>{"10 INCLUDE GRAPHICS", "20 GOSUB GRAPHICS:100", "30 GOTO 20"});
+    type(*s, "RENUM");
+    CHECK(listing(*s) == std::vector<std::string>{"10 INCLUDE GRAPHICS", "20 GOSUB GRAPHICS:100", "30 GOTO 20"});
+  }
+
+  TEST_CASE("NEW empties the current file and keeps the others, NEW ALL empties the store") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "10 PRINT 1");
+    type(*s, "FILE GRAPHICS");
+    type(*s, "NEW");
+    CHECK(listing(*s).empty());
+    CHECK_EQ(s->m->ram[basic::SYS_EDIT], 1);
+    type(*s, "FILE MAIN");
+    CHECK(listing(*s) == std::vector<std::string>{"10 PRINT 1"});
+    type(*s, "NEW ALL");
+    CHECK_EQ(sysWord(*s, basic::SYS_PROG_LEN), static_cast<int>(basic::EMPTY_PROGRAM));
+    const basic::Store store = basic::readStore(storeOf(*s));
+    REQUIRE(store.files.size() == 1);
+    CHECK(store.files[0].name == "MAIN");
+    CHECK_EQ(s->m->ram[basic::SYS_EDIT], 0);
+  }
+
+  TEST_CASE("the line after a file's last is not another file's: the run ends there") {
+    auto s = bootWith({{"LIB", "100 PRINT \"L\"\n110 RETURN\n200 PRINT \"NO RETURN\"\n"}});
+    type(*s, "10 INCLUDE LIB");
+    // The GOSUB is the main file's last line, and LIB's lines lie after it.
+    type(*s, "20 GOSUB LIB:100");
+    type(*s, "RUN", 20000000);
+    CHECK(has(text(*s), ">RUN\nL\nREADY"));
+    // A routine that runs off its file's end ends the program too.
+    type(*s, "20 GOSUB LIB:200");
+    type(*s, "30 PRINT \"NEVER\"");
+    type(*s, "CLS");
+    type(*s, "RUN", 20000000);
+    CHECK(has(text(*s), ">RUN\nNO RETURN\nREADY"));
+  }
+
+  TEST_CASE("variables, DATA and READ are one set shared by every file") {
+    auto s = bootWith({{"LIB", "100 READ B : A = 5 : RETURN\n200 DATA 9\n"}});
+    type(*s, "10 INCLUDE LIB");
+    type(*s, "20 DATA 1");
+    type(*s, "30 GOSUB LIB:100");
+    type(*s, "40 PRINT A;B");
+    type(*s, "50 RESTORE LIB:200 : READ C : PRINT C");
+    type(*s, "RUN", 20000000);
+    // The main file's DATA comes first, then LIB's.
+    CHECK(has(text(*s), ">RUN\n51\n9\nREADY"));
+  }
+
+  TEST_CASE("a jump into another file is found again each time round") {
+    auto s = bootWith({{"LIB", "100 C = C + 1\n110 RETURN\n200 PRINT \"T\";C\n210 END\n"}});
+    type(*s, "10 INCLUDE LIB");
+    type(*s, "20 I = I + 1");
+    type(*s, "30 GOSUB LIB:100");
+    type(*s, "40 IF I < 4 THEN 20");
+    type(*s, "50 IF C = 4 THEN LIB:200");
+    type(*s, "60 PRINT \"NOT HERE\"");
+    type(*s, "RUN", 20000000);
+    CHECK(has(text(*s), ">RUN\nT4\nREADY"));
+  }
+
+  TEST_CASE("a file that does not fit is the full memory error and leaves no half file") {
+    std::string big;
+    for (int n = 1; n <= 70; n++) big += std::to_string(n) + " REM " + std::string(240, 'X') + "\n";
+    auto s = bootWith({{"BIG", big}});
+    type(*s, "10 INCLUDE BIG");
+    type(*s, "RUN", 80000000);
+    CHECK(has(flat(*s), "THE PROGRAM MEMORY IS FULL: 16384 BYTES AT MOST"));
+    CHECK_EQ(fileStart(*s, 1), 0);
+    // The store is whole: the main file lists and runs.
+    CHECK(listing(*s) == std::vector<std::string>{"10 INCLUDE BIG"});
+  }
+
+  TEST_CASE("CHECK reads the current file, with the files it includes in the store") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "10 INCLUDE GRAPHICS");
+    type(*s, "20 GOSUB GRAPHICS:1000");
+    type(*s, "30 GOSUB GRAPHICS:999");
+    type(*s, "CHECK");
+    CHECK(has(flat(*s), "? THERE IS NO LINE 999 IN LINE 30"));
+    type(*s, "30");
+    type(*s, "CLS");
+    type(*s, "CHECK");
+    CHECK_EQ(s->m->ram[basic::SYS_ERR], 0);
+    CHECK_FALSE(has(text(*s), "IN LIB"));
+  }
+
+  TEST_CASE("a target typed at the prompt names a file too") {
+    auto s = bootWith({{"GRAPHICS", GRAPHICS}});
+    type(*s, "INCLUDE GRAPHICS");
+    // A jump typed at the prompt sets the place and runs nothing.
+    type(*s, "GOTO GRAPHICS:1010");
+    CHECK_EQ(s->m->ram[basic::SYS_ERR], 0);
+    CHECK_EQ(sysWord(*s, basic::SYS_PC), lineOffset(*s, 1010, 1));
+    type(*s, "GOTO NOPE:5");
+    CHECK(has(flat(*s), "? FILE NOT FOUND: NOPE"));
+  }
+}
+
+TEST_SUITE("the store as the IDE reads and writes it") {
+  TEST_CASE("a store with two files reads back as it was written") {
+    basic::Store store;
+    basic::FileTable files{{"GAME", "GRAPHICS"}};
+    store.files.push_back({"GAME", true, basic::encodeLines("10 INCLUDE GRAPHICS\n20 GOSUB GRAPHICS:1000\n", files, 0)});
+    store.files.push_back({"GRAPHICS", true, basic::encodeLines("1000 PRINT 1\n1010 RETURN\n", files, 1)});
+    const std::vector<uint8_t> bytes = basic::writeStore(store);
+    const basic::Store back = basic::readStore(bytes);
+    REQUIRE(back.files.size() == 2);
+    CHECK(back.files[0].name == "GAME");
+    CHECK(back.files[1].name == "GRAPHICS");
+    CHECK(back.files[0].lines == store.files[0].lines);
+    CHECK(back.files[1].lines == store.files[1].lines);
+    CHECK_EQ(basic::decodeLines(back.files[0].lines, back.table(), 0), "10 INCLUDE GRAPHICS\n20 GOSUB GRAPHICS:1000\n");
+    CHECK_EQ(basic::decodeLines(back.files[1].lines, back.table(), 1), "1000 PRINT 1\n1010 RETURN\n");
+    // Every record of a file carries the file's index.
+    CHECK(back.files[1].lines[0] == 1);
+  }
+
+  TEST_CASE("the interpreter runs a store the IDE wrote, both files") {
+    basic::Store store;
+    basic::FileTable files{{"GAME", "GRAPHICS"}};
+    store.files.push_back({"GAME", true, basic::encodeLines("10 GOSUB GRAPHICS:1000\n20 PRINT \"BACK\"\n", files, 0)});
+    store.files.push_back({"GRAPHICS", true, basic::encodeLines("1000 PRINT \"IN LIB\"\n1010 RETURN\n", files, 1)});
+    auto s = boot();
+    settle(*s);
+    basic::storeProgram(s->m->ram, basic::writeStore(store));
+    type(*s, "RUN", 20000000);
+    CHECK(has(text(*s), ">RUN\nIN LIB\nBACK\nREADY"));
+  }
+
+  TEST_CASE("a file's name comes from a document's name or a path") {
+    CHECK_EQ(basic::fileNameOf("graphics.bas"), "GRAPHICS");
+    CHECK_EQ(basic::fileNameOf("../graphlib/Graphics.BAS"), "GRAPHICS");
+    CHECK_EQ(basic::fileNameOf("C:\\libs\\tools.bas"), "TOOLS");
+    CHECK_EQ(basic::fileNameOf("AUTORUN"), "AUTORUN");
+    CHECK_EQ(basic::fileNameOf("averyveryverylongname.bas"), "AVERYVERYVERYLON");
+  }
+
+  TEST_CASE("a line's capitals reach the file's name before a target's colon, and never its size") {
+    CHECK_EQ(basic::canonicalLine("gosub graphics:1000"), "GOSUB GRAPHICS:1000");
+    CHECK_EQ(basic::canonicalLine("if a then tools:5"), "IF a THEN TOOLS:5");
+    // After INCLUDE the rest of the line is a name, not BASIC.
+    CHECK_EQ(basic::canonicalLine("include print"), "INCLUDE print");
+    CHECK_EQ(basic::canonicalLine("goto x:y = 5"), "GOTO x:y = 5");
+  }
+
+  // The IDE's two views of one program, a tab per file: each side's
+  // changes go across, file by file.
+  TEST_CASE("two tabs stay in step with their two files") {
+    auto s = boot();
+    s->slots.emplace_back("GRAPHICS", "1000 PRINT \"IN LIB\"\n1010 RETURN\n");
+    settle(*s);
+    type(*s, "10 INCLUDE GRAPHICS");
+    type(*s, "20 GOSUB GRAPHICS:1000");
+    type(*s, "INCLUDE GRAPHICS");
+    auto storeNow = [&] {
+      const auto& ram = s->m->ram;
+      const auto at = static_cast<std::ptrdiff_t>(sysWord(*s, basic::SYS_PROG));
+      return basic::readStore(std::vector<uint8_t>(ram.begin() + at, ram.begin() + at + sysWord(*s, basic::SYS_PROG_LEN)));
+    };
+    // The two documents as the IDE's tabs hold them, in step so far.
+    std::string game = "10 INCLUDE GRAPHICS\n20 GOSUB GRAPHICS:1000\n";
+    std::string graphics = "1000 PRINT \"IN LIB\"\n1010 RETURN\n";
+    basic::Store store = storeNow();
+    REQUIRE(store.files.size() == 2);
+    basic::FileTable files = store.table();
+    std::vector<uint8_t> gameBase = store.files[0].lines;
+    std::vector<uint8_t> graphicsBase = store.files[1].lines;
+    CHECK(basic::encodeLines(game, files, 0) == gameBase);
+    CHECK(basic::encodeLines(graphics, files, 1) == graphicsBase);
+
+    // A line typed on the machine into the main file, and an edit in the
+    // library's tab.
+    type(*s, "30 PRINT \"TYPED\"");
+    graphics = "1000 PRINT \"EDITED\"\n1010 RETURN\n";
+
+    store = storeNow();
+    files = store.table();
+    const basic::Synced main = basic::syncLines(gameBase, game, store.files[0].lines, files, 0);
+    const basic::Synced lib = basic::syncLines(graphicsBase, graphics, store.files[1].lines, files, 1);
+    CHECK(main.textChanged);
+    CHECK_FALSE(main.storeChanged);
+    CHECK_EQ(main.text, "10 INCLUDE GRAPHICS\n20 GOSUB GRAPHICS:1000\n30 PRINT \"TYPED\"\n");
+    CHECK(lib.storeChanged);
+    CHECK_FALSE(lib.textChanged);
+    store.files[0].lines = main.lines;
+    store.files[1].lines = lib.lines;
+    basic::storeProgram(s->m->ram, basic::writeStore(store));
+    type(*s, "RUN", 20000000);
+    CHECK(has(text(*s), ">RUN\nEDITED\nTYPED\nREADY"));
+  }
+
+  TEST_CASE("a line both sides changed takes the document's, and each side keeps its own new lines") {
+    basic::FileTable files{{"MAIN"}};
+    const std::vector<uint8_t> base = basic::encodeLines("10 PRINT 1\n20 PRINT 2\n", files, 0);
+    const std::vector<uint8_t> machine = basic::encodeLines("10 PRINT 111\n20 PRINT 2\n40 PRINT 4\n", files, 0);
+    const basic::Synced out = basic::syncLines(base, "10 PRINT 1000\n20 PRINT 2\n30 PRINT 3\n", machine, files, 0);
+    CHECK_EQ(basic::decodeLines(out.lines, files, 0), "10 PRINT 1000\n20 PRINT 2\n30 PRINT 3\n40 PRINT 4\n");
+    CHECK_EQ(out.text, "10 PRINT 1000\n20 PRINT 2\n30 PRINT 3\n40 PRINT 4\n");
+    CHECK(out.storeChanged);
+    CHECK(out.textChanged);
   }
 }

@@ -153,11 +153,13 @@ int BasicLines::started(std::span<const uint8_t> ram) {
   if (running && !checking_) {
     const size_t prog = static_cast<size_t>(word(basic::SYS_PROG));
     for (const int from : last_) {
-      if (from < 0 || prog + static_cast<size_t>(from) + 2 >= ram.size()) continue;
+      if (from < 0 || prog + static_cast<size_t>(from) + basic::RECORD_TEXT >= ram.size()) continue;
+      // A record: the file's index, the line's number, its length.
       const size_t record = prog + static_cast<size_t>(from);
-      const int number = word(record);
-      if (number == 0 || pc != from + ram[record + 2] || word(basic::SYS_ERR_LINE) != number) continue;
+      const int number = word(record + 1);
+      if (number == 0 || pc != from + ram[record + 3] || word(basic::SYS_ERR_LINE) != number) continue;
       line = number;
+      file_ = ram[record];
     }
   }
   last_[1] = last_[0];

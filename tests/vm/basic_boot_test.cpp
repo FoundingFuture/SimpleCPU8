@@ -75,10 +75,12 @@ TEST_SUITE("basic boot") {
     const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
     REQUIRE(prog != 0);
     CHECK(ram[basic::SYS_RUNNING] == 0);
-    // The empty program the boot leaves, the codec's empty program.
-    CHECK(basic::encodeProgram("") == std::vector<uint8_t>{0, 0, 3});
-    CHECK(std::vector<uint8_t>(ram.begin() + static_cast<long>(prog), ram.begin() + static_cast<long>(prog) + 3) ==
-          std::vector<uint8_t>{0, 0, 3});
+    // The empty store the boot leaves is the codec's empty program: the
+    // file table naming MAIN, and the record that ends that file.
+    const std::vector<uint8_t> empty = basic::encodeProgram("");
+    CHECK(empty.size() == basic::EMPTY_PROGRAM);
+    CHECK(std::vector<uint8_t>(ram.begin() + static_cast<long>(prog),
+                               ram.begin() + static_cast<long>(prog + empty.size())) == empty);
 
     std::vector<uint8_t> p = basic::encodeProgram("20 PRINT \"SECOND\"\n10 PRINT \"FIRST\"\n");
     std::copy(p.begin(), p.end(), ram.begin() + static_cast<long>(prog));

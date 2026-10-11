@@ -12,7 +12,7 @@ int main(void)
     lx_init();
     term_init();
     str_init();
-    ed_new();
+    ed_reset();
     bang_init();
     rt_ink(255);
 
@@ -23,6 +23,8 @@ int main(void)
     sto_autorun();
 
     for (;;) {
+        /* The prompt names the current file when it is not the main one. */
+        if (edit_file) term_puts(ed_file_name(edit_file));
         term_putc(62);
         /* The IDE reads and writes the program only while this is 1: the
          * program is whole and nothing of BASIC's is half done. AUTORUN,

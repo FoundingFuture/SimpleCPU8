@@ -69,6 +69,8 @@ class BasicLines {
   // The number of the line that started with the last instruction, or 0.
   // Its statements have not run yet.
   int started(std::span<const uint8_t> ram);
+  // The index of the file the line that started last is in.
+  int file() const { return file_; }
   // Forget what was seen, for a machine powered on again.
   void reset() { *this = BasicLines(); }
 
@@ -78,6 +80,7 @@ class BasicLines {
   int last_[2] = {-1, -1};
   bool wasRunning_ = false;
   bool checking_ = false;
+  int file_ = 0;
 };
 
 // A row of a microcode set's text. It has a section, a place in the
