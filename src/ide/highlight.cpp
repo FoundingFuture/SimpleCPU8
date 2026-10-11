@@ -318,8 +318,11 @@ std::vector<Span> lexLine(Syntax syntax, std::string_view line, LexState& state)
 
 bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, ImGuiInputTextFlags flags,
                 ImGuiInputTextCallback callback, void* user, Gutter* gutter) {
-  if (syntax == Syntax::Plain) return panes::inputMultiline(id, text, size, flags, callback, user);
-  if (gutter) gutter->clicked = 0;
+  if (syntax == Syntax::Plain && !gutter) return panes::inputMultiline(id, text, size, flags, callback, user);
+  if (gutter) {
+    gutter->clicked = 0;
+    gutter->revealed = false;
+  }
 
   // The column holds a breakpoint's dot, then the number. The number is as
   // wide as the last line's and three digits at least. So the column does
@@ -332,7 +335,8 @@ bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, I
   digits = std::max(digits, 3);
   const float digitWidth = ImGui::CalcTextSize("0").x;
   const float dotWidth = ImGui::GetFontSize();
-  const float gutterWidth = gutter ? dotWidth + digitWidth * static_cast<float>(digits + 1) : 0.0f;
+  const float numberWidth = gutter && gutter->numbers ? digitWidth * static_cast<float>(digits + 1) : 0.0f;
+  const float gutterWidth = gutter ? dotWidth + numberWidth : 0.0f;
   const ImVec2 gutterAt = ImGui::GetCursorScreenPos();
   if (gutter) ImGui::SetCursorScreenPos(ImVec2(gutterAt.x + gutterWidth, gutterAt.y));
 
@@ -356,6 +360,16 @@ bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, I
   if (!box || box->Hidden || box->LastFrameActive != g.FrameCount) return changed;
 
   const float lineHeight = g.FontSize;
+  if (gutter && gutter->reveal > 0) {
+    // Scroll only when the line is out of sight, so a step inside the
+    // lines on screen leaves the text where the reader has it.
+    const float y = static_cast<float>(gutter->reveal - 1) * lineHeight;
+    const float height = box->InnerRect.GetHeight();
+    if (y < box->Scroll.y || y > box->Scroll.y + height - lineHeight * 2.0f) {
+      ImGui::SetScrollY(box, std::max(0.0f, y - height * 0.4f));
+    }
+    gutter->revealed = true;
+  }
   float scrollX = 0.0f;
   if (const ImGuiInputTextState* state = ImGui::GetInputTextState(itemId)) scrollX = state->Scroll.x;
   const ImVec2 origin(box->Pos.x + g.Style.FramePadding.x - scrollX, box->Pos.y + g.Style.FramePadding.y - box->Scroll.y);
@@ -381,16 +395,23 @@ bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, I
     }
     char number[16];
     for (int n = firstVisible; n <= lastVisible && n < lines; n++) {
-      const int len = ImFormatString(number, sizeof number, "%d", n + 1);
-      const float w = ImGui::CalcTextSize(number, number + len).x;
       const float y = origin.y + static_cast<float>(n) * lineHeight;
-      pdl->AddText(g.Font, g.FontSize, ImVec2(gutterAt.x + gutterWidth - digitWidth * 0.5f - w, y), dim, number,
-                   number + len);
+      if (gutter->numbers) {
+        const int len = ImFormatString(number, sizeof number, "%d", n + 1);
+        const float w = ImGui::CalcTextSize(number, number + len).x;
+        pdl->AddText(g.Font, g.FontSize, ImVec2(gutterAt.x + gutterWidth - digitWidth * 0.5f - w, y), dim, number,
+                     number + len);
+      }
       const ImVec2 dot(gutterAt.x + dotWidth * 0.5f, y + lineHeight * 0.5f);
       if (gutter->marks && std::binary_search(gutter->marks->begin(), gutter->marks->end(), n + 1)) {
         pdl->AddCircleFilled(dot, radius, red);
       } else if (n == hovered) {
         pdl->AddCircle(dot, radius, red);
+      }
+      if (n + 1 == gutter->current) {
+        // The line the machine stands on: an arrow over the dot's place.
+        pdl->AddTriangleFilled(ImVec2(dot.x - radius, dot.y - radius), ImVec2(dot.x + radius, dot.y),
+                               ImVec2(dot.x - radius, dot.y + radius), IM_COL32(90, 217, 100, 255));
       }
     }
     pdl->PopClipRect();

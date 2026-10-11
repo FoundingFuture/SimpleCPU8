@@ -32,6 +32,7 @@ add_executable(simplecpu-ide
   basic_assist.cpp
   settings.cpp
   run_panes.cpp
+  run_menu.cpp
   micro_panes.cpp
   manual.cpp
   guide.cpp

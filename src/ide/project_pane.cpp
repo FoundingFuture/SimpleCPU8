@@ -51,13 +51,6 @@ std::optional<std::string> readText(const fs::path& p) {
 
 namespace {
 
-// A microcode set's errors as the build writes errors, file:line: message.
-std::vector<std::string> microcodeErrors(const McParsed& parsed) {
-  std::vector<std::string> out;
-  for (const McError& e : parsed.errors) out.push_back("microcode.txt:" + std::to_string(e.line) + ": " + e.message);
-  return out;
-}
-
 // The installed examples in the settings folder. A build from the
 // checkout reads them there too, so it shows what an install shows.
 fs::path examplesRoot() { return Settings::examplesDir(); }
@@ -183,7 +176,10 @@ std::vector<Ide::AssetEntry> Ide::assetList() const {
     std::error_code ec;
     for (const auto& e : fs::directory_iterator(l.assets, ec)) {
       if (!e.is_regular_file(ec)) continue;
-      if (l.nested ? e.path().filename().string().rfind('.', 0) == 0 : !flatAsset(e.path())) continue;
+      // A folder that holds the sources too, flat or a src/ with no
+      // assets/ beside it, lists only what is not a source.
+      const bool own = l.assets != l.sources;
+      if (own ? e.path().filename().string().rfind('.', 0) == 0 : !flatAsset(e.path())) continue;
       out.push_back({e.path().filename().string(), e.file_size(ec)});
     }
   } else {
@@ -630,6 +626,7 @@ bool Ide::anyDirty() const {
 void Ide::buildProject(bool run) {
   messages_.clear();
   builtRom_.clear();
+  lastBuildOk_ = false;
   project::Options o;
   project::Built built;
   if (example_) {
@@ -650,6 +647,7 @@ void Ide::buildProject(bool run) {
   for (const std::string& n : built.notes) note(n);
   reportErrors(built.errors);
   if (!built.cartridge) return;
+  lastBuildOk_ = true;
   insertBuilt(built, projectTitle_);
   if (run) setRunning(true);
 }
@@ -692,6 +690,12 @@ void Ide::insertBuilt(project::Built& built, const std::string& what) {
   assembled_ = std::move(built.assembled);
   haveSource_ = !built.assembly.empty();
   lineMap_ = std::move(built.lines);
+  pcLines_ = project::PcLines(lineMap_, assembled_);
+  stepLine_.clear();
+  for (const project::SourceLine& line : pcLines_.lines()) {
+    const DocKind kind = docKindOf(line.file);
+    stepLine_.push_back((kind == DocKind::C || kind == DocKind::Header) && docNamed(line.file) ? 1 : 0);
+  }
   builtTexts_.clear();
   for (const Doc& d : docs_) builtTexts_[d.name] = d.text;
   placeSourceBreaks();
@@ -716,6 +720,7 @@ void Ide::loadCartridge(Cartridge cart, const std::string& what) {
   // brings its program in, not the empty memory that wipes it.
   syncDoc_.clear();
   syncBase_.clear();
+  basicLines_.reset();
   computer_.insert(std::move(cart));
   applyLock();
   pushBreakpoints();
@@ -743,6 +748,8 @@ void Ide::bootBasic() {
   }
   builtAssembly_.clear();
   haveSource_ = false;
+  pcLines_ = {};
+  stepLine_.clear();
   loadCartridge(std::move(*r.cartridge), "the BASIC ROM");
   basicBooted_ = true;
 }
@@ -941,18 +948,25 @@ void Ide::editorBody(Doc& doc) {
   ImGui::BeginDisabled(example_);
   if (ImGui::SmallButton("Save")) saveProject();
   ImGui::EndDisabled();
+  // The Run menu's items for this view, a click away from the text.
   ImGui::SameLine();
-  if (ImGui::SmallButton("Build")) buildProject(false);
+  if (ImGui::SmallButton(running_ ? "Pause" : "Run")) {
+    if (running_) setRunning(false);
+    else viewRun();
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Check")) viewCheck();
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Step")) viewStep();
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s, F10", stepLabel());
   if (kind == DocKind::Basic) {
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Run in BASIC")) runInBasic();
     ImGui::SameLine();
     if (basicAtReady() && syncDoc_ == d->name) {
       ImGui::TextDisabled("in step with the computer: LIST shows this text, and lines typed there show up here");
     } else if (basicBooted_ && computer_.machine().status == Status::Running) {
       ImGui::TextDisabled("a program is running: changes go across when it stops at READY");
     } else {
-      ImGui::TextDisabled("Run in BASIC boots the interpreter; from then on this text and the computer stay in step");
+      ImGui::TextDisabled("Run boots the interpreter. From then on this text and the computer stay in step");
     }
     ImGui::SetItemTooltip("Enter at the end of a numbered line numbers the next one.\n"
                           "Enter on a bare number takes it away again.\n"
@@ -962,36 +976,17 @@ void Ide::editorBody(Doc& doc) {
                           ImGui::GetIO().ConfigMacOSXBehaviors ? "Cmd" : "Ctrl");
   } else if (kind == DocKind::Microcode) {
     ImGui::SameLine();
-    if (ImGui::SmallButton("Apply to machine")) {
-      McParsed parsed = parseMicrocode(d->text);
-      reportErrors(microcodeErrors(parsed));
-      if (parsed.errors.empty()) {
-        customText_ = d->text;
-        selectMicrocode(d->text);
-        note("your microcode was applied and the machine restarted");
-      }
-    }
+    if (ImGui::SmallButton("Apply to machine")) applyProjectMicrocode(false);
     ImGui::SameLine();
     if (ImGui::SmallButton(lockedMicrocode_ ? "Unlock" : "Apply and lock")) {
-      if (lockedMicrocode_) {
-        lockedMicrocode_.reset();
-        note("microcode unlocked: the next build or ROM brings its own set");
-      } else {
-        McParsed parsed = parseMicrocode(d->text);
-        reportErrors(microcodeErrors(parsed));
-        if (parsed.errors.empty()) {
-          lockedMicrocode_ = d->text;
-          customText_ = d->text;
-          selectMicrocode(d->text);
-          note("microcode locked: every project and ROM runs on this set until unlocked");
-        }
-      }
+      if (lockedMicrocode_) toggleMicrocodeLock();
+      else applyProjectMicrocode(true);
     }
     ImGui::SameLine();
     ImGui::TextDisabled("the set the ROM carries. The panes beside it show its rows firing");
   } else if (kind == DocKind::C) {
     ImGui::SameLine();
-    ImGui::TextDisabled("Build compiles every .c together; the Assembly pane shows the result");
+    ImGui::TextDisabled("Check compiles every .c together. The Assembly tab shows the result");
   } else if (kind == DocKind::Assembly) {
     ImGui::SameLine();
     if (ImGui::SmallButton("Format")) {
@@ -1003,13 +998,25 @@ void Ide::editorBody(Doc& doc) {
     ImGui::SameLine();
     ImGui::TextDisabled(settings_.formatAssembly ? "laid out in columns on every save" : "Format lays it out in columns");
   }
+  // The column before the text: the line the machine stands on while it
+  // is paused, scrolled into view when it moves to another line.
+  Gutter gutter;
+  gutter.current = currentLine(*d);
+  if (gutter.current == 0) {
+    shownCurrent_ = 0;
+  } else if (gutter.current != shownCurrent_ || d->name != shownCurrentDoc_) {
+    gutter.reveal = gutter.current;
+  }
   if (kind == DocKind::Basic) {
     if (assistDoc_ != d->name) {
       basicAssist_.reset();
       assistDoc_ = d->name;
     }
+    // A BASIC line carries its own number, so the column has none.
+    gutter.numbers = false;
     if (codeEditor("##doc", d->text, Syntax::Basic, ImVec2(-1.0f, -1.0f),
-                   ImGuiInputTextFlags_AllowTabInput | BasicAssist::FLAGS, BasicAssist::callback, &basicAssist_)) {
+                   ImGuiInputTextFlags_AllowTabInput | BasicAssist::FLAGS, BasicAssist::callback, &basicAssist_,
+                   &gutter)) {
       d->dirty = true;
     }
     // Whenever the box is not being typed in, the text stands in number
@@ -1018,17 +1025,21 @@ void Ide::editorBody(Doc& doc) {
     if (!ImGui::IsItemActive() && BasicAssist::sortText(d->text)) d->dirty = true;
     if (std::string n = basicAssist_.takeNote(); !n.empty()) note(n);
   } else {
-    // The number column. A click on a number sets or clears a breakpoint.
+    // A click on a number sets or clears a breakpoint.
     gutterMarks_.clear();
     if (auto sb = sourceBreaks_.find(d->name); sb != sourceBreaks_.end()) {
       for (const auto& [line, pc] : sb->second.lines) gutterMarks_.push_back(line);
     }
-    Gutter gutter{&gutterMarks_, 0};
+    gutter.marks = &gutterMarks_;
     if (codeEditor("##doc", d->text, syntaxOf(d->name), ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput,
                    nullptr, nullptr, &gutter)) {
       d->dirty = true;
     }
     if (gutter.clicked) toggleSourceBreak(*d, gutter.clicked);
+  }
+  if (gutter.revealed) {
+    shownCurrent_ = gutter.current;
+    shownCurrentDoc_ = d->name;
   }
 }
 

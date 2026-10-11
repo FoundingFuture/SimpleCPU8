@@ -19,14 +19,21 @@
 //                                 f30, f60, f120, max)
 //   simplecpu-ide --screenshot shot.png
 //                                 save the window after one second and quit
+//   simplecpu-ide --do run,step,step
+//                                 the Run menu's items by name, one every
+//                                 quarter second: run, check, step, pause,
+//                                 stop. With --screenshot, the picture is
+//                                 taken half a second after the last one
 //
 // F1 to F4 pick the view. F5 runs and pauses, Shift+F5 powers on.
-// F6 runs one frame, F7 assembles, F8 burns. F10 steps an instruction and
-// F11 a microcycle.
+// F6 runs one frame, F7 checks, F8 burns. F10 steps at the view's level
+// and F11 a microcycle.
 
+#include <algorithm>
 #include <cstdio>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "imgui.h"
 #include "raylib.h"
@@ -64,6 +71,10 @@ int main(int argc, char** argv) {
     ide.applyScale();
     std::string screenshot;
     bool run = false;
+    // --do: the Run menu's items still to do, and the frame for the next.
+    std::vector<std::string> script;
+    int scriptAt = 15;
+    int shotAt = 60;
     // An opened project picks its own view. A --view on the command line
     // is applied after everything opened, so it wins.
     std::optional<sc8::View> view;
@@ -88,6 +99,14 @@ int main(int argc, char** argv) {
         if (!ide.setSpeed(argv[++i])) std::fprintf(stderr, "unknown speed %s\n", argv[i]);
       } else if (a == "--font-view" && i + 1 < argc) {
         if (!ide.setFontView(argv[++i])) std::fprintf(stderr, "unknown font view %s: single, strip or block\n", argv[i]);
+      } else if (a == "--do" && i + 1 < argc) {
+        const std::string list = argv[++i];
+        for (size_t at = 0; at <= list.size();) {
+          size_t comma = list.find(',', at);
+          if (comma == std::string::npos) comma = list.size();
+          if (comma > at) script.push_back(list.substr(at, comma - at));
+          at = comma + 1;
+        }
       } else if (a == "--run") {
         run = true;
       } else {
@@ -103,7 +122,7 @@ int main(int argc, char** argv) {
     // An idle IDE sleeps in EndDrawing until the next input event. The
     // screenshot switch counts frames, so it never sleeps.
     auto paceRedraw = [&] {
-      if (pacer.waitAfterFrame(screenshot.empty() && ide.idle())) EnableEventWaiting();
+      if (pacer.waitAfterFrame(screenshot.empty() && script.empty() && ide.idle())) EnableEventWaiting();
       else DisableEventWaiting();
     };
     while (!ide.done()) {
@@ -113,7 +132,16 @@ int main(int argc, char** argv) {
         ide.leaveScreenOnly();
         ide.requestQuit();
       }
-      if (!screenshot.empty() && ++hostFrames == 60) {
+      hostFrames++;
+      if (!script.empty() && hostFrames >= scriptAt) {
+        if (!ide.menuAction(script.front())) {
+          std::fprintf(stderr, "unknown --do item %s: run, check, step, pause or stop\n", script.front().c_str());
+        }
+        script.erase(script.begin());
+        scriptAt = hostFrames + 15;
+        shotAt = std::max(shotAt, hostFrames + 30);
+      }
+      if (!screenshot.empty() && hostFrames >= shotAt && script.empty()) {
         // raylib's TakeScreenshot drops the directory, so export by hand.
         Image shot = LoadImageFromScreen();
         ExportImage(shot, screenshot.c_str());

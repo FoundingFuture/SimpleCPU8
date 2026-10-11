@@ -40,19 +40,27 @@ struct LexState {
 // is read for the line's start and left as it is at the line's end.
 std::vector<Span> lexLine(Syntax syntax, std::string_view line, LexState& state);
 
-// The column of line numbers codeEditor puts before the text. `marks` are
-// the lines drawn with a breakpoint's red dot, in ascending order. A click
-// in the column sets `clicked` to its line. It is 0 in every other frame.
+// The column codeEditor puts before the text: a breakpoint's dot, then
+// the line's number. `marks` are the lines drawn with a red dot, in
+// ascending order. A click in the column sets `clicked` to its line. It
+// is 0 in every other frame. `current` is the line the machine stands
+// on, drawn with an arrow, or 0. `reveal` is a line to scroll into view,
+// and `revealed` says the box did. A BASIC document turns `numbers` off,
+// since its lines carry their own.
 struct Gutter {
   const std::vector<int>* marks = nullptr;
   int clicked = 0;
+  int current = 0;
+  int reveal = 0;
+  bool revealed = false;
+  bool numbers = true;
 };
 
 // A multiline text box with the syntax drawn in colour over it. Takes the
 // same arguments as panes::inputMultiline and returns what it returns.
 // A gutter puts each line's number in a column before the text, outside
 // the box, so the numbers are never edited, selected or copied. A build
-// error names its line by that number.
+// error names its line by that number. Plain text takes a gutter too.
 bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, ImGuiInputTextFlags flags = 0,
                 ImGuiInputTextCallback callback = nullptr, void* user = nullptr, Gutter* gutter = nullptr);
 

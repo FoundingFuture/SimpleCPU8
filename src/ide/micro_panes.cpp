@@ -1,5 +1,5 @@
 // The MICROCODE view's panes: the datapath schema, the flow view and the
-// rows with their editor. The seal is respected here: on @optimal the rows
+// rows of the instruction being executed. The seal is respected here: on @optimal the rows
 // stay hidden and the lanes light from the bus events alone.
 #include <algorithm>
 #include <cstdio>
@@ -23,8 +23,8 @@ namespace {
 const ImVec4 ACCENT(0.35f, 0.85f, 0.4f, 1.0f);
 const ImVec4 DIM(0.5f, 0.5f, 0.5f, 1.0f);
 
-const char* SEALED = "The optimal set is sealed. It runs and can be raced, never read. Select @naive or your own set to "
-                     "trace, step and edit rows.";
+const char* SEALED = "The optimal set is sealed. It runs and can be raced, never read. Select naive or the project's set "
+                     "to trace and step rows.";
 
 // The boxes and wires the last bus event names. What the machine reports
 // even under the sealed set, so the schema shows where the bytes went.
@@ -342,22 +342,23 @@ void executionView(const Machine& m, const std::function<std::string(uint16_t)>&
 
 // The sets to pick from, then the current instruction as the rows it
 // runs, fetch first, so the shared fetch never seems to vanish. The
-// section browser is a toggle away. The editor for a set of your own
-// holds the whole text in the file format. Apply runs the parser and
-// shows its errors.
+// section browser is a toggle away. A set of the project's own is the
+// microcode.txt document, edited in the view's editor.
 void Ide::microcodePane() {
   ImGui::Begin(pane("Execution").c_str());
   const std::string& name = computer_.microcodeName();
   const bool custom = name != "@naive" && name != "@optimal";
-  if (ImGui::RadioButton("@naive", name == "@naive")) selectMicrocode("@naive");
-  ImGui::SameLine();
-  if (ImGui::RadioButton("@optimal", name == "@optimal")) selectMicrocode("@optimal");
-  ImGui::SameLine();
-  if (ImGui::RadioButton("my own", custom)) {
-    // A set of your own starts as a copy of the naive one.
-    if (customText_.empty()) customText_ = serializeMicrocode(buildNaive());
-    selectMicrocode(customText_);
+  // The Run menu's Microcode choices, where the rows are watched.
+  ImGui::BeginDisabled(!docNamed("microcode.txt"));
+  if (ImGui::RadioButton("project", custom)) applyProjectMicrocode(false);
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+    ImGui::SetTooltip("the set in the project's microcode.txt, which the editor beside this pane holds");
   }
+  ImGui::SameLine();
+  if (ImGui::RadioButton("naive", name == "@naive")) selectMicrocode("@naive");
+  ImGui::SameLine();
+  if (ImGui::RadioButton("optimal", name == "@optimal")) selectMicrocode("@optimal");
   const Machine& m = computer_.machine();
   // The instruction the sequencer is on, or the one it finished last. The
   // listing's line for it names it the way the source did.
@@ -390,29 +391,7 @@ void Ide::microcodePane() {
     ImGui::End();
     return;
   }
-  ImGui::SameLine(0.0f, 20.0f);
-  if (ImGui::SmallButton(mcEditing_ ? "close the editor" : "Edit rows...")) {
-    if (!mcEditing_ && customText_.empty()) customText_ = serializeMicrocode(computer_.machine().microcode());
-    mcEditing_ = !mcEditing_;
-  }
   ImGui::Separator();
-
-  if (mcEditing_) {
-    if (ImGui::SmallButton("Apply")) {
-      // Applying makes the set yours whichever radio was on, and restarts
-      // the machine, as swapping microcode always does.
-      selectMicrocode(customText_);
-      if (mcErrors_.empty()) note("your microcode was applied and the machine restarted");
-    }
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Reset to naive")) customText_ = serializeMicrocode(buildNaive());
-    ImGui::SameLine();
-    ImGui::TextDisabled("one section per instruction, one row per cycle, at most %d rows", ROW_CAP);
-    for (const std::string& e : mcErrors_) ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.35f, 1.0f), "%s", e.c_str());
-    panes::inputMultiline("##mctext", customText_, ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_AllowTabInput);
-    ImGui::End();
-    return;
-  }
 
   if (ImGui::SmallButton(mcBrowse_ ? "back to the instruction" : "browse all sections")) mcBrowse_ = !mcBrowse_;
   statusLine();

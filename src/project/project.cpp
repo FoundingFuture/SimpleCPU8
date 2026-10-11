@@ -1,4 +1,5 @@
 #include "project/project.h"
+#include "project/breakpoints.h"
 #include "project/text_file.h"
 
 #include <algorithm>
@@ -555,31 +556,8 @@ Layout layoutOf(const fs::path& dir) {
 // the row with a signal conflict, which is its own lesson, so the build
 // goes on. The warning says where to look before that happens.
 static std::vector<std::string> rowWarnings(const std::string& text, const Microcode& set) {
-  // The line of each row: a line ending in a colon opens a section, every
-  // other line with something on it before a # is a row of it.
   std::map<std::pair<std::string, size_t>, int> lineOf;
-  std::string section;
-  size_t row = 0;
-  int lineNo = 0;
-  for (size_t at = 0; at <= text.size();) {
-    size_t nl = text.find('\n', at);
-    if (nl == std::string::npos) nl = text.size();
-    std::string line = text.substr(at, nl - at);
-    at = nl + 1;
-    lineNo++;
-    const size_t hash = line.find('#');
-    if (hash != std::string::npos) line.resize(hash);
-    while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) line.pop_back();
-    size_t first = 0;
-    while (first < line.size() && std::isspace(static_cast<unsigned char>(line[first]))) first++;
-    if (first >= line.size()) continue;
-    if (line.back() == ':') {
-      section = line.substr(first, line.size() - first - 1);
-      row = 0;
-    } else {
-      lineOf[{section, row++}] = lineNo;
-    }
-  }
+  for (const RowStop& r : rowLines(text)) lineOf[{r.section, static_cast<size_t>(r.row)}] = r.line;
   std::vector<std::string> out;
   for (const Microcode::Section& sec : set.sections()) {
     for (size_t r = 0; r < sec.rows.size(); r++) {
@@ -592,6 +570,17 @@ static std::vector<std::string> rowWarnings(const std::string& text, const Micro
                     ". The machine stops with a signal conflict when it runs this row.");
     }
   }
+  return out;
+}
+
+MicrocodeCheck checkMicrocode(const std::string& text) {
+  MicrocodeCheck out;
+  const McParsed parsed = parseMicrocode(text);
+  for (const McError& e : parsed.errors) out.errors.push_back(std::to_string(e.line) + ": " + e.message);
+  if (!parsed.errors.empty()) return out;
+  out.sections = parsed.microcode.sections().size();
+  for (const Microcode::Section& sec : parsed.microcode.sections()) out.rows += sec.rows.size();
+  out.conflicts = rowWarnings(text, parsed.microcode);
   return out;
 }
 

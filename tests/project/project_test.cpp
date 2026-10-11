@@ -229,6 +229,28 @@ TEST_SUITE("project layouts") {
     CHECK(text.find("loop:   OUT    GPU_X_HI, 0") != std::string::npos);
   }
 
+  // The IDE's CHECK in the MICROCODE view: the set parsed and every row
+  // through checkRow, with no build.
+  TEST_CASE("checking a set counts its rows and names a conflict's line") {
+    const project::MicrocodeCheck good = project::checkMicrocode("fetch:\n  FETCH\nHLT:\n  HALT\n");
+    CHECK(good.errors.empty());
+    CHECK(good.conflicts.empty());
+    CHECK(good.sections == 2);
+    CHECK(good.rows == 2);
+    const project::MicrocodeCheck bad =
+        project::checkMicrocode("fetch:\n  FETCH\n# a comment\nHLT:\n  HALT\n  RAM_TO_B, ADDR_D1, ADDR_D2\n");
+    CHECK(bad.errors.empty());
+    REQUIRE(bad.conflicts.size() == 1);
+    CHECK(bad.conflicts[0].find("6: warning: HLT, row 2, breaks rule 8") == 0);
+  }
+
+  TEST_CASE("checking a set that does not parse gives the parser's errors by line") {
+    const project::MicrocodeCheck c = project::checkMicrocode("fetch:\n  NOT_A_SIGNAL\n");
+    REQUIRE_FALSE(c.errors.empty());
+    CHECK(c.errors[0].find("2: ") == 0);
+    CHECK(c.conflicts.empty());
+  }
+
   TEST_CASE("a microcode.txt that does not parse names its line") {
     TempDir t;
     write(t.path / "src" / "main.asm", "HLT\n");

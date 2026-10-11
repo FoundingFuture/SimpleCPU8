@@ -183,6 +183,35 @@ TEST_SUITE("vm frame advance") {
     CHECK_FALSE(c.runFrame());
   }
 
+  // The IDE's step and its BASIC breakpoints: the host looks at the
+  // machine after every instruction and says when to stop.
+  TEST_CASE("a watch stops a run after the instruction that makes it true") {
+    Computer c;
+    load(c, "        LD A <- 1\n        LD A <- 2\n        LD A <- 3\n        HLT\n");
+    c.setWatch([&c] { return c.machine().acc == 2; });
+    const uint64_t done = c.runBudget(100);
+    CHECK(c.hitWatch);
+    CHECK_FALSE(c.hitBreakpoint);
+    CHECK_EQ(done, 2);
+    CHECK_EQ(c.machine().pc, 2);
+    c.setWatch(nullptr);
+    c.runBudget(100);
+    CHECK_FALSE(c.hitWatch);
+    CHECK_EQ(c.machine().status, Status::Halted);
+  }
+
+  TEST_CASE("a watch stops the frame runner and the micro runner too") {
+    Computer c;
+    load(c, WAIT);
+    c.setWatch([&c] { return c.machine().instructions == 5; });
+    CHECK_EQ(c.runToNextFrame(), 5);
+    CHECK(c.hitWatch);
+    c.powerOn();
+    c.runMicroBudget(1000);
+    CHECK(c.hitWatch);
+    CHECK_EQ(c.machine().instructions, 5);
+  }
+
   TEST_CASE("a breakpoint wins over the frame target") {
     Computer c;
     load(c, WAIT);

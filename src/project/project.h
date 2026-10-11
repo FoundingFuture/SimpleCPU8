@@ -136,6 +136,17 @@ struct ExampleKind {
 constexpr ExampleKind EXAMPLE_KINDS[] = {
     {"assembly", "Assembly"}, {"basic", "BASIC"}, {"c", "C"}, {"microcode", "Microcode"}};
 
+// A microcode set's text checked without a build: the parser's errors,
+// then every row through checkRow. Each message opens with its line in
+// the text and a colon. The IDE's CHECK in the MICROCODE view shows them.
+struct MicrocodeCheck {
+  std::vector<std::string> errors;     // the set does not parse
+  std::vector<std::string> conflicts;  // rows that break a row rule
+  size_t sections = 0;
+  size_t rows = 0;
+};
+MicrocodeCheck checkMicrocode(const std::string& text);
+
 // Lay out a new project of a kind at dir, which must not exist yet or be
 // empty: the folders, a README, a .gitignore for build/ and a first
 // source that builds and runs. Microcode is an assembly project with the

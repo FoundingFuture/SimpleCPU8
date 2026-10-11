@@ -231,8 +231,8 @@ void Ide::columnTree() {
 
   // What the last build made: the ROM in the machine and the assembly.
   if (ImGui::TreeNodeEx("Build", GROUP)) {
-    const bool built = !computer_.cartridge().program.empty();
-    if (!built) ImGui::TextDisabled("not built yet");
+    const bool built = lastBuildOk_;
+    if (!built) ImGui::TextDisabled(messages_.empty() ? "not built yet" : "the last build failed");
     if (built) {
       const std::string file = !builtRom_.empty()  ? fs::path(builtRom_).filename().string()
                                : !romPath_.empty() ? fs::path(romPath_).filename().string()
@@ -243,7 +243,7 @@ void Ide::columnTree() {
       if (ImGui::Selectable(file.c_str())) note("the ROM: " + at);
       if (ImGui::IsItemHovered()) ImGui::SetTooltip("the ROM the last build made: %s", at.c_str());
     }
-    if (!builtAssembly_.empty()) {
+    if (built && !builtAssembly_.empty()) {
       if (ImGui::Selectable("assembly")) showAssembly();
       if (ImGui::IsItemHovered()) ImGui::SetTooltip("the assembly the last build made, read only");
     }

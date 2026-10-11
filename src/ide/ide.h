@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -30,6 +31,7 @@
 #include "ide/settings.h"
 #include "ide/sprite_editor.h"
 #include "ide/view.h"
+#include "project/breakpoints.h"
 #include "project/project.h"
 #include "vm/audio.h"
 #include "vm/computer.h"
@@ -92,6 +94,9 @@ class Ide {
   // --run: build the project and run it. A .bas opened from the command
   // line runs in BASIC instead, the quick way.
   void run();
+  // --do: one of the Run menu's items by name, in the view on screen:
+  // run, check, step, pause or stop. False for any other name.
+  bool menuAction(const std::string& name);
 
   // Called once per host frame, before rlImGuiBegin. Paces the machine,
   // feeds the keyboard and the audio. Renders the screen through the CRT
@@ -259,6 +264,7 @@ class Ide {
   // A build's or a microcode set's errors: each on a red line in Messages,
   // and the error tone once, when Preferences has it on.
   void reportErrors(const std::vector<std::string>& errors);
+  void showMessages();
   std::vector<project::Source> sources() const;
   project::Layout layout() const;
 
@@ -289,6 +295,51 @@ class Ide {
   void statusMenu();
   void selectMicrocode(const std::string& name);
   void applyLock();
+
+  // The Run menu (run_menu.cpp). Each item works at the level of the
+  // view on screen: a line of BASIC, a line of C, an instruction, a row.
+  void runMenu();
+  void viewRun();
+  void viewCheck();
+  void viewStep();
+  void viewStop();
+  const char* stepLabel() const;
+  // A document changed since the last build, or the last build failed.
+  bool needsBuild() const;
+  bool lastBuildOk_ = false;
+  // BASIC runs a program now, and is not waiting at its prompt.
+  bool basicMidProgram() const;
+  void checkBasicDoc(Doc& doc);
+  void checkMicrocodeDoc(const Doc& doc);
+  // The Microcode submenu: the project's microcode.txt into the machine,
+  // and the lock that keeps the running set.
+  void applyProjectMicrocode(bool lock);
+  void toggleMicrocodeLock();
+  // A step of BASIC or C: the machine runs flat out until stepUntil_
+  // answers true, asked after every instruction. Pause ends it early.
+  void stepC();
+  void stepBasic();
+  void beginStep(std::function<bool()> until);
+  void refreshWatch();
+  bool watchHit();
+  std::function<bool()> stepUntil_;
+  bool stepDone_ = false;
+  bool stepSawProgram_ = false;  // a BASIC step saw the program running
+  // The last build's source line per address, and which of those lines
+  // are lines of a C document, where a C step may stop.
+  project::PcLines pcLines_;
+  std::vector<char> stepLine_;
+  // The BASIC line a watch saw start with the last instruction, or 0.
+  project::BasicLines basicLines_;
+  int basicStarted_ = 0;
+  // Where the machine stands, in the words of the view's language.
+  std::string whereNote();
+  int currentLine(const Doc& doc);
+  // The current line the editor last scrolled into view, and its document.
+  int shownCurrent_ = 0;
+  std::string shownCurrentDoc_;
+  // Bring the document the machine stands in to the front of its editor.
+  void showWhere();
   // A breakpoint set in the listing's margin. One on the address of an
   // editor breakpoint removes that one.
   void toggleBreakpoint(int instr);
@@ -545,12 +596,9 @@ class Ide {
   bool stackFollow_ = true;
   std::vector<std::string> watched_;
 
-  // The microcode pane. lockedMicrocode_ holds a set the machine keeps
+  // The Execution pane. lockedMicrocode_ holds a set the machine keeps
   // whatever a project or ROM brings.
   int selectedSection_ = 0;
-  std::string customText_;
-  std::vector<std::string> mcErrors_;
-  bool mcEditing_ = false;
   std::optional<std::string> lockedMicrocode_;
 
   // The manual pane.

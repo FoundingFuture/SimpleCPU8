@@ -31,6 +31,9 @@ constexpr uint16_t SYS_PROG_LEN = 0x0A;
 constexpr uint16_t SYS_ERR = 0x12;
 constexpr uint16_t SYS_ERR_LINE = 0x13;
 constexpr uint16_t SYS_RUNNING = 0x15;
+// While a program runs: the offset of the line RUN goes to next. RUN moves
+// it past a line before the line's statements run, and a jump sets it.
+constexpr uint16_t SYS_PC = 0x16;
 constexpr uint16_t SYS_COL = 0x05;
 constexpr uint16_t SYS_ROW = 0x06;
 // Where READ takes its next value, 0 for the first one.

@@ -110,7 +110,6 @@ Ide::Ide()
           [this](std::string m) { note(std::move(m)); }}) {
   resetSections();
   registerLayoutHandler();
-  customText_.reserve(1 << 15);
   settings_.load();
   columnFromSettings_ = settings_.columnKnown;
   for (int v = 0; v < VIEW_COUNT; v++) {
@@ -491,6 +490,11 @@ void Ide::rebuildListing() {
 
 void Ide::setRunning(bool on) {
   running_ = on;
+  // Pause ends a step that has not reached its line yet.
+  if (!on && stepUntil_) {
+    stepUntil_ = nullptr;
+    refreshWatch();
+  }
   owed_ = 0.0;
   tick_ = 0.0;
   freshRun_ = on;
@@ -518,11 +522,26 @@ void Ide::pace() {
   const double dt = freshRun_ ? 0.0 : static_cast<double>(GetFrameTime());
   freshRun_ = false;
   auto stopped = [&](bool exhausted) {
-    if (!exhausted && !computer_.hitBreakpoint) return false;
+    if (!exhausted && !computer_.hitBreakpoint && !computer_.hitWatch) return false;
+    const bool stepped = stepDone_;
+    stepDone_ = false;
     setRunning(false);
     if (computer_.hitBreakpoint) note(stopNote());
+    else if (stepped) note(whereNote());
+    showWhere();
     return true;
   };
+  if (stepUntil_) {
+    // A step runs flat out whatever the view's speed: the person waits
+    // for one line, not for the picture.
+    const double until = GetTime() + 0.012;
+    constexpr uint64_t CHUNK = 20000;
+    while (GetTime() < until) {
+      const uint64_t done = computer_.runBudget(CHUNK);
+      if (stopped(done < CHUNK)) return;
+    }
+    return;
+  }
   if (s.micro) {
     // One row per tick, so every row is drawn, never skipped.
     tick_ += dt;
@@ -585,6 +604,7 @@ void Ide::powerOn() {
   setRunning(false);
   poweredOff_ = false;
   computer_.powerOn();
+  basicLines_.reset();
   applyLock();
   pushBreakpoints();
   // A restarted interpreter starts with an empty program; the document
@@ -633,8 +653,8 @@ void Ide::statusMenu() {
   ImGui::PopStyleColor();
   if (!open) return;
   const bool live = !poweredOff_ && m.status == Status::Running;
-  if (ImGui::MenuItem(running_ ? "Pause" : "Run", "F5", false, live)) setRunning(!running_);
-  if (ImGui::MenuItem("Step instruction", "F10", false, live)) stepInstruction();
+  if (ImGui::MenuItem(running_ ? "Pause" : "Go on", nullptr, false, live)) setRunning(!running_);
+  if (ImGui::MenuItem("Step instruction", nullptr, false, live)) stepInstruction();
   ImGui::Separator();
   if (ImGui::MenuItem("Reset", nullptr, false, !poweredOff_)) reset();
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("restart the CPU at the first slot, RAM as it is");
@@ -650,11 +670,13 @@ void Ide::statusMenu() {
 
 void Ide::selectMicrocode(const std::string& name) {
   setRunning(false);
-  mcErrors_ = computer_.selectMicrocode(name);
-  if (!mcErrors_.empty()) {
-    note("microcode: " + std::to_string(mcErrors_.size()) + " error(s), the set was not applied");
+  const std::vector<std::string> errors = computer_.selectMicrocode(name);
+  if (!errors.empty()) {
+    reportErrors(errors);
+    note("microcode: " + std::to_string(errors.size()) + " error(s), the set was not applied");
     return;
   }
+  basicLines_.reset();
   // A locked set follows the choice: the lock is on what runs now.
   if (lockedMicrocode_) lockedMicrocode_ = name;
   pushBreakpoints();
@@ -666,8 +688,9 @@ void Ide::selectMicrocode(const std::string& name) {
 void Ide::applyLock() {
   if (!lockedMicrocode_) return;
   if (computer_.microcodeName() == *lockedMicrocode_) return;
-  mcErrors_ = computer_.selectMicrocode(*lockedMicrocode_);
-  if (!mcErrors_.empty()) note("the locked microcode set no longer parses; the cartridge's own set runs");
+  if (!computer_.selectMicrocode(*lockedMicrocode_).empty()) {
+    note("the locked microcode set no longer parses; the cartridge's own set runs");
+  }
 }
 
 bool Ide::idle() const {
@@ -1100,6 +1123,7 @@ bool Ide::buildLayout(View view, unsigned dockspace, float width, float height) 
 void Ide::menuBar() {
   if (!ImGui::BeginMainMenuBar()) return;
   viewTabs();
+  runMenu();
   const fs::path startIn = !settings_.projectsDir.empty() && fs::is_directory(settings_.projectsDir)
                                ? fs::path(settings_.projectsDir)
                            : projectDir_.empty() ? fs::current_path()
@@ -1160,7 +1184,7 @@ void Ide::menuBar() {
                    [this](const fs::path& p) { saveProjectAs(p.string()); });
     }
     ImGui::Separator();
-    if (ImGui::MenuItem("Build", "F7")) buildProject(false);
+    if (ImGui::MenuItem("Build")) buildProject(false);
     if (ImGui::MenuItem("Build and run", "Ctrl+F5")) buildProject(true);
     if (ImGui::MenuItem("Burn ROM as...", "F8")) {
       dialog_.open(FileDialog::Mode::SaveFile, "Burn the machine's ROM to a file",
@@ -1172,43 +1196,6 @@ void Ide::menuBar() {
     if (ImGui::MenuItem("Boot the BASIC ROM")) bootBasic();
     ImGui::Separator();
     if (ImGui::MenuItem("Quit", "Cmd+Q")) requestQuit();
-    ImGui::EndMenu();
-  }
-  if (ImGui::BeginMenu("Run")) {
-    if (ImGui::MenuItem(running_ ? "Pause" : "Run", "F5")) setRunning(!running_);
-    if (ImGui::MenuItem("Step instruction", "F10")) stepInstruction();
-    if (ImGui::MenuItem("Step microcycle", "F11", false, computer_.microcodeInspectable())) stepMicro();
-    if (ImGui::MenuItem("Run one frame", "F6")) runOneFrame();
-    if (ImGui::MenuItem("Reset")) reset();
-    if (ImGui::MenuItem("Reboot", "Shift+F5")) powerOn();
-    ImGui::Separator();
-    if (ImGui::BeginMenu("Speed")) {
-      for (size_t i = 0; i < std::size(LADDER); i++) {
-        const bool enabled = !LADDER[i].micro || computer_.microcodeInspectable();
-        if (ImGui::MenuItem(LADDER[i].label, nullptr, speedIndex() == static_cast<int>(i), enabled)) {
-          pickSpeed(static_cast<int>(i));
-        }
-      }
-      ImGui::EndMenu();
-    }
-    ImGui::EndMenu();
-  }
-  if (ImGui::BeginMenu("Microcode")) {
-    for (const char* name : {"@naive", "@optimal"}) {
-      if (ImGui::MenuItem(name, nullptr, computer_.microcodeName() == name)) selectMicrocode(name);
-    }
-    const bool own = computer_.microcodeName() != "@naive" && computer_.microcodeName() != "@optimal";
-    ImGui::MenuItem("your own set", nullptr, own, false);
-    ImGui::Separator();
-    if (ImGui::MenuItem("Lock the running set", nullptr, lockedMicrocode_.has_value())) {
-      if (lockedMicrocode_) {
-        lockedMicrocode_.reset();
-        note("microcode unlocked: the next build or ROM brings its own set");
-      } else {
-        lockedMicrocode_ = computer_.microcodeName();
-        note("microcode locked: every project and ROM runs on the set in the machine now");
-      }
-    }
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Settings")) {
@@ -1323,15 +1310,16 @@ void Ide::shortcuts() {
   if (ImGui::IsKeyPressed(ImGuiKey_F2)) setView(View::C);
   if (ImGui::IsKeyPressed(ImGuiKey_F3)) setView(View::Assembly);
   if (ImGui::IsKeyPressed(ImGuiKey_F4)) setView(View::Microcode);
-  if (ImGui::IsKeyPressed(ImGuiKey_F7)) buildProject(false);
+  if (ImGui::IsKeyPressed(ImGuiKey_F7)) viewCheck();
   if (ImGui::IsKeyPressed(ImGuiKey_F12)) enterScreenOnly();
   if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
     if (io.KeyShift) powerOn();
     else if (io.KeyCtrl) buildProject(true);
-    else setRunning(!running_);
+    else if (running_) setRunning(false);
+    else viewRun();
   }
   if (ImGui::IsKeyPressed(ImGuiKey_F6)) runOneFrame();
-  if (ImGui::IsKeyPressed(ImGuiKey_F10)) stepInstruction();
+  if (ImGui::IsKeyPressed(ImGuiKey_F10)) viewStep();
   if (ImGui::IsKeyPressed(ImGuiKey_F11)) stepMicro();
   const bool cmd = io.KeyCtrl || io.KeySuper;
   if (cmd && ImGui::IsKeyPressed(ImGuiKey_S)) saveProject();
@@ -1552,7 +1540,16 @@ void Ide::settingsDialog() {
 
 void Ide::reportErrors(const std::vector<std::string>& errors) {
   for (const std::string& e : errors) messages_.push_back({e, true});
-  if (!errors.empty() && settings_.errorSound) audio_.alert();
+  if (errors.empty()) return;
+  if (settings_.errorSound) audio_.alert();
+  showMessages();
+}
+
+// Messages may sit behind another tab, the guide's in the BASIC view. It
+// comes to the front for a frame, and the editor keeps the keyboard.
+void Ide::showMessages() {
+  focusQueue_.push_back(pane("Messages"));
+  if (focusAfterLayout_.empty()) focusAfterLayout_ = pane("Editor");
 }
 
 void Ide::messagesPane(const char* name) {
