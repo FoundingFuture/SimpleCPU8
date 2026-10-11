@@ -40,6 +40,7 @@
 
 #include "asm/asm.h"
 #include "core/cartridge.h"
+#include "project/folder.h"
 
 namespace sc8::project {
 
@@ -172,7 +173,9 @@ std::optional<std::string> readProgramFile(const std::filesystem::path& file);
 // the folder it sits in, the projects folder the person set, and the
 // libraries folders. The parent is in so that projects beside each
 // other copy from one another, `LOAD "../pong/sound.bas"`, wherever
-// they sit. Eddie's decision. A project with no folder has none.
+// they sit. Eddie's decision. A project with no folder has none. Each
+// folder comes back in its one spelling, normalFolder's, so `game/` and
+// `game/.` give the roots `game` gives.
 std::vector<std::filesystem::path> loadRoots(const std::filesystem::path& projectDir,
                                              const std::filesystem::path& projectsFolder,
                                              const std::vector<std::filesystem::path>& libraries);

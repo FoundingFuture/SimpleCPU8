@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
     else if (a == "--author") opts.meta.emplace_back("author", next());
     else if (a == "--asm-out") opts.keepAsm = true;
     else if (a == "--no-sources") opts.embedSources = false;
-    else if (a == "--libraries") opts.libraries.push_back(next());
+    else if (a == "--libraries") opts.libraries.push_back(project::normalFolder(next()));
     else if (a == "--listing") listing = true;
     else if (a.rfind("-D", 0) == 0) {
       std::string def = a.size() > 2 ? a.substr(2) : next();
@@ -171,8 +171,7 @@ int main(int argc, char** argv) {
   // The libraries sit in the folder libraries beside the project's own
   // folder, which is where the IDE keeps them in its projects folder.
   // A folder named with --libraries is asked first.
-  fs::path here = fs::absolute(dir).lexically_normal();
-  if (!here.has_filename()) here = here.parent_path();
+  const fs::path here = project::normalFolder(fs::absolute(dir));
   opts.libraries.push_back(project::defaultLibraries(here.parent_path()));
   project::Written w = project::buildAndWrite(layout, opts, out);
   for (const std::string& n : w.built.notes) std::fprintf(stderr, "%s\n", n.c_str());

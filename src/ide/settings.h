@@ -42,8 +42,10 @@ struct Settings {
 
   // Read the file if there is one; a missing file leaves the defaults.
   void load();
-  // Write the file. False when it could not be written.
-  bool save() const;
+  // Write the file. False when it could not be written. The two folders
+  // are put in their one spelling first, project::normalFolder's, so what
+  // Preferences stored is what the session reads from then on.
+  bool save();
 
  private:
   // DESIGN: never a bare name. dir() / name with an empty dir() is a

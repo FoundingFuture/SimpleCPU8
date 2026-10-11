@@ -638,15 +638,18 @@ bool inside(const fs::path& root, const fs::path& path) {
 std::vector<fs::path> loadRoots(const fs::path& projectDir, const fs::path& projectsFolder,
                                 const std::vector<fs::path>& libraries) {
   std::vector<fs::path> roots;
-  if (projectDir.empty()) return roots;
-  roots.push_back(projectDir);
+  // Each folder in its one spelling. The parent of `game/` as spelled
+  // is `game`, which is not the folder the project sits in.
+  const fs::path dir = normalFolder(projectDir);
+  if (dir.empty()) return roots;
+  roots.push_back(dir);
   // A relative folder has no parent to name; the absolute form, which
   // readProgramFileIn takes, has one.
-  const fs::path parent = projectDir.parent_path();
-  if (!parent.empty() && parent != projectDir) roots.push_back(parent);
-  if (!projectsFolder.empty()) roots.push_back(projectsFolder);
+  const fs::path parent = dir.parent_path();
+  if (!parent.empty() && parent != dir) roots.push_back(parent);
+  if (!projectsFolder.empty()) roots.push_back(normalFolder(projectsFolder));
   for (const fs::path& folder : libraries) {
-    if (!folder.empty()) roots.push_back(folder);
+    if (!folder.empty()) roots.push_back(normalFolder(folder));
   }
   return roots;
 }
@@ -669,7 +672,9 @@ std::optional<std::string> readProgramFileIn(const fs::path& base, const std::st
   bool allowed = false;
   for (const fs::path& root : roots) {
     if (root.empty()) continue;
-    const fs::path at = fs::absolute(root, ec).lexically_normal();
+    // A root with a separator after it has an empty name at its end,
+    // which no file's path goes on from.
+    const fs::path at = normalFolder(fs::absolute(root, ec));
     allowed = allowed || (!ec && inside(at, wanted));
   }
   if (!allowed) return std::nullopt;

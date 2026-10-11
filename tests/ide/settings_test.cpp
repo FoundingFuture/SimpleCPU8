@@ -80,6 +80,34 @@ TEST_SUITE("the settings folder") {
     CHECK(next.librariesDir == s.librariesDir);
   }
 
+  // A folder typed with a separator after it is the same folder. The
+  // parent of `projects/` taken as spelled is `projects`, so the IDE
+  // keeps both folders in the one spelling the rest of it reads.
+  TEST_CASE("the projects and libraries folders are kept in one spelling") {
+    FakeHome home;
+    const fs::path projects = "/home/me/projects";
+    const fs::path libraries = "/home/me/libs";
+    Settings s;
+    s.projectsDir = "/home/me/projects/";
+    s.librariesDir = "/home/me/other/../libs/.";
+    REQUIRE(s.save());
+    // What Preferences stored is what the session goes on with.
+    CHECK(fs::path(s.projectsDir) == projects);
+    CHECK(fs::path(s.librariesDir) == libraries);
+    Settings next;
+    next.load();
+    CHECK(fs::path(next.projectsDir) == projects);
+    CHECK(fs::path(next.librariesDir) == libraries);
+    // A file somebody wrote by hand is read the same way.
+    {
+      std::ofstream out(Settings::settingsFile(), std::ios::binary);
+      out << "projects = /home/me/projects/./\nlibraries = \n";
+    }
+    Settings hand;
+    hand.load();
+    CHECK(fs::path(hand.projectsDir) == projects);
+    CHECK(hand.librariesDir.empty());
+  }
 
   TEST_CASE("settings.txt has LF line ends") {
     FakeHome home;

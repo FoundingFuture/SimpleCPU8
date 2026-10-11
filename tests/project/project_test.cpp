@@ -11,6 +11,7 @@
 
 #include "asm/asm.h"
 #include "core/isa.h"
+#include "project/folder.h"
 #include "project/project.h"
 #include "assets/assets.h"
 #include "assets/font.h"
@@ -346,8 +347,8 @@ TEST_SUITE("simplecpu-make new") {
   }
 
   // A library by name gets the check a file by path gets. A libraries
-  // folder may come with a project somebody else made, and a link in it
-  // must not put a file from elsewhere into the ROM.
+  // folder may come with a project somebody else made. A link in it must
+  // not put a file from elsewhere into the ROM.
   TEST_CASE("a link in a libraries folder to a file outside it is no library") {
     TempDir t;
     const fs::path libs = t.path / "libraries";
@@ -501,6 +502,61 @@ TEST_SUITE("simplecpu-make new") {
     CHECK(unset == std::vector<fs::path>{game, "/home/me"});
     // A project with no folder has nowhere to read from.
     CHECK(project::loadRoots({}, "/home/me/projects", libraries).empty());
+  }
+
+  // A folder comes from a command line, a dialog or a settings file, and
+  // each spells it its own way. The parent of `game/` taken as spelled is
+  // `game`, and a root with a separator after it matched nothing.
+  TEST_CASE("a folder has one spelling: no separator after it, no dot and no dot dot in it") {
+    const fs::path game = "/home/me/game";
+    CHECK(project::normalFolder("/home/me/game/") == game);
+    CHECK(project::normalFolder("/home/me/game/.") == game);
+    CHECK(project::normalFolder("/home/me/pong/../game") == game);
+    CHECK(project::normalFolder("/home/me/game") == game);
+    CHECK(project::normalFolder("/home/me/game/..") == fs::path("/home/me"));
+    CHECK(project::normalFolder("game/") == fs::path("game"));
+    CHECK(project::normalFolder("/") == fs::path("/"));
+    CHECK(project::normalFolder("").empty());
+  }
+
+  TEST_CASE("every spelling of the project's folder gives the same LOAD roots") {
+    const std::vector<fs::path> plain = project::loadRoots("/home/me/game", "/home/me/projects", {"/home/me/libraries"});
+    CHECK(plain == std::vector<fs::path>{"/home/me/game", "/home/me", "/home/me/projects", "/home/me/libraries"});
+    for (const char* spelled : {"/home/me/game/", "/home/me/game/.", "/home/me/pong/../game"}) {
+      CAPTURE(spelled);
+      CHECK(project::loadRoots(spelled, "/home/me/projects/", {"/home/me/libraries/."}) == plain);
+    }
+    // game/.. is the folder game sits in, and the roots are that folder's.
+    CHECK(project::loadRoots("/home/me/game/..", {}, {}) == std::vector<fs::path>{"/home/me", "/home"});
+  }
+
+  TEST_CASE("a LOAD from the project beside this one works from every spelling of the folder") {
+    TempDir t;
+    write(t.path / "game" / "src" / "game.bas", "10 REM GAME\n");
+    write(t.path / "pong" / "sound.bas", "10 REM SOUND\n");
+    for (const char* spelled : {"game", "game/", "game/.", "pong/../game"}) {
+      CAPTURE(spelled);
+      const fs::path dir = fs::path(t.path.string() + "/" + spelled);
+      const std::vector<fs::path> roots = project::loadRoots(dir, {}, {});
+      CHECK(project::readProgramFileIn(dir, "../pong/sound.bas", roots) == std::string("10 REM SOUND\n"));
+      CHECK(project::readProgramFileIn(dir, "src/game.bas", roots) == std::string("10 REM GAME\n"));
+    }
+  }
+
+  TEST_CASE("a projects folder with a separator after it matches what is inside it") {
+    TempDir t;
+    const fs::path projects = t.path / "projects";
+    const fs::path game = t.path / "elsewhere" / "game";
+    write(projects / "pong" / "sound.bas", "10 REM SOUND\n");
+    write(game / "src" / "game.bas", "10 REM GAME\n");
+    write(t.path / "outside" / "x.bas", "10 REM OUTSIDE\n");
+    const fs::path spelled = fs::path(projects.string() + "/");
+    // Given as it is, with no loadRoots between.
+    CHECK(project::readProgramFileIn(projects / "pong", "sound.bas", {spelled}) == std::string("10 REM SOUND\n"));
+    // Through loadRoots, where the projects folder alone reaches the file.
+    const std::vector<fs::path> roots = project::loadRoots(game, spelled, {});
+    CHECK(project::readProgramFileIn(game, "../../projects/pong/sound.bas", roots) == std::string("10 REM SOUND\n"));
+    CHECK_FALSE(project::readProgramFileIn(game, "../../outside/x.bas", roots));
   }
 
   // The size is not trusted to stay what it was when it was asked.

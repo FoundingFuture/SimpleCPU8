@@ -344,7 +344,10 @@ std::vector<project::Source> Ide::sources() const {
   return out;
 }
 
-void Ide::openProject(const std::string& dir) {
+void Ide::openProject(const std::string& given) {
+  // The folder in its one spelling, whatever the command line or the
+  // dialog wrote: its parent is then the folder it sits in.
+  const std::string dir = project::normalFolder(fs::absolute(given)).string();
   const project::Layout l = project::layoutOf(dir);
   std::error_code ec;
   if (!fs::is_directory(l.sources, ec)) {
@@ -352,7 +355,7 @@ void Ide::openProject(const std::string& dir) {
     return;
   }
   sprite_.close();
-  projectDir_ = fs::absolute(dir).string();
+  projectDir_ = dir;
   example_ = insideExamples(projectDir_);
   projectTitle_ = l.name;
   romBase_.reset();
@@ -471,7 +474,7 @@ void Ide::createProject(const std::string& dir, project::Kind kind) {
 // gets a home. A project that has a folder already brings its README and
 // its assets along: they are part of the project as much as the sources.
 void Ide::saveProjectAs(const std::string& dir) {
-  const fs::path root = fs::absolute(dir);
+  const fs::path root = project::normalFolder(fs::absolute(dir));
   if (insideExamples(root)) {
     note("not saved: " + root.string() + " is inside the examples, which stay as they are. Pick a folder of your own");
     return;

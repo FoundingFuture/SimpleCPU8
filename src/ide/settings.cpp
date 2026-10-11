@@ -1,5 +1,6 @@
 #include "ide/settings.h"
 
+#include "project/folder.h"
 #include "project/text_file.h"
 
 #include <cstdlib>
@@ -45,6 +46,13 @@ fs::path Settings::file(const char* name) {
   return base.empty() ? base : base / name;
 }
 
+namespace {
+
+// A folder from the file or from Preferences, as every reader expects it.
+std::string oneSpelling(const std::string& folder) { return project::normalFolder(folder).string(); }
+
+}  // namespace
+
 void Settings::load() {
   const fs::path file = settingsFile();
   if (file.empty()) return;
@@ -61,8 +69,8 @@ void Settings::load() {
     };
     const std::string key = trim(line.substr(0, eq));
     const std::string value = trim(line.substr(eq + 1));
-    if (key == "projects") projectsDir = value;
-    else if (key == "libraries") librariesDir = value;
+    if (key == "projects") projectsDir = oneSpelling(value);
+    else if (key == "libraries") librariesDir = oneSpelling(value);
     else if (key == "scale") {
       const float f = std::strtof(value.c_str(), nullptr);
       if (f >= 0.5f && f <= 4.0f) uiScale = f;
@@ -77,7 +85,9 @@ void Settings::load() {
   }
 }
 
-bool Settings::save() const {
+bool Settings::save() {
+  projectsDir = oneSpelling(projectsDir);
+  librariesDir = oneSpelling(librariesDir);
   const fs::path file = settingsFile();
   if (file.empty()) return false;
   std::ostringstream o;
