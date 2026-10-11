@@ -12,6 +12,7 @@
 
 #include "asm/format.h"
 #include "basic/basic_rom.h"
+#include "basic/lines.h"
 #include "basic/program.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
@@ -706,6 +707,7 @@ void Ide::insertBuilt(project::Built& built, const std::string& what) {
                                         built.sources.front() == "the BASIC interpreter");
   loadCartridge(std::move(*built.cartridge), what);
   basicBooted_ = interpreter;
+  refreshWatch();
   if (built.instructions > 0) {
     note("built " + what + ": " + std::to_string(built.instructions) + " instructions, " +
          std::to_string(built.ramBytes) + " bytes of RAM, " + std::to_string(built.dataBytes) + " bytes of data");
@@ -752,6 +754,7 @@ void Ide::bootBasic() {
   stepLine_.clear();
   loadCartridge(std::move(*r.cartridge), "the BASIC ROM");
   basicBooted_ = true;
+  refreshWatch();
 }
 
 // Run the active .bas document: boot the interpreter unless the machine
@@ -1007,13 +1010,27 @@ void Ide::editorBody(Doc& doc) {
   } else if (gutter.current != shownCurrent_ || d->name != shownCurrentDoc_) {
     gutter.reveal = gutter.current;
   }
+  // A line the Breakpoints pane asked for wins over the machine's.
+  const bool asked = revealLine_ > 0 && revealDoc_ == d->name;
+  if (asked) gutter.reveal = revealLine_;
   if (kind == DocKind::Basic) {
     if (assistDoc_ != d->name) {
       basicAssist_.reset();
       assistDoc_ = d->name;
     }
-    // A BASIC line carries its own number, so the column has none.
+    // A BASIC line carries its own number, so the column has none. A
+    // breakpoint belongs to that number, and its dot to the row it is on.
     gutter.numbers = false;
+    gutterMarks_.clear();
+    const auto breaks = basicBreaks_.find(d->name);
+    if (breaks != basicBreaks_.end()) {
+      const std::vector<std::string> rows = basic::splitLines(d->text);
+      for (size_t r = 0; r < rows.size(); r++) {
+        const std::optional<int> n = basic::lineNumber(rows[r]);
+        if (n && breaks->second.count(*n)) gutterMarks_.push_back(static_cast<int>(r) + 1);
+      }
+    }
+    gutter.marks = &gutterMarks_;
     if (codeEditor("##doc", d->text, Syntax::Basic, ImVec2(-1.0f, -1.0f),
                    ImGuiInputTextFlags_AllowTabInput | BasicAssist::FLAGS, BasicAssist::callback, &basicAssist_,
                    &gutter)) {
@@ -1022,8 +1039,24 @@ void Ide::editorBody(Doc& doc) {
     // Whenever the box is not being typed in, the text stands in number
     // order with its reserved words in capitals: a file opened out of
     // order, lines typed on the machine's screen, the editor just left.
-    if (!ImGui::IsItemActive() && BasicAssist::sortText(d->text)) d->dirty = true;
+    const bool resting = !ImGui::IsItemActive();
+    if (resting && BasicAssist::sortText(d->text)) d->dirty = true;
     if (std::string n = basicAssist_.takeNote(); !n.empty()) note(n);
+    if (gutter.clicked) toggleBasicBreak(*d, gutter.clicked);
+    // A line that no longer exists loses its breakpoint, once the person
+    // has left the box: a number being retyped is not a line removed.
+    if (resting && breaks != basicBreaks_.end() && basicBreaks_.count(d->name)) {
+      std::set<int> present;
+      for (const std::string& row : basic::splitLines(d->text)) {
+        if (const std::optional<int> n = basic::lineNumber(row)) present.insert(*n);
+      }
+      std::set<int>& lines = basicBreaks_[d->name];
+      std::erase_if(lines, [&](int n) { return present.count(n) == 0; });
+      if (lines.empty()) {
+        basicBreaks_.erase(d->name);
+        refreshWatch();
+      }
+    }
   } else {
     // A click on a number sets or clears a breakpoint.
     gutterMarks_.clear();
@@ -1040,6 +1073,7 @@ void Ide::editorBody(Doc& doc) {
   if (gutter.revealed) {
     shownCurrent_ = gutter.current;
     shownCurrentDoc_ = d->name;
+    if (asked) revealLine_ = 0;
   }
 }
 

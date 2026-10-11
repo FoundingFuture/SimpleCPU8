@@ -16,6 +16,7 @@
 
 #include "assets/assets.h"
 #include "basic/basic_rom.h"
+#include "basic/lines.h"
 #include "basic/program.h"
 #include "core/cartridge.h"
 #include "core/mcparse.h"
@@ -491,10 +492,8 @@ void Ide::rebuildListing() {
 void Ide::setRunning(bool on) {
   running_ = on;
   // Pause ends a step that has not reached its line yet.
-  if (!on && stepUntil_) {
-    stepUntil_ = nullptr;
-    refreshWatch();
-  }
+  if (!on) stepUntil_ = nullptr;
+  refreshWatch();
   owed_ = 0.0;
   tick_ = 0.0;
   freshRun_ = on;
@@ -519,7 +518,8 @@ void Ide::pace() {
   const Speed& s = LADDER[static_cast<size_t>(speedIndex())];
   // The frame a run starts in may have begun in an idle wait for input.
   // That wait is not time the machine owes, so the first frame counts none.
-  const double dt = freshRun_ ? 0.0 : static_cast<double>(GetFrameTime());
+  const bool fresh = freshRun_;
+  const double dt = fresh ? 0.0 : static_cast<double>(GetFrameTime());
   freshRun_ = false;
   auto stopped = [&](bool exhausted) {
     if (!exhausted && !computer_.hitBreakpoint && !computer_.hitWatch) return false;
@@ -527,10 +527,20 @@ void Ide::pace() {
     stepDone_ = false;
     setRunning(false);
     if (computer_.hitBreakpoint) note(stopNote());
+    else if (!watchNote_.empty()) note(watchNote_);
     else if (stepped) note(whereNote());
+    watchNote_.clear();
     showWhere();
     return true;
   };
+  // A run that starts inside an instruction, or before one, first goes
+  // to the next row with a breakpoint in it.
+  if (fresh && !rowBreaks_.empty() && computer_.microcodeInspectable() &&
+      rowBreaks_.advance(computer_.machine())) {
+    setRunning(false);
+    note(rowNote());
+    return;
+  }
   if (stepUntil_) {
     // A step runs flat out whatever the view's speed: the person waits
     // for one line, not for the picture.
@@ -593,8 +603,11 @@ void Ide::stepMicro() {
 
 void Ide::runOneFrame() {
   setRunning(false);
+  refreshWatch();
   computer_.runToNextFrame();
   if (computer_.hitBreakpoint) note(stopNote());
+  else if (computer_.hitWatch && !watchNote_.empty()) note(watchNote_);
+  watchNote_.clear();
 }
 
 // Power on reloads the RAM image and starts from the first slot, the
@@ -752,6 +765,10 @@ std::string Ide::stopNote() const {
 // that does. The click can place it at once only when the document is as
 // the last build read it. Otherwise the next build places it.
 void Ide::toggleSourceBreak(const Doc& doc, int line) {
+  if (docKindOf(doc.name) == DocKind::Microcode) {
+    toggleRowBreak(doc, line);
+    return;
+  }
   followEdits();
   auto found = sourceBreaks_.find(doc.name);
   if (found != sourceBreaks_.end() && found->second.lines.erase(line)) {
@@ -780,8 +797,11 @@ void Ide::toggleSourceBreak(const Doc& doc, int line) {
 
 void Ide::followEdits() {
   bool moved = false;
+  // A row's place in its section changes with any edit above it.
+  bool rows = false;
   for (auto it = sourceBreaks_.begin(); it != sourceBreaks_.end();) {
     auto& [name, sb] = *it;
+    const bool microcode = docKindOf(name) == DocKind::Microcode;
     const Doc* doc = nullptr;
     for (const Doc& d : docs_) {
       if (d.name == name) doc = &d;
@@ -789,9 +809,11 @@ void Ide::followEdits() {
     if (!doc) {
       it = sourceBreaks_.erase(it);
       moved = true;
+      rows = rows || microcode;
       continue;
     }
     if (doc->text != sb.text) {
+      rows = rows || microcode;
       const project::Edit edit(sb.text, doc->text);
       std::map<int, std::optional<uint16_t>> lines;
       for (const auto& [line, pc] : sb.lines) {
@@ -804,12 +826,18 @@ void Ide::followEdits() {
     it = sb.lines.empty() ? sourceBreaks_.erase(it) : std::next(it);
   }
   if (moved) pushBreakpoints();
+  if (rows) rebuildRowBreaks();
 }
 
 void Ide::placeSourceBreaks() {
   followEdits();
   for (auto it = sourceBreaks_.begin(); it != sourceBreaks_.end();) {
     auto& [name, sb] = *it;
+    // A row of microcode has no address for a build to give it.
+    if (docKindOf(name) == DocKind::Microcode) {
+      ++it;
+      continue;
+    }
     std::map<int, std::optional<uint16_t>> placed;
     for (const auto& [line, pc] : sb.lines) {
       if (const auto stop = project::stopAt(lineMap_, assembled_, name, line)) {
@@ -825,8 +853,90 @@ void Ide::placeSourceBreaks() {
 
 void Ide::forgetSourceBreaks() {
   sourceBreaks_.clear();
+  basicBreaks_.clear();
+  rebuildRowBreaks();
   builtTexts_.clear();
   lineMap_ = {};
+}
+
+// A click in microcode.txt's column. A line without a row takes the next
+// row. The optimal set is sealed, so a breakpoint is refused while it
+// runs: it has no row the machine could show.
+void Ide::toggleRowBreak(const Doc& doc, int line) {
+  followEdits();
+  const std::string where = doc.name + ":" + std::to_string(line);
+  const std::optional<project::RowStop> row = project::rowAt(doc.text, line);
+  auto found = sourceBreaks_.find(doc.name);
+  if (found != sourceBreaks_.end() && found->second.lines.erase(row ? row->line : line)) {
+    if (found->second.lines.empty()) sourceBreaks_.erase(found);
+    rebuildRowBreaks();
+    return;
+  }
+  if (!computer_.microcodeInspectable()) {
+    note(where + ": no breakpoint, because the optimal set is sealed and shows no row. Run, Microcode picks naive "
+                 "or the project's set");
+    return;
+  }
+  if (!row) {
+    note(where + ": no row at or after this line, so no breakpoint");
+    return;
+  }
+  SourceBreaks& sb = sourceBreaks_[doc.name];
+  if (sb.lines.empty()) sb.text = doc.text;
+  sb.lines[row->line] = std::nullopt;
+  rebuildRowBreaks();
+}
+
+void Ide::rebuildRowBreaks() {
+  std::vector<project::RowStop> rows;
+  for (const auto& [name, sb] : sourceBreaks_) {
+    if (docKindOf(name) != DocKind::Microcode) continue;
+    for (const project::RowStop& r : project::rowLines(sb.text)) {
+      if (sb.lines.count(r.line)) rows.push_back(r);
+    }
+  }
+  rowBreaks_.set(std::move(rows));
+  refreshWatch();
+}
+
+std::string Ide::rowNote() const {
+  const project::RowStop& r = rowBreaks_.stopped();
+  return "stopped at row " + std::to_string(r.row + 1) + " of " + r.section + ", microcode.txt:" +
+         std::to_string(r.line);
+}
+
+std::string Ide::runningBasicDoc() const {
+  if (!syncDoc_.empty()) return syncDoc_;
+  for (const Doc& d : docs_) {
+    if (d.name == "autorun.bas") return d.name;
+  }
+  return "";
+}
+
+// A click in a BASIC document's column, on the text's row. The
+// breakpoint belongs to the line number on that row.
+void Ide::toggleBasicBreak(const Doc& doc, int row) {
+  const std::vector<std::string> rows = basic::splitLines(doc.text);
+  const std::optional<int> number =
+      row >= 1 && static_cast<size_t>(row) <= rows.size() ? basic::lineNumber(rows[static_cast<size_t>(row - 1)])
+                                                           : std::nullopt;
+  if (!number) {
+    note(doc.name + ": a breakpoint goes on a numbered line");
+    return;
+  }
+  std::set<int>& lines = basicBreaks_[doc.name];
+  if (!lines.erase(*number)) lines.insert(*number);
+  if (lines.empty()) basicBreaks_.erase(doc.name);
+  refreshWatch();
+}
+
+void Ide::selectLine(const std::string& doc, int line) {
+  for (size_t i = 0; i < docs_.size(); i++) {
+    if (docs_[i].name != doc) continue;
+    openDoc(i);
+    revealDoc_ = doc;
+    revealLine_ = line;
+  }
 }
 
 // ---- the host frame
@@ -936,8 +1046,8 @@ void Ide::frame() {
   // The number in the id is the layout's version. A new pane bumps it, so
   // a layout file from before the pane rebuilds the view once rather than
   // leaving the newcomer floating.
-  static const ImGuiID IDS[VIEW_COUNT] = {ImHashStr("sc8-view-basic-5"), ImHashStr("sc8-view-c-5"),
-                                          ImHashStr("sc8-view-assembly-5"), ImHashStr("sc8-view-microcode-5")};
+  static const ImGuiID IDS[VIEW_COUNT] = {ImHashStr("sc8-view-basic-6"), ImHashStr("sc8-view-c-6"),
+                                          ImHashStr("sc8-view-assembly-6"), ImHashStr("sc8-view-microcode-6")};
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const float column = projectColumn();
   const int active = static_cast<int>(view_);
@@ -992,6 +1102,7 @@ void Ide::frame() {
   editorPane(view_);
   if (spriteVisible_) spritePane();
   messagesPane(pane("Messages").c_str());
+  breakpointsPane(pane("Breakpoints").c_str());
   // The MICROCODE view has its screen in the side pane.
   if (view_ != View::Microcode) screenPane(pane("Screen").c_str());
   switch (view_) {
@@ -1008,7 +1119,6 @@ void Ide::frame() {
       registersPane(pane("Registers").c_str());
       memoryPane(pane("Memory").c_str());
       stackPane(pane("Stack").c_str());
-      breakpointsPane(pane("Breakpoints").c_str());
       manualPane(pane("Manual").c_str());
       break;
     case View::Microcode:
@@ -1056,6 +1166,7 @@ bool Ide::buildLayout(View view, unsigned dockspace, float width, float height) 
       dock("Editor", mid);
       dock("Screen", right);
       dock("Sprite preview", rightBottom);
+      dock("Breakpoints", rightBottom);
       dock("Messages", rightBottom);
       dock("Manual", rightBottom);
       break;
@@ -1069,6 +1180,7 @@ bool Ide::buildLayout(View view, unsigned dockspace, float width, float height) 
       dock("###Sprite", mid);
       dock("Assembly", mid);
       dock("Editor", mid);
+      dock("Breakpoints", bottom);
       dock("Layers", bottom);
       dock("Messages", bottom);
       dock("Screen", right);
@@ -1111,6 +1223,7 @@ bool Ide::buildLayout(View view, unsigned dockspace, float width, float height) 
       dock("Editor", mid);
       dock("CPU", cpu);
       dock("Sprite preview", side);
+      dock("Breakpoints", side);
       dock("Messages", side);
       dock("Execution", side);
       dock("Side", rightBottom);

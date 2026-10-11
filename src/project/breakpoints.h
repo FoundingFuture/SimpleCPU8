@@ -80,8 +80,8 @@ class BasicLines {
   bool checking_ = false;
 };
 
-// A row of a microcode set's text: the section it belongs to, its place
-// in the section counted from 0, and the line of the text it is on.
+// A row of a microcode set's text. It has a section, a place in the
+// section counted from 0, and a line of the text.
 struct RowStop {
   std::string section;  // an instruction's name as the set spells it, or fetch
   int row = 0;

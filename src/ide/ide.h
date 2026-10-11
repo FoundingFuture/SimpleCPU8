@@ -97,6 +97,9 @@ class Ide {
   // --do: one of the Run menu's items by name, in the view on screen:
   // run, check, step, pause or stop. False for any other name.
   bool menuAction(const std::string& name);
+  // --break: a breakpoint on a document's line, written name:line. A .bas
+  // takes its BASIC line number. False when the document is not open.
+  bool addBreak(const std::string& spec);
 
   // Called once per host frame, before rlImGuiBegin. Paces the machine,
   // feeds the keyboard and the audio. Renders the screen through the CRT
@@ -361,6 +364,28 @@ class Ide {
   std::map<std::string, std::string> builtTexts_;  // each document as the last build read it
   std::vector<int> gutterMarks_;                   // the active document's breakpoint lines
   void toggleSourceBreak(const Doc& doc, int line);
+  // A breakpoint on a row of microcode.txt. Its line lives in
+  // sourceBreaks_ with no address and follows edits as the others do.
+  // rowBreaks_ holds the rows those lines name, as the machine meets them.
+  void toggleRowBreak(const Doc& doc, int line);
+  void rebuildRowBreaks();
+  project::RowBreaks rowBreaks_;
+  std::string rowNote() const;
+  // Breakpoints on BASIC lines, by document and line number. The watch
+  // stops the machine when such a line starts. A line that leaves the
+  // document takes its breakpoint along. project/breakpoints.cpp has
+  // the rule.
+  std::map<std::string, std::set<int>> basicBreaks_;
+  void toggleBasicBreak(const Doc& doc, int row);
+  // The document whose program BASIC runs: the one in step, or the
+  // AUTORUN a built project boots into.
+  std::string runningBasicDoc() const;
+  // What a watch stopped the machine for, for Messages.
+  std::string watchNote_;
+  // A document's line to show, asked for by the Breakpoints pane.
+  void selectLine(const std::string& doc, int line);
+  std::string revealDoc_;
+  int revealLine_ = 0;
   // Move each document's breakpoints with the edits made since they were
   // placed. A line the edits removed loses its breakpoint.
   void followEdits();

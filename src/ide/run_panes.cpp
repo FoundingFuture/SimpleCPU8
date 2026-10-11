@@ -9,6 +9,7 @@
 #include "raylib.h"
 #include "rlImGui.h"
 
+#include "basic/lines.h"
 #include "cc/layout.h"
 #include "ide/highlight.h"
 #include "ide/ide.h"
@@ -286,51 +287,91 @@ void Ide::stackBody() {
   hexDump("stack", m.stack.data(), m.stackSize(), stackJump_, hot, static_cast<int>(m.sp));
 }
 
-// The editor's breakpoints by file and line, then the listing's by address.
+// Every breakpoint with its document and line: the BASIC lines, the C
+// and assembly lines, the rows of microcode, then the listing's own by
+// address. A click on one shows the document and the line in its view.
 void Ide::breakpointsPane(const char* pane) {
   ImGui::Begin(pane);
-  if (breakpoints_.empty() && sourceBreaks_.empty()) {
-    ImGui::TextDisabled("none. Click a line number in the editor, or a line's margin in the listing, to set one.");
-  } else {
-    if (ImGui::SmallButton("clear all")) {
-      breakpoints_.clear();
-      sourceBreaks_.clear();
-      pushBreakpoints();
-    }
-    std::optional<std::pair<std::string, int>> removeLine;
-    for (const auto& [name, sb] : sourceBreaks_) {
-      for (const auto& [line, pc] : sb.lines) {
-        const std::string where = name + ":" + std::to_string(line);
-        ImGui::PushID(where.c_str());
-        if (ImGui::SmallButton("x")) removeLine = {name, line};
-        ImGui::SameLine();
-        if (pc) ImGui::Text("%s  %s", hex(*pc, 4).c_str(), where.c_str());
-        else ImGui::Text("      %s  (placed by the next build)", where.c_str());
-        ImGui::PopID();
+  if (breakpoints_.empty() && sourceBreaks_.empty() && basicBreaks_.empty()) {
+    ImGui::TextDisabled("none. Click in the column before a line in the editor, or in a line's margin in the "
+                        "listing, to set one.");
+    ImGui::End();
+    return;
+  }
+  if (ImGui::SmallButton("clear all")) {
+    breakpoints_.clear();
+    sourceBreaks_.clear();
+    basicBreaks_.clear();
+    pushBreakpoints();
+    rebuildRowBreaks();
+  }
+  // What a click asked for, done after the lists are walked.
+  std::optional<std::pair<std::string, int>> removeLine, removeBasic, show;
+  for (const auto& [name, lines] : basicBreaks_) {
+    const Doc* doc = docNamed(name);
+    const std::vector<std::string> rows = doc ? basic::splitLines(doc->text) : std::vector<std::string>{};
+    for (const int number : lines) {
+      int row = 0;
+      for (size_t r = 0; r < rows.size(); r++) {
+        if (basic::lineNumber(rows[r]) == number) row = static_cast<int>(r) + 1;
       }
-    }
-    if (removeLine) {
-      auto doc = sourceBreaks_.find(removeLine->first);
-      doc->second.lines.erase(removeLine->second);
-      if (doc->second.lines.empty()) sourceBreaks_.erase(doc);
-      pushBreakpoints();
-    }
-    std::optional<uint16_t> remove;
-    for (uint16_t pc : breakpoints_) {
-      ImGui::PushID(pc);
-      if (ImGui::SmallButton("x")) remove = pc;
+      const std::string where = name + " line " + std::to_string(number);
+      ImGui::PushID(where.c_str());
+      if (ImGui::SmallButton("x")) removeBasic = {name, number};
       ImGui::SameLine();
-      std::string text;
-      for (const ListLine& l : listing_) {
-        if (l.instr && *l.instr == pc) text = l.text;
-      }
-      ImGui::Text("%s  %s", hex(pc, 4).c_str(), text.c_str());
+      if (ImGui::Selectable(where.c_str())) show = {name, row};
       ImGui::PopID();
     }
-    if (remove) {
-      breakpoints_.erase(*remove);
-      pushBreakpoints();
+  }
+  for (const auto& [name, sb] : sourceBreaks_) {
+    const bool microcode = docKindOf(name) == DocKind::Microcode;
+    for (const auto& [line, pc] : sb.lines) {
+      const std::string where = name + ":" + std::to_string(line);
+      std::string text;
+      if (microcode) {
+        const std::optional<project::RowStop> row = project::rowAt(sb.text, line);
+        text = where + (row ? "  " + row->section + ", row " + std::to_string(row->row + 1) : "");
+      } else if (pc) {
+        text = hex(*pc, 4) + "  " + where;
+      } else {
+        text = "      " + where + "  (placed by the next build)";
+      }
+      ImGui::PushID(where.c_str());
+      if (ImGui::SmallButton("x")) removeLine = {name, line};
+      ImGui::SameLine();
+      if (ImGui::Selectable(text.c_str())) show = {name, line};
+      ImGui::PopID();
     }
+  }
+  if (removeBasic) {
+    std::set<int>& lines = basicBreaks_[removeBasic->first];
+    lines.erase(removeBasic->second);
+    if (lines.empty()) basicBreaks_.erase(removeBasic->first);
+    refreshWatch();
+  }
+  if (removeLine) {
+    auto doc = sourceBreaks_.find(removeLine->first);
+    doc->second.lines.erase(removeLine->second);
+    if (doc->second.lines.empty()) sourceBreaks_.erase(doc);
+    pushBreakpoints();
+    rebuildRowBreaks();
+  }
+  if (show) selectLine(show->first, show->second);
+  std::optional<uint16_t> remove;
+  for (uint16_t pc : breakpoints_) {
+    ImGui::PushID(pc);
+    if (ImGui::SmallButton("x")) remove = pc;
+    ImGui::SameLine();
+    std::string text;
+    for (const ListLine& l : listing_) {
+      if (l.instr && *l.instr == pc) text = l.text;
+    }
+    ImGui::Text("%s  %s", hex(pc, 4).c_str(), text.c_str());
+    ImGui::PopID();
+  }
+  if (remove) {
+    breakpoints_.erase(*remove);
+    pushBreakpoints();
   }
   ImGui::End();
 }

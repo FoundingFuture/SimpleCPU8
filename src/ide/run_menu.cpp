@@ -7,6 +7,7 @@
 // machine itself steps instructions and rows only.
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <iterator>
 #include <string>
 
@@ -183,20 +184,41 @@ void Ide::beginStep(std::function<bool()> until) {
   refreshWatch();
 }
 
+// The machine runs the short way with no watch. So one is set only for
+// a step, a BASIC breakpoint or a row breakpoint the machine can meet.
 void Ide::refreshWatch() {
-  if (stepUntil_) computer_.setWatch([this] { return watchHit(); });
+  const bool lines = basicBooted_ && !basicBreaks_.empty();
+  const bool rows = !rowBreaks_.empty() && computer_.microcodeInspectable();
+  if (stepUntil_ || lines || rows) computer_.setWatch([this] { return watchHit(); });
   else computer_.setWatch(nullptr);
 }
 
 // Called by the machine's run loop after every instruction while a watch
 // is set. True stops the run.
 bool Ide::watchHit() {
-  basicStarted_ = basicBooted_ ? basicLines_.started(computer_.machine().ram) : 0;
+  Machine& m = computer_.machine();
+  bool stop = false;
+  basicStarted_ = basicBooted_ ? basicLines_.started(m.ram) : 0;
+  if (basicStarted_ != 0 && !basicBreaks_.empty()) {
+    const std::string doc = runningBasicDoc();
+    const auto lines = basicBreaks_.find(doc);
+    if (lines != basicBreaks_.end() && lines->second.count(basicStarted_)) {
+      watchNote_ = "Stopped at line " + std::to_string(basicStarted_) + " in " + upperName(doc);
+      stop = true;
+    }
+  }
+  // A row breakpoint in the instruction about to start. The watch runs
+  // the machine on to the row, since the run loop stops between
+  // instructions only.
+  if (!rowBreaks_.empty() && computer_.microcodeInspectable() && rowBreaks_.onNext(m) && rowBreaks_.advance(m)) {
+    watchNote_ = rowNote();
+    stop = true;
+  }
   if (stepUntil_ && stepUntil_()) {
     stepDone_ = true;
-    return true;
+    stop = true;
   }
-  return false;
+  return stop;
 }
 
 // One line of C: run until the address belongs to another line of a C
@@ -243,7 +265,8 @@ std::string Ide::whereNote() {
     const auto& ram = m.ram;
     if (ram[basic::SYS_RUNNING] != 1) return "the program ended, BASIC is at READY";
     const int line = (ram[basic::SYS_ERR_LINE] << 8) | ram[basic::SYS_ERR_LINE + 1];
-    return "line " + std::to_string(line) + (syncDoc_.empty() ? "" : " in " + upperName(syncDoc_));
+    const std::string doc = runningBasicDoc();
+    return "line " + std::to_string(line) + (doc.empty() ? "" : " in " + upperName(doc));
   }
   if (const project::SourceLine* at = pcLines_.at(m.pc)) return at->file + ":" + std::to_string(at->line);
   return "PC " + panes::hex(m.pc, 4);
@@ -256,7 +279,7 @@ int Ide::currentLine(const Doc& doc) {
   const Machine& m = computer_.machine();
   if (running_ || poweredOff_ || m.status != Status::Running) return 0;
   if (docKindOf(doc.name) == DocKind::Basic) {
-    if (!basicMidProgram() || doc.name != syncDoc_) return 0;
+    if (!basicMidProgram() || doc.name != runningBasicDoc()) return 0;
     const int line = (m.ram[basic::SYS_ERR_LINE] << 8) | m.ram[basic::SYS_ERR_LINE + 1];
     const std::vector<std::string> rows = basic::splitLines(doc.text);
     for (size_t r = 0; r < rows.size(); r++) {
@@ -303,6 +326,21 @@ void Ide::toggleMicrocodeLock() {
     lockedMicrocode_ = computer_.microcodeName();
     note("microcode locked: every project and ROM runs on the set in the machine now");
   }
+}
+
+bool Ide::addBreak(const std::string& spec) {
+  const size_t colon = spec.rfind(':');
+  if (colon == std::string::npos) return false;
+  const Doc* doc = docNamed(spec.substr(0, colon));
+  const int line = std::atoi(spec.c_str() + colon + 1);
+  if (!doc || line < 1) return false;
+  if (docKindOf(doc->name) == DocKind::Basic) {
+    basicBreaks_[doc->name].insert(line);
+    refreshWatch();
+  } else {
+    toggleSourceBreak(*doc, line);
+  }
+  return true;
 }
 
 bool Ide::menuAction(const std::string& name) {

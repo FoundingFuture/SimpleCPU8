@@ -19,6 +19,10 @@
 //                                 f30, f60, f120, max)
 //   simplecpu-ide --screenshot shot.png
 //                                 save the window after one second and quit
+//   simplecpu-ide --break main.c:12
+//                                 a breakpoint on a document's line, as a
+//                                 click in the editor's column sets it. A
+//                                 .bas takes the BASIC line number
 //   simplecpu-ide --do run,step,step
 //                                 the Run menu's items by name, one every
 //                                 quarter second: run, check, step, pause,
@@ -73,6 +77,8 @@ int main(int argc, char** argv) {
     bool run = false;
     // --do: the Run menu's items still to do, and the frame for the next.
     std::vector<std::string> script;
+    // --break: set once everything opened, since a document must exist.
+    std::vector<std::string> breaks;
     int scriptAt = 15;
     int shotAt = 60;
     // An opened project picks its own view. A --view on the command line
@@ -99,6 +105,8 @@ int main(int argc, char** argv) {
         if (!ide.setSpeed(argv[++i])) std::fprintf(stderr, "unknown speed %s\n", argv[i]);
       } else if (a == "--font-view" && i + 1 < argc) {
         if (!ide.setFontView(argv[++i])) std::fprintf(stderr, "unknown font view %s: single, strip or block\n", argv[i]);
+      } else if (a == "--break" && i + 1 < argc) {
+        breaks.push_back(argv[++i]);
       } else if (a == "--do" && i + 1 < argc) {
         const std::string list = argv[++i];
         for (size_t at = 0; at <= list.size();) {
@@ -115,6 +123,9 @@ int main(int argc, char** argv) {
     }
     ide.restoreSprite();
     if (view) ide.setView(*view);
+    for (const std::string& b : breaks) {
+      if (!ide.addBreak(b)) std::fprintf(stderr, "no breakpoint at %s: name a document and a line, main.c:12\n", b.c_str());
+    }
     if (run) ide.run();
 
     int hostFrames = 0;
