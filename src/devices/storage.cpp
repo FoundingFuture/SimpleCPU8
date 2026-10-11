@@ -23,9 +23,6 @@ bool validName(const std::string& name) {
   return !name.empty() && name.size() <= static_cast<size_t>(NAME_LIMIT) && printable(name);
 }
 
-// A name with a slash or a dot in it is a path to a program's file.
-bool isPath(const std::string& name) { return name.find_first_of("/\\.") != std::string::npos; }
-
 bool validPath(const std::string& name) {
   return !name.empty() && name.size() <= static_cast<size_t>(PATH_LIMIT) && printable(name);
 }

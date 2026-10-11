@@ -11,6 +11,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -49,6 +50,15 @@ enum Status : uint8_t {
   STO_BAD_NAME = 3,
   STO_BAD_CMD = 4,
 };
+
+// A name with a slash or a dot in it is a path to a program's file, and
+// any other name is a slot's.
+//
+// DESIGN: one rule, here. The device reads it to pick the limit a name
+// is held to, and a host to pick between its own files and the disk. Two
+// copies that drift would send a name down the branch that never checked
+// it. file_of in src/basic/store.c cuts a path at the same characters.
+inline bool isPath(std::string_view name) { return name.find_first_of("/\\.") != std::string_view::npos; }
 
 }  // namespace sc8::storage
 

@@ -15,6 +15,7 @@
 #include "basic/basic_rom.h"
 #include "basic/program.h"
 #include "core/cartridge.h"
+#include "devices/storage.h"
 #include "ide/ide.h"
 #include "project/project.h"
 #include "project/text_file.h"
@@ -29,10 +30,6 @@ std::string lowerOf(std::string text) {
   for (char& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   return text;
 }
-
-// A name with a slash or a dot in it is a path, as the storage device
-// reads one.
-bool isPath(const std::string& name) { return name.find_first_of("/\\.") != std::string::npos; }
 
 }  // namespace
 
@@ -140,7 +137,7 @@ BasicSlots Ide::basicSlots() {
 void Ide::hostStorage() {
   Storage::Host host;
   host.find = [this](const std::string& name) -> std::optional<std::string> {
-    if (isPath(name)) {
+    if (storage::isPath(name)) {
       // A path is read from the disk, against the project's folder.
       // DESIGN: the program in the machine names the path, and it may be
       // a ROM or a project somebody else made. readProgramFileIn judges
