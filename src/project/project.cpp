@@ -640,6 +640,10 @@ std::vector<fs::path> loadRoots(const fs::path& projectDir, const fs::path& proj
   std::vector<fs::path> roots;
   if (projectDir.empty()) return roots;
   roots.push_back(projectDir);
+  // A relative folder has no parent to name; the absolute form, which
+  // readProgramFileIn takes, has one.
+  const fs::path parent = projectDir.parent_path();
+  if (!parent.empty() && parent != projectDir) roots.push_back(parent);
   if (!projectsFolder.empty()) roots.push_back(projectsFolder);
   for (const fs::path& folder : libraries) {
     if (!folder.empty()) roots.push_back(folder);

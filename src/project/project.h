@@ -168,10 +168,10 @@ constexpr ExampleKind EXAMPLE_KINDS[] = {
 std::optional<std::string> readProgramFile(const std::filesystem::path& file);
 
 // The folders a LOAD by path may read from: the project's own folder,
-// the projects folder the person set, and the libraries folders. The
-// folder a project happens to sit in is not one. For a project in the
-// home folder that would be the whole home folder. A project with no
-// folder has none.
+// the folder it sits in, the projects folder the person set, and the
+// libraries folders. The parent is in so that projects beside each
+// other copy from one another, `LOAD "../pong/sound.bas"`, wherever
+// they sit. Eddie's decision. A project with no folder has none.
 std::vector<std::filesystem::path> loadRoots(const std::filesystem::path& projectDir,
                                              const std::filesystem::path& projectsFolder,
                                              const std::vector<std::filesystem::path>& libraries);

@@ -433,15 +433,15 @@ TEST_SUITE("simplecpu-make new") {
     if (!ec) CHECK_FALSE(project::readProgramFileIn(projects / "game", "link.bas", {projects}));
   }
 
-  // The folder a project happens to sit in is not one of them. For a
-  // project in the home folder it would be the whole home folder.
-  TEST_CASE("a path may reach the project, the projects folder and the libraries, and not the project's parent") {
+  // The folder a project sits in is one of them, so projects beside
+  // each other copy from one another wherever they are.
+  TEST_CASE("a path may reach the project, its parent, the projects folder and the libraries") {
     const fs::path game = fs::path("/home/me/game");
     const std::vector<fs::path> libraries = {"/home/me/projects/libraries", "/home/me/libraries"};
     const std::vector<fs::path> set = project::loadRoots(game, "/home/me/projects", libraries);
-    CHECK(set == std::vector<fs::path>{game, "/home/me/projects", "/home/me/projects/libraries", "/home/me/libraries"});
+    CHECK(set == std::vector<fs::path>{game, "/home/me", "/home/me/projects", "/home/me/projects/libraries", "/home/me/libraries"});
     const std::vector<fs::path> unset = project::loadRoots(game, {}, {});
-    CHECK(unset == std::vector<fs::path>{game});
+    CHECK(unset == std::vector<fs::path>{game, "/home/me"});
     // A project with no folder has nowhere to read from.
     CHECK(project::loadRoots({}, "/home/me/projects", libraries).empty());
   }

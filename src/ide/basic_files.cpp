@@ -145,7 +145,8 @@ void Ide::hostStorage() {
       // DESIGN: the program in the machine names the path, and it may be
       // a ROM or a project somebody else made. readProgramFileIn judges
       // the name before it touches the disk and keeps it inside the
-      // project, the projects folder and the libraries folders. A
+      // project, the folder the project sits in, the projects folder
+      // and the libraries folders. A
       // project with no folder has no path to resolve, as a ROM in
       // simplecpu has none. When no file is read, the device tries the
       // slot the path's stem names.
