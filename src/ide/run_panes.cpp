@@ -1,6 +1,6 @@
-// The Run level's panes. The screen, the registers with the run controls,
-// memory with the watch list, the breakpoints and the listing. The
-// Microcode level shows the listing and the registers too.
+// The panes that watch the machine run. The screen, the registers with
+// the run controls, memory with the watch list, the breakpoints and the
+// listing. The ASSEMBLY view shows them all, the other views some.
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -109,13 +109,12 @@ void Ide::runControls() {
   ImGui::SameLine();
   ImGui::SetNextItemWidth(150);
   const auto ladder = speedLadder();
-  if (ImGui::BeginCombo("##speed", ladder[static_cast<size_t>(speed_)].label)) {
+  if (ImGui::BeginCombo("##speed", ladder[static_cast<size_t>(speedIndex())].label)) {
     for (size_t i = 0; i < ladder.size(); i++) {
       const bool enabled = !ladder[i].micro || computer_.microcodeInspectable();
       if (!enabled) ImGui::BeginDisabled();
-      if (ImGui::Selectable(ladder[i].label, speed_ == static_cast<int>(i))) {
-        speed_ = static_cast<int>(i);
-        if (running_) setRunning(true);
+      if (ImGui::Selectable(ladder[i].label, speedIndex() == static_cast<int>(i))) {
+        pickSpeed(static_cast<int>(i));
       }
       if (!enabled) ImGui::EndDisabled();
     }
@@ -288,8 +287,8 @@ void Ide::stackBody() {
 }
 
 // The editor's breakpoints by file and line, then the listing's by address.
-void Ide::breakpointsPane() {
-  ImGui::Begin("Breakpoints");
+void Ide::breakpointsPane(const char* pane) {
+  ImGui::Begin(pane);
   if (breakpoints_.empty() && sourceBreaks_.empty()) {
     ImGui::TextDisabled("none. Click a line number in the editor, or a line's margin in the listing, to set one.");
   } else {

@@ -118,7 +118,7 @@ void Ide::spritePane() {
   if (focusSprite_ > 0) focusSprite_--;
   bool open = true;
   if (focusPreview) ImGui::SetNextWindowFocus();
-  if (ImGui::Begin("Sprite preview", &open)) {
+  if (ImGui::Begin(pane("Sprite preview").c_str(), &open)) {
     const DisplaySettings before = display;
     sprite_.previewBody(display);
     if (!(display == before)) saveDisplay();
@@ -126,8 +126,8 @@ void Ide::spritePane() {
   ImGui::End();
   if (focus) ImGui::SetNextWindowFocus();
   ImGui::SetNextWindowSize(ImVec2(900, 700), ImGuiCond_FirstUseEver);
-  // The ### keeps one window whatever the title says.
-  if (ImGui::Begin((sprite_.title() + "###Sprite").c_str(), &open)) sprite_.body();
+  // The ### keeps one window per view whatever the title says.
+  if (ImGui::Begin((sprite_.title() + pane("###Sprite")).c_str(), &open)) sprite_.body();
   ImGui::End();
   if (!open) spriteVisible_ = false;
 }

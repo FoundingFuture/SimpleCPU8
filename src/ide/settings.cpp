@@ -69,6 +69,9 @@ void Settings::load() {
       formatAssembly = value != "0";
     } else if (key == "error_sound") {
       errorSound = value != "0";
+    } else if (key == "column") {
+      columnOpen = value != "collapsed";
+      columnKnown = true;
     }
   }
 }
@@ -82,6 +85,7 @@ bool Settings::save() const {
   o << "scale = " << uiScale << "\n";
   o << "format_asm = " << (formatAssembly ? 1 : 0) << "\n";
   o << "error_sound = " << (errorSound ? 1 : 0) << "\n";
+  o << "column = " << (columnOpen ? "open" : "collapsed") << "\n";
   return writeText(file, o.str());
 }
 

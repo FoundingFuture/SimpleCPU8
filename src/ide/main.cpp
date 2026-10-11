@@ -8,14 +8,19 @@
 //                                 sprite editor, or a .font in font mode
 //   simplecpu-ide --font-view block
 //                                 font mode's view: single, strip or block
-//   simplecpu-ide --level run     start in a level: edit, run or microcode
+//   simplecpu-ide --view c        start in a view: basic, c, assembly or
+//                                 microcode
+//   simplecpu-ide --level run     the same by the name of the level the
+//                                 view replaced, for the screenshot scripts:
+//                                 basic is basic, project is c, run is
+//                                 assembly, cpu is microcode
 //   simplecpu-ide --run           start running, --speed f60 picks the rate
 //                                 (trace, 0.5, 2, 10, 60, 1000, 100000,
 //                                 f30, f60, f120, max)
 //   simplecpu-ide --screenshot shot.png
 //                                 save the window after one second and quit
 //
-// F1, F2 and F3 switch the level. F5 runs and pauses, Shift+F5 powers on.
+// F1 to F4 pick the view. F5 runs and pauses, Shift+F5 powers on.
 // F6 runs one frame, F7 assembles, F8 burns. F10 steps an instruction and
 // F11 a microcycle.
 
@@ -59,20 +64,26 @@ int main(int argc, char** argv) {
     ide.applyScale();
     std::string screenshot;
     bool run = false;
-    // An opened project picks its own level. A --level on the command
-    // line is applied after everything opened, so it wins.
-    std::optional<sc8::Level> level;
+    // An opened project picks its own view. A --view on the command line
+    // is applied after everything opened, so it wins.
+    std::optional<sc8::View> view;
     for (int i = 1; i < argc; i++) {
       const std::string a = argv[i];
       if (a == "--screenshot" && i + 1 < argc) {
         screenshot = argv[++i];
+      } else if (a == "--view" && i + 1 < argc) {
+        const std::string name = argv[++i];
+        view = sc8::viewNamed(name);
+        if (!view) std::fprintf(stderr, "unknown view %s: basic, c, assembly or microcode\n", name.c_str());
       } else if (a == "--level" && i + 1 < argc) {
         const std::string name = argv[++i];
-        if (name == "basic") level = sc8::Level::Basic;
-        else if (name == "project" || name == "edit") level = sc8::Level::Project;
-        else if (name == "run") level = sc8::Level::Run;
-        else if (name == "cpu" || name == "microcode") level = sc8::Level::Cpu;
-        else std::fprintf(stderr, "unknown level %s: basic, project, run or cpu\n", name.c_str());
+        view = sc8::viewOfLevel(name);
+        if (!view) {
+          std::fprintf(stderr,
+                       "unknown level %s: --level takes the old names basic, project, run or cpu, for the views "
+                       "basic, c, assembly and microcode. --view takes the new ones.\n",
+                       name.c_str());
+        }
       } else if (a == "--speed" && i + 1 < argc) {
         if (!ide.setSpeed(argv[++i])) std::fprintf(stderr, "unknown speed %s\n", argv[i]);
       } else if (a == "--font-view" && i + 1 < argc) {
@@ -84,7 +95,7 @@ int main(int argc, char** argv) {
       }
     }
     ide.restoreSprite();
-    if (level) ide.setLevel(*level);
+    if (view) ide.setView(*view);
     if (run) ide.run();
 
     int hostFrames = 0;

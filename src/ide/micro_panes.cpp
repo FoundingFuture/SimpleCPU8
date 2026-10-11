@@ -1,4 +1,4 @@
-// The Microcode level's panes: the datapath schema, the flow view and the
+// The MICROCODE view's panes: the datapath schema, the flow view and the
 // rows with their editor. The seal is respected here: on @optimal the rows
 // stay hidden and the lanes light from the bus events alone.
 #include <algorithm>
@@ -346,7 +346,7 @@ void executionView(const Machine& m, const std::function<std::string(uint16_t)>&
 // holds the whole text in the file format. Apply runs the parser and
 // shows its errors.
 void Ide::microcodePane() {
-  ImGui::Begin("Microcode");
+  ImGui::Begin(pane("Execution").c_str());
   const std::string& name = computer_.microcodeName();
   const bool custom = name != "@naive" && name != "@optimal";
   if (ImGui::RadioButton("@naive", name == "@naive")) selectMicrocode("@naive");
@@ -494,7 +494,7 @@ bool Ide::sectionHeader(Section s, Place here) {
 // scroll, so a person keeps the datapath and the stack in sight together
 // or folds what is not needed now.
 void Ide::cpuPane() {
-  ImGui::Begin("CPU");
+  ImGui::Begin(pane("CPU").c_str());
   runControls();
   ImGui::Separator();
   ImGui::BeginChild("cpu-sections", ImVec2(0, 0), ImGuiChildFlags_None);
@@ -565,7 +565,7 @@ void Ide::sideScreen() {
 // the stack and the manual. The manual comes last and takes the height
 // that is left, so folding it leaves room for the rest.
 void Ide::sidePane() {
-  ImGui::Begin("Side##cpu");
+  ImGui::Begin(pane("Side").c_str());
   const float line = ImGui::GetTextLineHeightWithSpacing();
   if (sectionHeader(SecScreen, Place::Side)) sideScreen();
   if (sectionHeader(SecRegisters, Place::Side)) {

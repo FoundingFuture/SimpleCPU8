@@ -1,5 +1,6 @@
-// The project: its documents, the Files and Editor panes, the build, and
-// the BASIC bridge between the active .bas document and the interpreter.
+// The project: its documents, each view's editor, the build, and the
+// BASIC bridge between the active .bas document and the interpreter.
+// project_column.cpp draws the project's files.
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -45,16 +46,6 @@ std::optional<std::string> readText(const fs::path& p) {
 }
 
 }  // namespace
-
-DocKind docKindOf(const std::string& name) {
-  const std::string ext = fs::path(name).extension().string();
-  if (name == "microcode.txt") return DocKind::Microcode;
-  if (ext == ".c") return DocKind::C;
-  if (ext == ".h") return DocKind::Header;
-  if (ext == ".asm") return DocKind::Assembly;
-  if (ext == ".bas") return DocKind::Basic;
-  return DocKind::Other;
-}
 
 // ---- the project
 
@@ -133,8 +124,9 @@ void Ide::newScratchProject() {
   filesChanged_ = false;
   addDoc("main.asm", DEFAULT_SOURCE);
   docs_.back().dirty = false;
-  activate(0);
+  settleActive();
   buildProject(false);
+  viewForProject();
 }
 
 void Ide::addDoc(const std::string& name, const std::string& text) {
@@ -147,10 +139,18 @@ void Ide::addDoc(const std::string& name, const std::string& text) {
   std::sort(docs_.begin(), docs_.end(), [](const Doc& a, const Doc& b) { return a.name < b.name; });
 }
 
-Doc* Ide::activeDoc() { return active_ < docs_.size() ? &docs_[active_] : nullptr; }
+Doc* Ide::docNamed(const std::string& name) {
+  for (Doc& d : docs_) {
+    if (d.name == name) return &d;
+  }
+  return nullptr;
+}
 
-// The manual follows the document: a .bas opens the BASIC guide, a .c
-// the C guide, and so on. The Reference tab stays where the reader put it.
+Doc* Ide::activeDocOf(View view) {
+  Doc* d = docNamed(activeName_[static_cast<int>(view)]);
+  return d && d->open ? d : nullptr;
+}
+
 void Ide::askRemove(const std::string& name, bool asset) {
   removing_ = name;
   removingAsset_ = asset;
@@ -271,20 +271,60 @@ void Ide::removeDoc(const std::string& name) {
     note(name + " left the project");
     filesChanged_ = true;
   }
-  const size_t index = static_cast<size_t>(it - docs_.begin());
   docs_.erase(it);
   if (syncDoc_ == name) syncDoc_.clear();
-  if (active_ > index || active_ >= docs_.size()) active_ = docs_.empty() ? 0 : active_ - (active_ > 0 ? 1 : 0);
-  if (!docs_.empty()) activate(active_);
+  settleActive();
 }
 
 void Ide::activate(size_t index) {
   if (index >= docs_.size()) return;
-  active_ = index;
-  if (auto g = guideFor(docs_[index].name)) {
-    guideView_.guide = *g;
-    manualTab_ = static_cast<int>(*g);
+  Doc& d = docs_[index];
+  const std::optional<View> view = viewOfKind(docKindOf(d.name));
+  if (!view) return;
+  d.open = true;
+  activeName_[static_cast<int>(*view)] = d.name;
+  selectTab_[static_cast<int>(*view)] = d.name;
+}
+
+void Ide::openDoc(size_t index) {
+  if (index >= docs_.size()) return;
+  activate(index);
+  if (const std::optional<View> view = viewOfKind(docKindOf(docs_[index].name))) setView(*view);
+  focusAfterLayout_ = pane("Editor");
+}
+
+// A view whose active document is gone or closed takes another of its
+// open documents: main.c, main.asm or autorun.bas when it has one, since
+// that is where a reader starts, else the first by name.
+void Ide::settleActive() {
+  for (int v = 0; v < VIEW_COUNT; v++) {
+    if (activeDocOf(static_cast<View>(v))) continue;
+    activeName_[v].clear();
+    for (const Doc& d : docs_) {
+      if (!d.open || viewOfKind(docKindOf(d.name)) != static_cast<View>(v)) continue;
+      const bool main = d.name == "main.c" || d.name == "main.asm" || d.name == "autorun.bas";
+      if (activeName_[v].empty() || main) activeName_[v] = d.name;
+    }
+    selectTab_[v] = activeName_[v];
   }
+}
+
+bool Ide::newDoc(const std::string& name) {
+  if (name.empty()) return false;
+  if (docKindOf(name) == DocKind::Other) {
+    note(name + ": a source is a .c, .h, .asm or .bas file, or microcode.txt");
+    return false;
+  }
+  if (!docNamed(name)) {
+    std::string text;
+    if (name == "microcode.txt") text = "# your microcode set, started from the naive one\n\n" + serializeMicrocode(buildNaive());
+    addDoc(name, text);
+    docNamed(name)->dirty = true;
+  }
+  for (size_t i = 0; i < docs_.size(); i++) {
+    if (docs_[i].name == name) openDoc(i);
+  }
+  return true;
 }
 
 project::Layout Ide::layout() const {
@@ -324,31 +364,26 @@ void Ide::openProject(const std::string& dir) {
     if (auto t = readText(entry.path())) addDoc(name, *t);
   }
   for (Doc& d : docs_) d.dirty = false;
-  if (docs_.empty()) {
-    note(l.sources.string() + " holds no source yet: add one with the field under the file list");
-  } else {
-    // main.c, main.asm or autorun.bas first, since that is where a
-    // reader starts.
-    size_t first = 0;
-    for (size_t i = 0; i < docs_.size(); i++) {
-      const std::string& n = docs_[i].name;
-      if (n == "main.c" || n == "main.asm" || n == "autorun.bas") first = i;
-    }
-    activate(first);
-  }
-  focusFiles_ = true;
+  if (docs_.empty()) note(l.sources.string() + " holds no source yet: New file in the project column adds one");
+  settleActive();
   buildProject(false);
   note("opened project " + projectTitle_ + " in " + projectDir_);
   if (example_) note(projectTitle_ + " is an example: it stays as it is. File, Save project as keeps your copy.");
-  levelForProject();
+  viewForProject();
 }
 
-void Ide::levelForProject() {
-  const bool allBasic = !docs_.empty() && std::all_of(docs_.begin(), docs_.end(), [](const Doc& d) {
-    return docKindOf(d.name) == DocKind::Basic;
-  });
-  if (allBasic) setLevel(Level::Basic);
-  else if (level_ == Level::Basic) setLevel(Level::Project);
+void Ide::viewForProject() {
+  if (docs_.empty()) return;
+  if (docNamed("microcode.txt")) {
+    setView(View::Microcode);
+    return;
+  }
+  for (const char* name : {"main.c", "main.asm", "autorun.bas"}) {
+    if (!docNamed(name)) continue;
+    setView(*viewOfKind(docKindOf(name)));
+    return;
+  }
+  setView(*viewOfKind(docKindOf(docs_.front().name)));
 }
 
 // A ROM is a project too: its BASIC slots and its own microcode set are
@@ -389,12 +424,6 @@ void Ide::openRomAsProject(const std::string& path) {
     romBase_ = std::move(*r.cartridge);
     romBase_->sources.clear();
     for (Doc& d : docs_) d.dirty = false;
-    size_t first = 0;
-    for (size_t i = 0; i < docs_.size(); i++) {
-      const std::string& n = docs_[i].name;
-      if (n == "main.c" || n == "main.asm" || n == "autorun.bas") first = i;
-    }
-    activate(first);
     carriedProject_ = true;
   } else {
     for (const auto& [name, text] : r.cartridge->basic) {
@@ -408,13 +437,12 @@ void Ide::openRomAsProject(const std::string& path) {
     romBase_ = std::move(*r.cartridge);
     carriedProject_ = false;
     for (Doc& d : docs_) d.dirty = false;
-    if (!docs_.empty()) activate(0);
   }
-  focusFiles_ = true;
+  settleActive();
   buildProject(false);
   note("opened ROM " + path + (carriedProject_ ? " with its project: " : " as a project: ") +
        std::to_string(docs_.size()) + " document(s)" + (carriedProject_ ? "" : ", the program as it is"));
-  levelForProject();
+  viewForProject();
 }
 
 void Ide::createProject(const std::string& dir, project::Kind kind) {
@@ -601,6 +629,7 @@ bool Ide::anyDirty() const {
 // well. A project without one is built from the documents in memory.
 void Ide::buildProject(bool run) {
   messages_.clear();
+  builtRom_.clear();
   project::Options o;
   project::Built built;
   if (example_) {
@@ -611,7 +640,10 @@ void Ide::buildProject(bool run) {
     saveAll();
     project::Written w = project::buildAndWrite(layout(), o);
     built = std::move(w.built);
-    if (built.cartridge) note("wrote " + w.rom.string());
+    if (built.cartridge) {
+      builtRom_ = w.rom.string();
+      note("wrote " + w.rom.string());
+    }
   } else {
     built = buildInMemory();
   }
@@ -719,8 +751,8 @@ void Ide::bootBasic() {
 // already runs one, put the program in its memory and type RUN. The push
 // waits for the boot, since the system page is empty until then.
 void Ide::runInBasic() {
-  Doc* d = activeDoc();
-  if (!d || docKindOf(d->name) != DocKind::Basic) return;
+  Doc* d = activeDocOf(View::Basic);
+  if (!d) return;
   syncDoc_ = d->name;
   if (!basicBooted_ || computer_.machine().status != Status::Running) bootBasic();
   pushPending_ = true;
@@ -761,11 +793,10 @@ void Ide::setDocText(Doc& doc, std::string text) {
 }
 
 // The document in step with the interpreter: the .bas document in the
-// editor, else the one last in step, else autorun.bas, which a built
-// BASIC project boots into.
+// BASIC view's editor, else the one last in step, else autorun.bas, which
+// a built BASIC project boots into.
 Doc* Ide::basicPartner() {
-  Doc* active = activeDoc();
-  if (active && docKindOf(active->name) == DocKind::Basic) return active;
+  if (Doc* active = activeDocOf(View::Basic)) return active;
   for (Doc& d : docs_) {
     if (d.name == syncDoc_) return &d;
   }
@@ -854,145 +885,59 @@ void Ide::typeIntoMachine() {
 
 // ---- the panes
 
-void Ide::filesPane(const char* name, bool* open) {
-  if (focusFiles_) {
-    ImGui::SetNextWindowFocus();
-    focusFiles_ = false;
-  }
-  ImGui::Begin(name, open);
-  const std::string where = projectDir_.empty() ? (romBase_ ? "a ROM, not saved as a folder yet" : "not saved yet")
-                                                : projectDir_;
-  ImGui::TextWrapped("%s", projectTitle_.c_str());
-  ImGui::TextDisabled("%s", where.c_str());
-  if (ImGui::SmallButton("Build")) buildProject(false);
-  ImGui::SameLine();
-  if (ImGui::SmallButton("Build and run")) buildProject(true);
-  ImGui::BeginDisabled(example_);
-  if (ImGui::SmallButton("Save")) saveProject();
-  ImGui::EndDisabled();
-  ImGui::SameLine();
-  if (ImGui::SmallButton("Boot BASIC")) bootBasic();
-  ImGui::SameLine();
-  if (activeDoc() && ImGui::SmallButton("Remove")) askRemove(activeDoc()->name);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("remove the selected file from the project; a right click on a file does too");
-  ImGui::Separator();
-  for (size_t i = 0; i < docs_.size(); i++) {
-    const Doc& d = docs_[i];
-    const std::string label = d.name + (d.dirty ? " *" : "");
-    if (ImGui::Selectable(label.c_str(), i == active_)) activate(i);
-    if (ImGui::BeginPopupContextItem()) {
-      if (ImGui::MenuItem(("Remove " + d.name + "...").c_str())) askRemove(d.name);
-      ImGui::EndPopup();
-    }
-  }
-  ImGui::Spacing();
-  ImGui::SetNextItemWidth(-1.0f);
-  if (panes::inputLine("##new", newDocName_, "new file: name.c, .h, .asm, .bas, Enter",
-                       ImGuiInputTextFlags_EnterReturnsTrue)) {
-    const std::string n = newDocName_;
-    if (!n.empty() && docKindOf(n) != DocKind::Other) {
-      bool exists = false;
-      for (const Doc& d : docs_) exists = exists || d.name == n;
-      if (!exists) {
-        std::string text;
-        if (n == "microcode.txt") text = "# your microcode set, started from the naive one\n\n" + serializeMicrocode(buildNaive());
-        addDoc(n, text);
-        docs_.back().dirty = true;
-        std::sort(docs_.begin(), docs_.end(), [](const Doc& a, const Doc& b) { return a.name < b.name; });
-      }
-      for (size_t i = 0; i < docs_.size(); i++) {
-        if (docs_[i].name == n) activate(i);
-      }
-      newDocName_.clear();
-    } else if (!n.empty()) {
-      note(n + ": a source is a .c, .h, .asm or .bas file, or microcode.txt");
-    }
-  }
-  // The assets: pictures, sounds and any file the sources name.
-  ImGui::Spacing();
-  ImGui::SeparatorText("Assets");
-  if (assetsStale_) {
-    shownAssets_ = assetList();
-    assetsStale_ = false;
-  }
-  // A button below that changes the assets only marks the list stale, so
-  // the list stays whole while the loop walks it.
-  const std::vector<AssetEntry>& assets = shownAssets_;
-  if (assets.empty()) ImGui::TextDisabled("none yet");
-  for (const AssetEntry& a : assets) {
-    ImGui::PushID(a.name.c_str());
-    const bool picture = isDrawable(a.name);
-    const bool isFontAsset = SpriteEditor::isFont(a.name);
-    const char* editor = isFontAsset ? "font editor" : "sprite editor";
-    const bool editing = sprite_.isOpen() && sprite_.name() == a.name;
-    if (ImGui::Selectable(a.name.c_str(), editing, ImGuiSelectableFlags_AllowDoubleClick) && picture &&
-        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-      openSprite(a.name);
-    }
-    if (ImGui::IsItemHovered() && isFontAsset) {
-      const std::string stem = fs::path(a.name).stem().string();
-      ImGui::SetTooltip("%s, %ju bytes. C names it as __font(\"%s\"), assembly as .font('%s'), BASIC as "
-                        "LOADFONT %s. A double click opens it in the font editor.",
-                        a.name.c_str(), a.bytes, a.name.c_str(), a.name.c_str(), stem.c_str());
-    } else if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("%s, %ju bytes. C names it as __sprite(\"%s\"), __image, __sample or __file; "
-                        "assembly as .sprite('%s'), .image, .sample or .file.%s",
-                        a.name.c_str(), a.bytes, a.name.c_str(), a.name.c_str(),
-                        picture ? " A double click opens it in the sprite editor." : "");
-    }
-    if (ImGui::BeginPopupContextItem()) {
-      if (picture && ImGui::MenuItem((std::string("Edit in the ") + editor).c_str())) openSprite(a.name);
-      if (ImGui::MenuItem(("Remove " + a.name + "...").c_str())) askRemove(a.name, true);
-      ImGui::EndPopup();
-    }
-    ImGui::PopID();
-  }
-  if (ImGui::SmallButton("Add asset...")) {
-    dialog_.open(FileDialog::Mode::OpenFile, "Add a file to the project's assets", fs::current_path(), {},
-                 [this](const fs::path& p) { addAsset(p.string()); });
-  }
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("copy a picture, a sound or any file into the project; a right click on an asset removes it");
-  ImGui::SameLine();
-  if (ImGui::SmallButton("New sprite...")) askNewSprite();
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("draw a new sprite strip, saved as a PNG under Assets");
-  {
-    // Beside New sprite when the pane is wide enough, under it otherwise.
-    const ImGuiStyle& st = ImGui::GetStyle();
-    const float w = ImGui::CalcTextSize("New font...").x + st.FramePadding.x * 2.0f;
-    if (ImGui::GetItemRectMax().x + st.ItemSpacing.x + w <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) {
-      ImGui::SameLine();
-    }
-  }
-  if (ImGui::SmallButton("New font...")) askNewFont_ = true;
-  if (ImGui::IsItemHovered()) {
-    ImGui::SetTooltip("a copy of the built-in font as a .font under Assets, opened in the font editor");
-  }
-
-  if (romBase_ && !carriedProject_) {
-    ImGui::Spacing();
-    ImGui::TextWrapped("The ROM carries no project. Its program is not a document and its listing is a disassembly.");
-  } else if (carriedProject_) {
-    ImGui::Spacing();
-    ImGui::TextWrapped("The project came out of the ROM. Save writes it back into the ROM file. "
-                       "Save project as writes it to a folder.");
-  }
-  ImGui::End();
-}
-
-// The editor shows the active document with the buttons its kind needs.
-// A .bas document has the interpreter beside it: Run in BASIC, the sync
-// state and Pull.
-void Ide::editorPane(const char* name) {
-  ImGui::Begin(name);
-  Doc* d = activeDoc();
-  if (!d) {
-    ImGui::TextDisabled("no document: add one in the Files pane, or open a project");
+// A view's editor: one tab per open document of the view's kind, and
+// under the tabs the active document. A tab's close button takes the tab
+// away and leaves the document in the project.
+void Ide::editorPane(View view) {
+  const int v = static_cast<int>(view);
+  if (!ImGui::Begin(paneName("Editor", view).c_str())) {
     ImGui::End();
     return;
   }
+  // A tab asked for from elsewhere is selected by Dear ImGui one frame
+  // later. Until then the tab it shows is not what the person picked.
+  const bool pending = !selectTab_[v].empty();
+  std::string picked;
+  if (ImGui::BeginTabBar("docs", ImGuiTabBarFlags_FittingPolicyScroll)) {
+    for (Doc& d : docs_) {
+      if (!d.open || viewOfKind(docKindOf(d.name)) != view) continue;
+      ImGuiTabItemFlags flags = d.dirty ? ImGuiTabItemFlags_UnsavedDocument : 0;
+      if (pending && selectTab_[v] == d.name) flags |= ImGuiTabItemFlags_SetSelected;
+      bool open = true;
+      if (ImGui::BeginTabItem(d.name.c_str(), &open, flags)) {
+        if (!pending) picked = d.name;
+        ImGui::EndTabItem();
+      }
+      if (!open) d.open = false;
+    }
+    ImGui::EndTabBar();
+    selectTab_[v].clear();
+  }
+  if (!picked.empty()) activeName_[v] = picked;
+  if (!activeDocOf(view)) settleActive();
+  Doc* d = activeDocOf(view);
+  if (!d) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("no %s document is open. New file in the project column adds one.", viewLabel(view));
+    ImGui::PopStyleColor();
+    if (view == View::Microcode && !docNamed("microcode.txt")) {
+      if (ImGui::SmallButton("Start microcode.txt from the naive set")) newDoc("microcode.txt");
+    }
+    ImGui::End();
+    return;
+  }
+  // Each document is its own text box, with its own scroll and undo.
+  ImGui::PushID(d->name.c_str());
+  editorBody(*d);
+  ImGui::PopID();
+  ImGui::End();
+}
+
+// The active document with the buttons its kind needs. A .bas document
+// has the interpreter beside it: Run in BASIC and the sync state.
+void Ide::editorBody(Doc& doc) {
+  Doc* d = &doc;
   const DocKind kind = docKindOf(d->name);
-  ImGui::Text("%s%s", d->name.c_str(), d->dirty ? " (unsaved)" : "");
-  ImGui::SameLine();
   ImGui::BeginDisabled(example_);
   if (ImGui::SmallButton("Save")) saveProject();
   ImGui::EndDisabled();
@@ -1043,7 +988,7 @@ void Ide::editorPane(const char* name) {
       }
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("the set the ROM carries; the CPU level shows its rows firing");
+    ImGui::TextDisabled("the set the ROM carries. The panes beside it show its rows firing");
   } else if (kind == DocKind::C) {
     ImGui::SameLine();
     ImGui::TextDisabled("Build compiles every .c together; the Assembly pane shows the result");
@@ -1085,16 +1030,15 @@ void Ide::editorPane(const char* name) {
     }
     if (gutter.clicked) toggleSourceBreak(*d, gutter.clicked);
   }
-  ImGui::End();
 }
 
 // The assembly the last build handed the assembler: the compiler's
 // output, then the project's own .asm files. Read only, since the
 // sources are the documents.
-void Ide::assemblyPane() {
-  ImGui::Begin("Assembly");
+void Ide::assemblyPane(const char* name) {
+  ImGui::Begin(name);
   if (builtAssembly_.empty()) {
-    ImGui::TextDisabled(romBase_ ? "an opened ROM has no assembly; the Run level lists its program"
+    ImGui::TextDisabled(romBase_ ? "an opened ROM has no assembly. The ASSEMBLY view lists its program"
                                  : "build the project to see the assembly it makes");
   } else {
     ImGui::TextDisabled("what the assembler saw at the last build, read only");

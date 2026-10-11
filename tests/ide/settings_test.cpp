@@ -50,6 +50,22 @@ TEST_SUITE("the settings folder") {
     CHECK(Settings::examplesDir().empty());
   }
 
+  // The project column is open until its toggle collapses it, and the
+  // next start finds it as it was left.
+  TEST_CASE("the project column's state is kept, open by default") {
+    FakeHome home;
+    Settings fresh;
+    fresh.load();
+    CHECK(fresh.columnOpen);
+    CHECK_FALSE(fresh.columnKnown);
+    fresh.columnOpen = false;
+    REQUIRE(fresh.save());
+    Settings next;
+    next.load();
+    CHECK_FALSE(next.columnOpen);
+    CHECK(next.columnKnown);
+  }
+
   // A text-mode stream on Windows writes CR LF. This fails there alone.
   TEST_CASE("settings.txt has LF line ends") {
     FakeHome home;

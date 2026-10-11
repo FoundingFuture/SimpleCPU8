@@ -112,6 +112,12 @@ Ide::Ide()
   registerLayoutHandler();
   customText_.reserve(1 << 15);
   settings_.load();
+  columnFromSettings_ = settings_.columnKnown;
+  for (int v = 0; v < VIEW_COUNT; v++) {
+    for (size_t i = 0; i < std::size(LADDER); i++) {
+      if (std::string_view(LADDER[i].value) == defaultSpeed(static_cast<View>(v))) speed_[v] = static_cast<int>(i);
+    }
+  }
   loadDisplay();
   audio_.start();
   readExamples();
@@ -233,6 +239,35 @@ void Ide::registerLayoutHandler() {
     out->append("\n");
   };
   ImGui::AddSettingsHandler(&sp);
+
+  // The project column, as one entry:
+  //
+  //   [SC8Column][State]
+  //   Open=1
+  //   Width=230
+  //
+  // settings.txt keeps the open state too, written at every toggle, and
+  // wins when it has the line. Width is in pixels at UI size 1.
+  ImGuiSettingsHandler col;
+  col.TypeName = "SC8Column";
+  col.TypeHash = ImHashStr("SC8Column");
+  col.UserData = this;
+  col.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler* handler, const char*) -> void* { return handler->UserData; };
+  col.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler*, void* entry, const char* text) {
+    Ide* ide = static_cast<Ide*>(entry);
+    int a = 0;
+    if (readInts(text, "Open", a)) {
+      if (!ide->columnFromSettings_) ide->settings_.columnOpen = a != 0;
+    } else if (readInts(text, "Width", a)) {
+      ide->columnWidth_ = std::clamp(static_cast<float>(a), COLUMN_MIN, COLUMN_MAX);
+    }
+  };
+  col.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* handler, ImGuiTextBuffer* out) {
+    const Ide* ide = static_cast<const Ide*>(handler->UserData);
+    out->appendf("[%s][State]\n", handler->TypeName);
+    out->appendf("Open=%d\nWidth=%d\n\n", ide->settings_.columnOpen ? 1 : 0, static_cast<int>(ide->columnWidth_));
+  };
+  ImGui::AddSettingsHandler(&col);
 }
 
 void Ide::restoreSprite() {
@@ -350,7 +385,7 @@ void Ide::open(const std::string& path) {
     openProject(dir.string());
     const std::string name = fs::path(path).filename().string();
     for (size_t i = 0; i < docs_.size(); i++) {
-      if (docs_[i].name == name) activate(i);
+      if (docs_[i].name == name) openDoc(i);
     }
     return;
   }
@@ -361,52 +396,52 @@ void Ide::open(const std::string& path) {
     fs::path dir = file.parent_path();
     if (dir.filename() == "assets") dir = dir.parent_path();
     openProject(dir.string());
-    setLevel(Level::Project);
     openSprite(file.filename().string());
-    if (sprite_.isOpen()) focusAfterLayout_ = "###Sprite";
     return;
   }
   note("cannot open " + path + ": a .rom, a folder, a picture, a .font, or a .c, .h, .asm, .bas or microcode.txt");
 }
 
 void Ide::run() {
-  if (openedBasic_ && activeDoc() && docKindOf(activeDoc()->name) == DocKind::Basic && !projectDir_.empty()) {
+  if (openedBasic_ && activeDocOf(View::Basic) && !projectDir_.empty()) {
     // The whole project built when it opened. Its AUTORUN is running
     // already when the .bas was that one; any other runs the quick way.
-    if (activeDoc()->name == "autorun.bas") setRunning(true);
+    if (activeDocOf(View::Basic)->name == "autorun.bas") setRunning(true);
     else runInBasic();
     return;
   }
   setRunning(true);
 }
 
-void Ide::setLevel(Level level) {
-  level_ = level;
-  // The manual follows the level too: the BASIC level opens the BASIC
-  // guide, the CPU level the microcode guide, the Run level the assembly
-  // guide. Project keeps the document's.
-  if (level == Level::Basic) {
-    guideView_.guide = Guide::Basic;
-    manualTab_ = static_cast<int>(Guide::Basic);
-  } else if (level == Level::Cpu) {
-    guideView_.guide = Guide::Microcode;
-    manualTab_ = static_cast<int>(Guide::Microcode);
-  } else if (level == Level::Run) {
-    guideView_.guide = Guide::Assembly;
-    manualTab_ = static_cast<int>(Guide::Assembly);
-  } else if (activeDoc()) {
-    activate(active_);
-  }
+void Ide::setView(View view) {
+  const bool changed = view != view_;
+  view_ = view;
+  // Each view runs at its own speed, so a running machine takes the new
+  // view's pace.
+  if (changed && running_) setRunning(true);
 }
+
+std::string Ide::paneName(const char* base, View view) { return std::string(base) + "##" + viewKey(view); }
 
 bool Ide::setSpeed(const std::string& value) {
   for (size_t i = 0; i < std::size(LADDER); i++) {
     if (value == LADDER[i].value) {
-      speed_ = static_cast<int>(i);
+      for (int& s : speed_) s = static_cast<int>(i);
       return true;
     }
   }
   return false;
+}
+
+int Ide::speedIndex() const {
+  const int index = speed_[static_cast<int>(view_)];
+  if (LADDER[static_cast<size_t>(index)].micro && !computer_.microcodeInspectable()) return 1;
+  return index;
+}
+
+void Ide::pickSpeed(int index) {
+  speed_[static_cast<int>(view_)] = index;
+  if (running_) setRunning(true);
 }
 
 void Ide::requestQuit() {
@@ -459,7 +494,7 @@ void Ide::setRunning(bool on) {
   owed_ = 0.0;
   tick_ = 0.0;
   freshRun_ = on;
-  const Speed& s = LADDER[static_cast<size_t>(speed_)];
+  const Speed& s = LADDER[static_cast<size_t>(speedIndex())];
   if (on) {
     computer_.setTrace(tracedRun(s));
     // Real frames drive the frame-locked rates and MAX. The trace speed
@@ -477,7 +512,7 @@ void Ide::setRunning(bool on) {
 // frame loop. Each branch stops the run when the machine stopped. A
 // breakpoint stops it too.
 void Ide::pace() {
-  const Speed& s = LADDER[static_cast<size_t>(speed_)];
+  const Speed& s = LADDER[static_cast<size_t>(speedIndex())];
   // The frame a run starts in may have begun in an idle wait for input.
   // That wait is not time the machine owes, so the first frame counts none.
   const double dt = freshRun_ ? 0.0 : static_cast<double>(GetFrameTime());
@@ -624,8 +659,6 @@ void Ide::selectMicrocode(const std::string& name) {
   if (lockedMicrocode_) lockedMicrocode_ = name;
   pushBreakpoints();
   selectedSection_ = 0;
-  // The trace speed needs readable rows, which the sealed set hides.
-  if (!computer_.microcodeInspectable() && LADDER[static_cast<size_t>(speed_)].micro) speed_ = 1;
 }
 
 // After every insert: a locked set replaces whatever the cartridge
@@ -871,32 +904,60 @@ void Ide::update() {
   spritePreview();
 }
 
-// Each level owns a dockspace with a fixed id. imgui.ini keeps three
-// layouts, so a rearrangement inside one level survives a switch. The
-// hidden levels are submitted with KeepAliveOnly. That keeps their
-// windows docked while they are not drawn.
+// Each view owns a dockspace with a fixed id, so the layout file keeps
+// four layouts and a rearrangement inside one view survives a switch.
+// The hidden views are submitted with KeepAliveOnly. That keeps their
+// windows docked while they are not drawn. The dockspaces share one host
+// window, which fills the window right of the project column.
 void Ide::frame() {
   // The number in the id is the layout's version. A new pane bumps it, so
-  // an imgui.ini from before the pane rebuilds the level once rather than
+  // a layout file from before the pane rebuilds the view once rather than
   // leaving the newcomer floating.
-  static const ImGuiID IDS[LEVEL_COUNT] = {ImHashStr("sc8-level-basic-1"), ImHashStr("sc8-level-project-4"),
-                                           ImHashStr("sc8-level-run-2"), ImHashStr("sc8-level-cpu-4")};
+  static const ImGuiID IDS[VIEW_COUNT] = {ImHashStr("sc8-view-basic-5"), ImHashStr("sc8-view-c-5"),
+                                          ImHashStr("sc8-view-assembly-5"), ImHashStr("sc8-view-microcode-5")};
   const ImGuiViewport* vp = ImGui::GetMainViewport();
-  const int active = static_cast<int>(level_);
-  for (int i = 0; i < LEVEL_COUNT; i++) {
-    if (i != active) ImGui::DockSpaceOverViewport(IDS[i], vp, ImGuiDockNodeFlags_KeepAliveOnly);
+  const float column = projectColumn();
+  const int active = static_cast<int>(view_);
+  ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + column, vp->WorkPos.y));
+  ImGui::SetNextWindowSize(ImVec2(std::max(1.0f, vp->WorkSize.x - column), vp->WorkSize.y));
+  ImGui::SetNextWindowViewport(vp->ID);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+  ImGui::Begin("##views", nullptr,
+               ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                   ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings);
+  ImGui::PopStyleVar(3);
+  for (int i = 0; i < VIEW_COUNT; i++) {
+    if (i != active) ImGui::DockSpace(IDS[i], ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_KeepAliveOnly);
   }
-  const ImGuiID dockspace = ImGui::DockSpaceOverViewport(IDS[active], vp, ImGuiDockNodeFlags_PassthruCentralNode);
+  const ImGuiID dockspace = ImGui::DockSpace(IDS[active], ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+  const ImVec2 room = ImGui::GetWindowSize();
+  ImGui::End();
+  if (!viewShown_[active]) {
+    viewShown_[active] = true;
+    // The view's own guide: BASIC, C, Assembly, Microcode, in tab order.
+    manualTab_ = active;
+  }
   if (!layoutBuilt_[active]) {
     layoutBuilt_[active] = true;
-    buildLayout(level_, dockspace);
-    // Which tab is in front is decided by focus, and every window of a
-    // fresh layout asks for it. The one a person wants first wins here.
-    if (focusAfterLayout_.empty())
-      focusAfterLayout_ = level_ == Level::Basic   ? "Editor##basic"
-                        : level_ == Level::Project ? "Editor"
-                        : level_ == Level::Run     ? "Memory##run"
-                                                   : "Microcode";
+    if (buildLayout(view_, dockspace, room.x, room.y)) {
+      // Which tab is in front is decided by focus, and every window of a
+      // fresh layout asks for it. Dear ImGui brings one focused window's
+      // tab forward per frame. So each node's first tab takes the focus
+      // for a frame, and the window a person wants first has it last.
+      static const std::vector<const char*> FRONT[VIEW_COUNT] = {
+          {"Manual", "Screen"},
+          {"Messages", "Manual", "Screen"},
+          {"Listing", "Messages", "Registers", "Screen"},
+          {"Listing", "Execution", "Side", "CPU"}};
+      for (const char* name : FRONT[active]) focusQueue_.push_back(pane(name));
+    }
+    if (focusAfterLayout_.empty()) focusAfterLayout_ = pane("Editor");
+  } else if (!focusQueue_.empty()) {
+    ImGui::SetWindowFocus(focusQueue_.front().c_str());
+    focusQueue_.erase(focusQueue_.begin());
   } else if (!focusAfterLayout_.empty()) {
     ImGui::SetWindowFocus(focusAfterLayout_.c_str());
     focusAfterLayout_.clear();
@@ -905,38 +966,32 @@ void Ide::frame() {
   shortcuts();
   followEdits();
   screenHasKeys_ = false;
-  switch (level_) {
-    case Level::Basic:
-      editorPane("Editor##basic");
-      screenPane("Screen##basic");
-      manualPane("Manual##basic");
-      if (basicShowsFiles_) filesPane("Files##basic", &basicShowsFiles_);
-      if (basicShowsMessages_) messagesPane("Messages##basic", &basicShowsMessages_);
+  editorPane(view_);
+  if (spriteVisible_) spritePane();
+  messagesPane(pane("Messages").c_str());
+  // The MICROCODE view has its screen in the side pane.
+  if (view_ != View::Microcode) screenPane(pane("Screen").c_str());
+  switch (view_) {
+    case View::Basic:
+      manualPane(pane("Manual").c_str());
       break;
-    case Level::Project:
-      filesPane("Files");
-      editorPane("Editor");
-      if (spriteVisible_) spritePane();
-      assemblyPane();
-      messagesPane("Messages");
-      screenPane("Screen##project");
-      manualPane("Manual##project");
+    case View::C:
+      assemblyPane(pane("Assembly").c_str());
+      listingPane(pane("Layers").c_str());
+      manualPane(pane("Manual").c_str());
       break;
-    case Level::Run:
-      screenPane("Screen##run");
-      registersPane("Registers##run");
-      memoryPane("Memory##run");
-      stackPane("Stack##run");
-      breakpointsPane();
-      listingPane("Listing##run");
-      messagesPane("Messages");
-      manualPane("Manual##run");
+    case View::Assembly:
+      listingPane(pane("Listing").c_str());
+      registersPane(pane("Registers").c_str());
+      memoryPane(pane("Memory").c_str());
+      stackPane(pane("Stack").c_str());
+      breakpointsPane(pane("Breakpoints").c_str());
+      manualPane(pane("Manual").c_str());
       break;
-    case Level::Cpu:
+    case View::Microcode:
       cpuPane();
       microcodePane();
-      listingPane("Listing##micro");
-      messagesPane("Messages");
+      listingPane(pane("Listing").c_str());
       sidePane();
       break;
   }
@@ -948,89 +1003,103 @@ void Ide::frame() {
   romSaveDialog();
   removeDialog();
   settingsDialog();
+  newFileDialog();
   newSpriteDialog();
   newFontDialog();
   spriteSwitchDialog();
 }
 
-// The first run of a level has no saved layout, so the panes get one
+// The first run of a view has no saved layout, so the panes get one
 // here. A saved layout wins on every later run: the node then has splits
-// and is left alone.
-void Ide::buildLayout(Level level, unsigned dockspace) {
+// and is left alone, and false comes back. The sprite editor docks
+// beside each view's editor and its preview beside the guide.
+bool Ide::buildLayout(View view, unsigned dockspace, float width, float height) {
   ImGuiDockNode* node = ImGui::DockBuilderGetNode(dockspace);
-  if (!node || !node->IsLeafNode()) return;
+  if (!node || !node->IsLeafNode()) return false;
   ImGui::DockBuilderRemoveNode(dockspace);
   ImGui::DockBuilderAddNode(dockspace, ImGuiDockNodeFlags_DockSpace);
-  ImGui::DockBuilderSetNodeSize(dockspace, ImGui::GetMainViewport()->WorkSize);
-  ImGuiID left = dockspace, right, bottom, mid, midBottom, rightBottom, files;
-  switch (level) {
-    case Level::Basic:
-      // The editor large on the left. The screen on the right with the
-      // manual under it. The files and the messages, when the Level menu
-      // shows them, open as tabs beside the editor and the manual.
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.42f, &right, &left);
+  ImGui::DockBuilderSetNodeSize(dockspace, ImVec2(width, height));
+  auto dock = [&](const char* base, ImGuiID where) {
+    ImGui::DockBuilderDockWindow(paneName(base, view).c_str(), where);
+  };
+  ImGuiID mid = dockspace, right, bottom, rightBottom, left, cpu, side;
+  switch (view) {
+    case View::Basic:
+      // The editor large in the middle. The screen on the right, with
+      // the guide under it and the messages as a tab beside the guide.
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Right, 0.42f, &right, &mid);
       ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &rightBottom, &right);
-      ImGui::DockBuilderDockWindow("Files##basic", left);
-      ImGui::DockBuilderDockWindow("Editor##basic", left);
-      ImGui::DockBuilderDockWindow("Screen##basic", right);
-      ImGui::DockBuilderDockWindow("Messages##basic", rightBottom);
-      ImGui::DockBuilderDockWindow("Manual##basic", rightBottom);
+      dock("###Sprite", mid);
+      dock("Editor", mid);
+      dock("Screen", right);
+      dock("Sprite preview", rightBottom);
+      dock("Messages", rightBottom);
+      dock("Manual", rightBottom);
       break;
-    case Level::Project:
-      // The files on the far left, the editor beside them with the
-      // messages under it. The screen on the right, so a program's result
-      // is seen without leaving the editor, and the manual under it.
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.36f, &right, &left);
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Left, 0.26f, &files, &left);
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.22f, &bottom, &left);
+    case View::C:
+      // The editor in the middle with the assembly the build made as a
+      // tab beside it. Under it the messages and the layer below, the
+      // listing that follows the PC. The screen and the guide right.
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Right, 0.38f, &right, &mid);
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Down, 0.26f, &bottom, &mid);
       ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.5f, &rightBottom, &right);
-      ImGui::DockBuilderDockWindow("Files", files);
-      ImGui::DockBuilderDockWindow("Sprite", left);
-      ImGui::DockBuilderDockWindow("Assembly", left);
-      ImGui::DockBuilderDockWindow("Editor", left);
-      ImGui::DockBuilderDockWindow("Messages", bottom);
-      ImGui::DockBuilderDockWindow("Screen##project", right);
-      ImGui::DockBuilderDockWindow("Manual##project", rightBottom);
-      ImGui::DockBuilderDockWindow("Sprite preview", rightBottom);
+      dock("###Sprite", mid);
+      dock("Assembly", mid);
+      dock("Editor", mid);
+      dock("Layers", bottom);
+      dock("Messages", bottom);
+      dock("Screen", right);
+      dock("Sprite preview", rightBottom);
+      dock("Manual", rightBottom);
       break;
-    case Level::Run:
-      // The screen large in the middle, the registers and the run
-      // controls under it. The listing on the left, memory on the right.
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.24f, &right, &left);
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.60f, &mid, &left);
-      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Down, 0.26f, &midBottom, &mid);
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.30f, &bottom, &left);
-      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.30f, &rightBottom, &right);
-      ImGui::DockBuilderDockWindow("Listing##run", left);
-      ImGui::DockBuilderDockWindow("Breakpoints", bottom);
-      ImGui::DockBuilderDockWindow("Screen##run", mid);
-      ImGui::DockBuilderDockWindow("Registers##run", midBottom);
-      // The last window docked into a node is the tab in front.
-      ImGui::DockBuilderDockWindow("Manual##run", right);
-      ImGui::DockBuilderDockWindow("Stack##run", right);
-      ImGui::DockBuilderDockWindow("Memory##run", right);
-      ImGui::DockBuilderDockWindow("Messages", rightBottom);
+    case View::Assembly:
+      // The editor in the middle, the listing beside it with breakpoints
+      // in its margin, the messages under the editor. The screen right
+      // with the guide as a tab beside it. Registers, memory, stack and
+      // breakpoints under the screen.
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Right, 0.32f, &right, &mid);
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Right, 0.46f, &left, &mid);
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Down, 0.22f, &bottom, &mid);
+      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.48f, &rightBottom, &right);
+      dock("###Sprite", mid);
+      dock("Editor", mid);
+      dock("Messages", bottom);
+      dock("Listing", left);
+      dock("Sprite preview", right);
+      dock("Manual", right);
+      dock("Screen", right);
+      dock("Breakpoints", rightBottom);
+      dock("Stack", rightBottom);
+      dock("Memory", rightBottom);
+      dock("Registers", rightBottom);
       break;
-    case Level::Cpu:
-      // The CPU view large in the middle, its sections stacked. The
-      // listing on the left. On the right the microcode rows and the
-      // messages on top, the side pane with the screen and the manual
-      // under them.
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.28f, &right, &left);
-      ImGui::DockBuilderSplitNode(left, ImGuiDir_Right, 0.62f, &mid, &left);
-      ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.60f, &rightBottom, &right);
-      ImGui::DockBuilderDockWindow("Listing##micro", left);
-      ImGui::DockBuilderDockWindow("CPU", mid);
-      ImGui::DockBuilderDockWindow("Messages", right);
-      ImGui::DockBuilderDockWindow("Microcode", right);
-      ImGui::DockBuilderDockWindow("Side##cpu", rightBottom);
+    case View::Microcode:
+      // The microcode document in the middle, the listing left of it.
+      // The CPU pane right of it, the datapath and the flow in its
+      // sections as the CPU level had them. On the far right the rows
+      // being executed and the messages on top, and the side pane under
+      // them: screen, registers, memory, stack and guide.
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Right, 0.24f, &side, &mid);
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Left, 0.26f, &left, &mid);
+      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Right, 0.50f, &cpu, &mid);
+      ImGui::DockBuilderSplitNode(side, ImGuiDir_Down, 0.60f, &rightBottom, &side);
+      dock("Listing", left);
+      dock("###Sprite", mid);
+      dock("Editor", mid);
+      dock("CPU", cpu);
+      dock("Sprite preview", side);
+      dock("Messages", side);
+      dock("Execution", side);
+      dock("Side", rightBottom);
       break;
   }
   ImGui::DockBuilderFinish(dockspace);
+  return true;
 }
 
 void Ide::menuBar() {
   if (!ImGui::BeginMainMenuBar()) return;
+  viewTabs();
   const fs::path startIn = !settings_.projectsDir.empty() && fs::is_directory(settings_.projectsDir)
                                ? fs::path(settings_.projectsDir)
                            : projectDir_.empty() ? fs::current_path()
@@ -1105,25 +1174,6 @@ void Ide::menuBar() {
     if (ImGui::MenuItem("Quit", "Cmd+Q")) requestQuit();
     ImGui::EndMenu();
   }
-  if (ImGui::BeginMenu("Level")) {
-    if (ImGui::MenuItem("BASIC", "F1", level_ == Level::Basic)) setLevel(Level::Basic);
-    if (ImGui::MenuItem("Project", "F2", level_ == Level::Project)) setLevel(Level::Project);
-    if (ImGui::MenuItem("Run", "F3", level_ == Level::Run)) setLevel(Level::Run);
-    if (ImGui::MenuItem("CPU", "F4", level_ == Level::Cpu)) setLevel(Level::Cpu);
-    if (level_ == Level::Project) {
-      ImGui::Separator();
-      if (ImGui::MenuItem("Sprite editor", nullptr, spriteVisible_)) {
-        spriteVisible_ = !spriteVisible_;
-        focusSprite_ = spriteVisible_ ? 6 : 0;
-      }
-    }
-    if (level_ == Level::Basic) {
-      ImGui::Separator();
-      if (ImGui::MenuItem("Show files", nullptr, basicShowsFiles_)) basicShowsFiles_ = !basicShowsFiles_;
-      if (ImGui::MenuItem("Show messages", nullptr, basicShowsMessages_)) basicShowsMessages_ = !basicShowsMessages_;
-    }
-    ImGui::EndMenu();
-  }
   if (ImGui::BeginMenu("Run")) {
     if (ImGui::MenuItem(running_ ? "Pause" : "Run", "F5")) setRunning(!running_);
     if (ImGui::MenuItem("Step instruction", "F10")) stepInstruction();
@@ -1135,9 +1185,8 @@ void Ide::menuBar() {
     if (ImGui::BeginMenu("Speed")) {
       for (size_t i = 0; i < std::size(LADDER); i++) {
         const bool enabled = !LADDER[i].micro || computer_.microcodeInspectable();
-        if (ImGui::MenuItem(LADDER[i].label, nullptr, speed_ == static_cast<int>(i), enabled)) {
-          speed_ = static_cast<int>(i);
-          if (running_) setRunning(true);
+        if (ImGui::MenuItem(LADDER[i].label, nullptr, speedIndex() == static_cast<int>(i), enabled)) {
+          pickSpeed(static_cast<int>(i));
         }
       }
       ImGui::EndMenu();
@@ -1181,14 +1230,15 @@ void Ide::menuBar() {
       }
     }
     if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("the panes as they are now, for every level, and the window's place and size, kept for "
-                        "the next start");
+      ImGui::SetTooltip("the panes as they are now, for every view, the project column and the window's place "
+                        "and size, kept for the next start");
     }
     if (ImGui::MenuItem("Reset layout")) {
       std::error_code ec;
       fs::remove(Settings::layoutFile(), ec);
       ImGui::ClearIniSettings();
       resetSections();
+      columnWidth_ = COLUMN_WIDTH;
       for (bool& b : layoutBuilt_) b = false;
       note("layout reset to the built in one");
     }
@@ -1238,13 +1288,41 @@ void Ide::menuBar() {
   ImGui::EndMainMenuBar();
 }
 
+// The views as four tab buttons at the left of the menu bar, in the
+// colours of a tab. The view on screen is the selected tab.
+void Ide::viewTabs() {
+  const ImGuiStyle& style = ImGui::GetStyle();
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, style.TabRounding);
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2.0f, style.ItemSpacing.y));
+  for (int i = 0; i < VIEW_COUNT; i++) {
+    const View v = static_cast<View>(i);
+    const bool selected = v == view_;
+    ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(selected ? ImGuiCol_TabSelected : ImGuiCol_Tab));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImGui::GetStyleColorVec4(ImGuiCol_TabHovered));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4(ImGuiCol_TabSelected));
+    if (!selected) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    if (ImGui::Button(viewLabel(v))) setView(v);
+    if (!selected) ImGui::PopStyleColor();
+    ImGui::PopStyleColor(3);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("the %s view, F%d", viewLabel(v), i + 1);
+    if (selected) {
+      const ImVec2 a = ImGui::GetItemRectMin();
+      const ImVec2 b = ImGui::GetItemRectMax();
+      ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x, b.y - 1.0f), ImVec2(b.x, b.y - 1.0f),
+                                          ImGui::GetColorU32(ImGuiCol_TabSelectedOverline), 2.0f);
+    }
+  }
+  ImGui::PopStyleVar(2);
+  ImGui::SameLine(0.0f, style.ItemSpacing.x * 2.0f);
+}
+
 void Ide::shortcuts() {
   if (dialog_.isOpen() || askQuit_) return;
   const ImGuiIO& io = ImGui::GetIO();
-  if (ImGui::IsKeyPressed(ImGuiKey_F1)) setLevel(Level::Basic);
-  if (ImGui::IsKeyPressed(ImGuiKey_F2)) setLevel(Level::Project);
-  if (ImGui::IsKeyPressed(ImGuiKey_F3)) setLevel(Level::Run);
-  if (ImGui::IsKeyPressed(ImGuiKey_F4)) setLevel(Level::Cpu);
+  if (ImGui::IsKeyPressed(ImGuiKey_F1)) setView(View::Basic);
+  if (ImGui::IsKeyPressed(ImGuiKey_F2)) setView(View::C);
+  if (ImGui::IsKeyPressed(ImGuiKey_F3)) setView(View::Assembly);
+  if (ImGui::IsKeyPressed(ImGuiKey_F4)) setView(View::Microcode);
   if (ImGui::IsKeyPressed(ImGuiKey_F7)) buildProject(false);
   if (ImGui::IsKeyPressed(ImGuiKey_F12)) enterScreenOnly();
   if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
@@ -1257,6 +1335,9 @@ void Ide::shortcuts() {
   if (ImGui::IsKeyPressed(ImGuiKey_F11)) stepMicro();
   const bool cmd = io.KeyCtrl || io.KeySuper;
   if (cmd && ImGui::IsKeyPressed(ImGuiKey_S)) saveProject();
+  // Ctrl-B is a key of the machine's while the screen has the keyboard.
+  // Preferences holds a copy of the settings the toggle would write.
+  if (cmd && ImGui::IsKeyPressed(ImGuiKey_B, false) && !(screenHasKeys_ && running_) && !askSettings_) toggleColumn();
   if (cmd && ImGui::IsKeyPressed(ImGuiKey_O)) {
     dialog_.open(FileDialog::Mode::OpenFolder, "Open a project folder", fs::current_path(), {},
                  [this](const fs::path& p) { openProject(p.string()); });
@@ -1474,8 +1555,8 @@ void Ide::reportErrors(const std::vector<std::string>& errors) {
   if (!errors.empty() && settings_.errorSound) audio_.alert();
 }
 
-void Ide::messagesPane(const char* name, bool* open) {
-  ImGui::Begin(name, open);
+void Ide::messagesPane(const char* name) {
+  ImGui::Begin(name);
   for (const Message& msg : messages_) {
     if (!msg.error) {
       ImGui::TextWrapped("%s", msg.text.c_str());

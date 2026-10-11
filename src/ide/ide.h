@@ -1,10 +1,8 @@
 // The IDE: one Computer, one project, and the panes that look at both,
-// arranged in levels. A level is a saved dock layout. BASIC holds the
-// editor, the screen and the manual only. Project holds the files, the
-// editor, the screen, the messages and the manual. Run holds the screen
-// and the debugger. CPU holds the datapath, the flow and the microcode
-// rows, with a side pane for the screen, the manual and the state.
-// Switching level swaps the layout.
+// arranged in four views, one per language (ide/view.h). A view is a
+// saved dock layout around the editor of its language, and every view
+// runs the machine. The project column sits left of the views, outside
+// them, and stays when the view changes.
 //
 // There is always a project. It is a folder of sources (.c, .h, .asm,
 // .bas, microcode.txt) and assets, or an opened ROM (its slots and its
@@ -13,7 +11,8 @@
 // project into a ROM and puts it in the machine: C first, then the
 // assembler over everything, then the ROM. A project with BASIC boots
 // into the interpreter.
-// docs/standalone.md, section "IDE levels", is the design.
+// docs/standalone.md, section "IDE levels", describes the levels the
+// views replaced.
 #pragma once
 
 #include <cstdint>
@@ -30,6 +29,7 @@
 #include "ide/guide.h"
 #include "ide/settings.h"
 #include "ide/sprite_editor.h"
+#include "ide/view.h"
 #include "project/project.h"
 #include "vm/audio.h"
 #include "vm/computer.h"
@@ -37,13 +37,6 @@
 #include "vm/keys.h"
 
 namespace sc8 {
-
-// BASIC is the plain level: the editor, the screen and the manual, for a
-// person writing BASIC who needs nothing else in view. Project adds the
-// files, the assembly and the messages. Run adds the debugger. CPU shows
-// the inside of the processor.
-enum class Level { Basic, Project, Run, Cpu };
-constexpr int LEVEL_COUNT = 4;
 
 // The speed ladder from the browser's speed menu: the trace speed, six
 // instruction rates, three frame-locked rates, then MAX.
@@ -67,14 +60,14 @@ struct ListLine {
 };
 
 // One document of the project: a source by its file name, its text and
-// whether the text differs from the disk. Kind follows the extension.
-enum class DocKind { C, Header, Assembly, Basic, Microcode, Other };
-DocKind docKindOf(const std::string& name);
-
+// whether the text differs from the disk. Its kind follows its name
+// (ide/view.h). `open` says its tab shows in its view's editor. A closed
+// document stays in the project, and the project column opens it again.
 struct Doc {
   std::string name;
   std::string text;
   bool dirty = false;
+  bool open = true;
 };
 
 class Ide {
@@ -89,11 +82,12 @@ class Ide {
   // other name.
   bool setFontView(const std::string& name);
 
-  void setLevel(Level level);
-  Level level() const { return level_; }
+  void setView(View view);
+  View view() const { return view_; }
 
   // The command line's --speed and --run: a label from the browser's
   // speed menu, then start running. False for a value the ladder lacks.
+  // The command line's speed holds in every view.
   bool setSpeed(const std::string& value);
   // --run: build the project and run it. A .bas opened from the command
   // line runs in BASIC instead, the quick way.
@@ -188,7 +182,7 @@ class Ide {
     uintmax_t bytes = 0;
   };
   std::vector<AssetEntry> assetList() const;
-  // The Files pane's list of assets, never read on every frame. A project
+  // The project column's list of assets, never read on every frame. A project
   // opening, an asset the IDE writes or removes, and the window coming
   // back to the front each read the folder again.
   std::vector<AssetEntry> shownAssets_;
@@ -243,8 +237,18 @@ class Ide {
   // project does.
   project::Built buildInMemory();
   bool anyDirty() const;
+  // Make a document the one its view's editor shows, without leaving the
+  // view on screen. openDoc also shows its tab and switches to its view.
   void activate(size_t index);
-  Doc* activeDoc();
+  void openDoc(size_t index);
+  // The document the view on screen edits, and any view's.
+  Doc* activeDoc() { return activeDocOf(view_); }
+  Doc* activeDocOf(View view);
+  Doc* docNamed(const std::string& name);
+  void settleActive();
+  // A new document of the project, opened in its view. False with a note
+  // for a name that is not a source or is taken.
+  bool newDoc(const std::string& name);
   void addDoc(const std::string& name, const std::string& text);
   void buildProject(bool run);
   void insertBuilt(project::Built& built, const std::string& what);
@@ -334,18 +338,49 @@ class Ide {
   // reloads it rather than writing its own copy back.
   void setDocText(Doc& doc, std::string text);
 
-  // The levels and their layouts.
-  void buildLayout(Level level, unsigned dockspace);
+  // The views and their layouts.
+  bool buildLayout(View view, unsigned dockspace, float width, float height);
+  // A pane's window name in a view: the base name and the view's key.
+  // A pane two views show is two windows and never moves between them.
+  static std::string paneName(const char* base, View view);
+  std::string pane(const char* base) const { return paneName(base, view_); }
   void menuBar();
+  // The four tab buttons at the left of the menu bar.
+  void viewTabs();
   void shortcuts();
   void quitDialog();
   void settingsDialog();
 
-  // The panes. A pane shared by two levels takes the level's window name.
-  void filesPane(const char* name, bool* open = nullptr);
-  void editorPane(const char* name);
-  void assemblyPane();
-  void messagesPane(const char* name, bool* open = nullptr);
+  // The project column (project_column.cpp): a fixed column at the left
+  // of the window, under the menu bar, drawn before the view's dockspace.
+  // It is not a docked pane, so no view owns it and no layout loses it.
+  // Open, it is a tree of the project. Collapsed, it is a narrow bar.
+  // Draws it and answers its width.
+  float projectColumn();
+  void columnTree();
+  void columnBar();
+  void toggleColumn();
+  void newFileDialog();
+  // Show the assembly the last build made: the C view's Assembly tab for
+  // a project with C, the ASSEMBLY view's listing otherwise.
+  void showAssembly();
+  // The column's width while open, in pixels at UI size 1. Save layout
+  // keeps it with the open state.
+  float columnWidth_ = COLUMN_WIDTH;
+  static constexpr float COLUMN_WIDTH = 230.0f;
+  static constexpr float COLUMN_MIN = 140.0f;
+  static constexpr float COLUMN_MAX = 640.0f;
+  // settings.txt had a column line, so the layout file's does not apply.
+  bool columnFromSettings_ = false;
+  bool askNewFile_ = false;
+
+  // The panes. A pane two views show takes a window name per view.
+  // editorPane is a view's editor: one tab per open document of its
+  // kind, and under the tabs the active document with its buttons.
+  void editorPane(View view);
+  void editorBody(Doc& doc);
+  void assemblyPane(const char* name);
+  void messagesPane(const char* name);
   void manualPane(const char* name);
   void manualBody();
   void screenPane(const char* name);
@@ -358,7 +393,7 @@ class Ide {
   void stackBody();
   void datapathBody();
   void flowBody();
-  // The CPU level's one view: the run controls on top, then the datapath,
+  // The MICROCODE view's CPU pane: the run controls on top, then the datapath,
   // the flow, the registers, the memory and the stack as sections that
   // open and close. The side pane beside it holds the screen, the
   // registers, the memory, the stack and the manual the same way.
@@ -407,7 +442,7 @@ class Ide {
   void runControls();
   void memoryPane(const char* name);
   void stackPane(const char* name);
-  void breakpointsPane();
+  void breakpointsPane(const char* pane);
   void listingPane(const char* name);
   void datapathPane();
   void flowPane();
@@ -452,9 +487,12 @@ class Ide {
   // Refuse a write into an example, with a note naming what was refused.
   bool refuseExample(const std::string& what);
   std::string romPath_;  // the ROM file opened, for a burn to the same place
+  std::string builtRom_;  // the ROM file the last build wrote, or empty
   std::vector<Doc> docs_;
-  size_t active_ = 0;
-  bool focusFiles_ = false;
+  // Each view's active document by name, and a tab its editor selects at
+  // the next frame.
+  std::string activeName_[VIEW_COUNT];
+  std::string selectTab_[VIEW_COUNT];
   std::string newDocName_;
   bool openedBasic_ = false;   // the command line opened a .bas
   std::string builtAssembly_;  // what the assembler saw at the last build
@@ -467,22 +505,29 @@ class Ide {
   };
   std::vector<Message> messages_;
 
-  Level level_ = Level::Project;
-  bool layoutBuilt_[LEVEL_COUNT] = {false, false, false, false};
-  // The BASIC level keeps the files and the messages out of sight until
-  // the Level menu shows them.
-  bool basicShowsFiles_ = false;
-  bool basicShowsMessages_ = false;
-  // After a project opens: the BASIC level for a project of .bas files
-  // only, the Project level for anything else.
-  void levelForProject();
+  View view_ = View::Assembly;
+  bool layoutBuilt_[VIEW_COUNT] = {false, false, false, false};
+  // A view shown for the first time opens its own guide. After that the
+  // view keeps the guide its reader picked.
+  bool viewShown_[VIEW_COUNT] = {false, false, false, false};
+  // Windows to focus, one a frame, before focusAfterLayout_: the tabs a
+  // fresh layout shows in front.
+  std::vector<std::string> focusQueue_;
+  // After a project opens: the MICROCODE view for a project with a
+  // microcode.txt, else the view of the document a reader starts in.
+  void viewForProject();
   std::string focusAfterLayout_;  // a window to bring to the front once
   bool done_ = false;
   bool askQuit_ = false;
 
   bool running_ = false;
   bool freshRun_ = false;  // the next paced frame is a run's first
-  int speed_ = 8;  // index into the ladder, f60 by default
+  // Each view's speed, an index into the ladder. view.h has the defaults.
+  int speed_[VIEW_COUNT] = {0, 0, 0, 0};
+  // The speed the view on screen runs at. The trace speed needs readable
+  // rows, so under the sealed set it answers the slowest instruction rate.
+  int speedIndex() const;
+  void pickSpeed(int index);
   double owed_ = 0.0;
   double tick_ = 0.0;
   bool fastFrameLatch_ = false;
@@ -537,8 +582,9 @@ class Ide {
   // every section of the set.
   bool mcBrowse_ = false;
 
-  // The Manual pane's guide tab: which guide, its filter and its scroll.
-  GuideView guideView_;
+  // The Manual pane's guide tab, per view: which guide, its filter and
+  // its scroll.
+  GuideView guideView_[VIEW_COUNT];
   int manualTab_ = -1;  // a tab to select next frame, -1 for none
 };
 
