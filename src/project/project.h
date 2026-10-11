@@ -167,12 +167,25 @@ constexpr ExampleKind EXAMPLE_KINDS[] = {
 // any other file.
 std::optional<std::string> readProgramFile(const std::filesystem::path& file);
 
-// The same for a path the running machine gave, as LOAD "../lib/x.bas"
-// does. The file is read only when it lies inside one of `roots`, after
-// every .. and every link in the path is followed. So a path, or a link
-// in a project somebody else made, reaches no file outside them. No
-// roots, no file.
-std::optional<std::string> readProgramFileIn(const std::filesystem::path& file,
+// The folders a LOAD by path may read from: the project's own folder,
+// the projects folder the person set, and the libraries folders. The
+// folder a project happens to sit in is not one. For a project in the
+// home folder that would be the whole home folder. A project with no
+// folder has none.
+std::vector<std::filesystem::path> loadRoots(const std::filesystem::path& projectDir,
+                                             const std::filesystem::path& projectsFolder,
+                                             const std::vector<std::filesystem::path>& libraries);
+
+// A program's file for a path the running machine gave, as
+// LOAD "../graphlib/graphics.bas" does, resolved against `base`.
+//
+// DESIGN: the program that names the path may be somebody else's, so
+// the name is judged by its spelling before the disk is asked anything.
+// It must be relative, with no drive and no server in it, and end in
+// .bas. Joined to `base` it must lie inside one of `roots`. Only then is
+// the file looked up, and it must still lie inside a root once every
+// link in its path is followed. No roots, no file.
+std::optional<std::string> readProgramFileIn(const std::filesystem::path& base, const std::string& name,
                                              const std::vector<std::filesystem::path>& roots);
 
 // A microcode set's text checked without a build: the parser's errors,

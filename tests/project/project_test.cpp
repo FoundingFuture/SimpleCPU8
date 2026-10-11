@@ -377,8 +377,9 @@ TEST_SUITE("simplecpu-make new") {
     CHECK_FALSE(project::readProgramFile(t.path / "lib"));
   }
 
-  // A LOAD by path may reach a sibling project or a library, and no
-  // further: the program that names the path may be somebody else's.
+  // A LOAD by path may reach a file of the project, a sibling project in
+  // the projects folder or a library, and no further: the program that
+  // names the path may be somebody else's.
   TEST_CASE("a program file by path is read only from inside the folders it may come from") {
     TempDir t;
     const fs::path projects = t.path / "projects";
@@ -387,16 +388,38 @@ TEST_SUITE("simplecpu-make new") {
     write(t.path / "outside" / "private.bas", "10 REM PRIVATE\n");
     const std::vector<fs::path> roots = {projects};
     const fs::path game = projects / "game";
-    CHECK(project::readProgramFileIn(game / "../graphlib/graphics.bas", roots) == std::string("10 REM LIB\n"));
-    CHECK(project::readProgramFileIn(game / "src/game.bas", roots) == std::string("10 REM GAME\n"));
-    // Out of the folder by .. or by an absolute path.
-    CHECK_FALSE(project::readProgramFileIn(game / "../../outside/private.bas", roots));
-    CHECK_FALSE(project::readProgramFileIn(t.path / "outside" / "private.bas", roots));
+    CHECK(project::readProgramFileIn(game, "../graphlib/graphics.bas", roots) == std::string("10 REM LIB\n"));
+    CHECK(project::readProgramFileIn(game, "src/game.bas", roots) == std::string("10 REM GAME\n"));
+    // Out of the folder by .. is refused.
+    CHECK_FALSE(project::readProgramFileIn(game, "../../outside/private.bas", roots));
     // No folder to read from, no file.
-    CHECK_FALSE(project::readProgramFileIn(projects / "graphlib" / "graphics.bas", {}));
+    CHECK_FALSE(project::readProgramFileIn(projects / "graphlib", "graphics.bas", {}));
     // A name that only starts like the folder's is another folder.
     write(t.path / "projects-old" / "old.bas", "10 REM OLD\n");
-    CHECK_FALSE(project::readProgramFileIn(t.path / "projects-old" / "old.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "../../projects-old/old.bas", roots));
+    // Not a program's file, whatever folder it is in.
+    write(projects / "game" / "notes.txt", "10 REM NOTES\n");
+    CHECK_FALSE(project::readProgramFileIn(game, "notes.txt", roots));
+  }
+
+  // A path with a root is refused by its spelling, before the disk or
+  // the network is asked anything: on Windows a path that names a
+  // server would make the host call that server.
+  TEST_CASE("a path the machine gives must be relative") {
+    TempDir t;
+    const fs::path projects = t.path / "projects";
+    write(projects / "game" / "game.bas", "10 REM GAME\n");
+    const std::vector<fs::path> roots = {projects};
+    const fs::path game = projects / "game";
+    // Even a file inside the folder, named from the root.
+    CHECK_FALSE(project::readProgramFileIn(game, (game / "game.bas").string(), roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "/etc/passwd.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "//server/share/x.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "\\\\server\\share\\x.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "C:/x.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "C:x.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "", roots));
+    CHECK(project::readProgramFileIn(game, "game.bas", roots) == std::string("10 REM GAME\n"));
   }
 
   TEST_CASE("a link inside the folder to a file outside it is not read") {
@@ -407,7 +430,20 @@ TEST_SUITE("simplecpu-make new") {
     std::error_code ec;
     fs::create_symlink(t.path / "outside" / "private.bas", projects / "game" / "link.bas", ec);
     // A system that makes no links here has nothing to check.
-    if (!ec) CHECK_FALSE(project::readProgramFileIn(projects / "game" / "link.bas", {projects}));
+    if (!ec) CHECK_FALSE(project::readProgramFileIn(projects / "game", "link.bas", {projects}));
+  }
+
+  // The folder a project happens to sit in is not one of them. For a
+  // project in the home folder it would be the whole home folder.
+  TEST_CASE("a path may reach the project, the projects folder and the libraries, and not the project's parent") {
+    const fs::path game = fs::path("/home/me/game");
+    const std::vector<fs::path> libraries = {"/home/me/projects/libraries", "/home/me/libraries"};
+    const std::vector<fs::path> set = project::loadRoots(game, "/home/me/projects", libraries);
+    CHECK(set == std::vector<fs::path>{game, "/home/me/projects", "/home/me/projects/libraries", "/home/me/libraries"});
+    const std::vector<fs::path> unset = project::loadRoots(game, {}, {});
+    CHECK(unset == std::vector<fs::path>{game});
+    // A project with no folder has nowhere to read from.
+    CHECK(project::loadRoots({}, "/home/me/projects", libraries).empty());
   }
 
   // The size is not trusted to stay what it was when it was asked.

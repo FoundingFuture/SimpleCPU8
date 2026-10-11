@@ -623,20 +623,60 @@ std::optional<std::string> readProgramFile(const fs::path& file) {
   return text;
 }
 
-std::optional<std::string> readProgramFileIn(const fs::path& file, const std::vector<fs::path>& roots) {
+namespace {
+
+// True when every part of root's path opens path's, and path goes on.
+bool inside(const fs::path& root, const fs::path& path) {
+  auto r = root.begin();
+  auto p = path.begin();
+  for (; r != root.end() && p != path.end() && *r == *p; ++r, ++p) {}
+  return r == root.end() && p != path.end();
+}
+
+}  // namespace
+
+std::vector<fs::path> loadRoots(const fs::path& projectDir, const fs::path& projectsFolder,
+                                const std::vector<fs::path>& libraries) {
+  std::vector<fs::path> roots;
+  if (projectDir.empty()) return roots;
+  roots.push_back(projectDir);
+  if (!projectsFolder.empty()) roots.push_back(projectsFolder);
+  for (const fs::path& folder : libraries) {
+    if (!folder.empty()) roots.push_back(folder);
+  }
+  return roots;
+}
+
+std::optional<std::string> readProgramFileIn(const fs::path& base, const std::string& name,
+                                             const std::vector<fs::path>& roots) {
+  // By spelling first, with no call that reaches the disk or a server.
+  // A slash, a backslash or a colon at the wrong place is a root, a
+  // server or a drive on one system or another, so all are refused on
+  // every system.
+  if (name.empty() || name.front() == '/' || name.front() == '\\' || name.find(':') != std::string::npos) return std::nullopt;
+  const fs::path relative(name);
+  if (relative.has_root_name() || relative.has_root_directory()) return std::nullopt;
+  std::string ext = relative.extension().string();
+  for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (ext != ".bas" || base.empty()) return std::nullopt;
   std::error_code ec;
-  // canonical follows every link and .., and fails for a missing file.
-  const fs::path real = fs::canonical(file, ec);
+  const fs::path wanted = (fs::absolute(base, ec) / relative).lexically_normal();
+  if (ec) return std::nullopt;
+  bool allowed = false;
+  for (const fs::path& root : roots) {
+    if (root.empty()) continue;
+    const fs::path at = fs::absolute(root, ec).lexically_normal();
+    allowed = allowed || (!ec && inside(at, wanted));
+  }
+  if (!allowed) return std::nullopt;
+  // Then on the disk: canonical follows every link, and fails for a
+  // missing file. A link inside a root to a file outside is not read.
+  const fs::path real = fs::canonical(wanted, ec);
   if (ec) return std::nullopt;
   for (const fs::path& root : roots) {
     if (root.empty()) continue;
-    const fs::path base = fs::canonical(root, ec);
-    if (ec) continue;
-    // Inside means every part of the root's path opens the file's.
-    auto r = base.begin();
-    auto f = real.begin();
-    for (; r != base.end() && f != real.end() && *r == *f; ++r, ++f) {}
-    if (r == base.end() && f != real.end()) return readProgramFile(real);
+    const fs::path at = fs::canonical(root, ec);
+    if (!ec && inside(at, real)) return readProgramFile(real);
   }
   return std::nullopt;
 }
