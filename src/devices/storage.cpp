@@ -128,13 +128,20 @@ void Storage::run(uint8_t cmd) {
   }
 }
 
+void Storage::askedHost() {
+  if (hostAsked_) *hostAsked_ = true;
+}
+
 uint8_t Storage::load() {
   std::string name;
   if (!readName(name, true)) return STO_BAD_NAME;
   // The host first: a project's own file is newer than the slot a build
   // made of it. Then the slots, where a path is the slot its stem names.
   std::optional<std::string> found;
-  if (host_.find) found = host_.find(name);
+  if (host_.find) {
+    found = host_.find(name);
+    askedHost();
+  }
   if (!found && slots_) {
     const auto it = find(isPath(name) ? stemOf(name) : name);
     if (it != slots_->end()) found = it->second;
@@ -173,7 +180,10 @@ uint8_t Storage::save() {
   }
   moved_ = static_cast<uint16_t>(text.size());
   if (onChange_) onChange_();
-  if (host_.saved) host_.saved(name, text);
+  if (host_.saved) {
+    host_.saved(name, text);
+    askedHost();
+  }
   return STO_OK;
 }
 

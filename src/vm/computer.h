@@ -132,6 +132,16 @@ class Computer {
   void setWatch(std::function<bool()> watch) { watch_ = std::move(watch); }
   bool hitWatch = false;
 
+  // Set when a storage command asked the storage device's host: a LOAD
+  // the host answers, a SAVE it hears. Every run call ends its slice at
+  // that instruction, and the machine still runs.
+  //
+  // DESIGN: the host's answer may cost a look at the disk, and a program
+  // can ask two million times in one frame. One question a slice keeps
+  // the host in charge of its own time. A machine with no host never
+  // sets it, and its run goes the short way.
+  bool hitHost = false;
+
   // Run up to n instructions. Returns the number executed, so the caller
   // can pace batches per host frame.
   uint64_t runBudget(uint64_t n);

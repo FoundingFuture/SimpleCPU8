@@ -3,6 +3,7 @@
 // counterpart here. Their cases are left out. Device wiring cases are
 // added, because Computer owns the chain the session owned.
 
+#include <optional>
 #include <set>
 #include <string>
 
@@ -73,6 +74,17 @@ void load(Computer& c, const std::string& src, const std::string& mc = "naive") 
   cart.microcode = "@" + mc;
   c.insert(std::move(cart));
 }
+
+// The name Q at $80, then one storage command over and over.
+std::string storeLoop(const char* command) {
+  return std::string("        LD A <- 81\n        LD [$80] <- A\n        LD A <- 0\n        LD [$81] <- A\n"
+                     "        OUT STO_NAME_HI, 0\n        OUT STO_NAME_LO, $80\n"
+                     "loop:   OUT STO_CMD, ") +
+         command + "\n        JMP loop\n";
+}
+const std::string STORE_LOOP = storeLoop("STO_LOAD");
+const std::string SAVE_LOOP = storeLoop("STO_SAVE");
+const std::string CATALOG_LOOP = storeLoop("STO_CATALOG");
 
 std::string randTriple(Computer& c) {
   load(c, RAND);
@@ -210,6 +222,85 @@ TEST_SUITE("vm frame advance") {
     c.runMicroBudget(1000);
     CHECK(c.hitWatch);
     CHECK_EQ(c.machine().instructions, 5);
+  }
+
+  // The IDE answers LOAD from the disk and takes a SAVE into the project.
+  // A program must not make it do that a million times in one frame.
+  TEST_CASE("a storage command that asks the host ends the run slice") {
+    Computer c;
+    load(c, STORE_LOOP);
+    int asked = 0;
+    Storage::Host host;
+    host.find = [&asked](const std::string&) -> std::optional<std::string> {
+      asked++;
+      return std::nullopt;
+    };
+    c.storage().setHost(std::move(host));
+    const uint64_t done = c.runBudget(1000);
+    CHECK(c.hitHost);
+    CHECK_FALSE(c.hitWatch);
+    CHECK_FALSE(c.hitBreakpoint);
+    CHECK_EQ(asked, 1);
+    CHECK_EQ(done, 7);  // six to set the name up, then the command
+    CHECK_EQ(c.machine().status, Status::Running);
+    // The next slice goes on to the next command and no further.
+    CHECK_EQ(c.runBudget(1000), 2);
+    CHECK_EQ(asked, 2);
+    CHECK_EQ(c.runToNextFrame(), 2);
+    CHECK(c.hitHost);
+    CHECK_EQ(asked, 3);
+    c.runMicroBudget(100000);
+    CHECK(c.hitHost);
+    CHECK_EQ(asked, 4);
+  }
+
+  TEST_CASE("a SAVE the host hears ends the run slice too") {
+    Computer c;
+    load(c, SAVE_LOOP);
+    int saved = 0;
+    Storage::Host host;
+    host.saved = [&saved](const std::string&, const std::string&) { saved++; };
+    c.storage().setHost(std::move(host));
+    CHECK_EQ(c.runBudget(1000), 7);
+    CHECK(c.hitHost);
+    CHECK_EQ(saved, 1);
+    c.runToNextFrame();
+    CHECK_EQ(saved, 2);
+  }
+
+  TEST_CASE("a storage command the host is not asked about runs on") {
+    // No host: the slots answer, and the slice runs its whole budget.
+    Computer c;
+    load(c, STORE_LOOP);
+    CHECK_EQ(c.runBudget(1000), 1000);
+    CHECK_FALSE(c.hitHost);
+    // A host, and a command that is the cartridge's alone.
+    Computer d;
+    load(d, CATALOG_LOOP);
+    int asked = 0;
+    Storage::Host host;
+    host.find = [&asked](const std::string&) -> std::optional<std::string> {
+      asked++;
+      return std::nullopt;
+    };
+    host.saved = [&asked](const std::string&, const std::string&) { asked++; };
+    d.storage().setHost(std::move(host));
+    CHECK_EQ(d.runBudget(1000), 1000);
+    CHECK_FALSE(d.hitHost);
+    CHECK_EQ(asked, 0);
+  }
+
+  // runFrame and runInstructions say whether the machine still runs. A
+  // slice the host ended is a running machine.
+  TEST_CASE("a slice the host ended is not a stop") {
+    Computer c;
+    load(c, STORE_LOOP);
+    Storage::Host host;
+    host.find = [](const std::string&) -> std::optional<std::string> { return std::nullopt; };
+    c.storage().setHost(std::move(host));
+    CHECK(c.runInstructions(1000));
+    CHECK(c.hitHost);
+    CHECK(c.runFrame());
   }
 
   TEST_CASE("a breakpoint wins over the frame target") {

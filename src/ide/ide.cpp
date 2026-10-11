@@ -522,6 +522,11 @@ void Ide::pace() {
   const bool fresh = freshRun_;
   const double dt = fresh ? 0.0 : static_cast<double>(GetFrameTime());
   freshRun_ = false;
+  // DESIGN: a storage command that asked the host ends the machine's
+  // slice with hitHost set, and the run goes on in the next host frame.
+  // So the host looks at the disk once a frame at most, whatever the
+  // program does, and its SAVE queue holds one entry at most. Such a
+  // slice is short without the machine having stopped.
   auto stopped = [&](bool exhausted) {
     if (!exhausted && !computer_.hitBreakpoint && !computer_.hitWatch) return false;
     const bool stepped = stepDone_;
@@ -549,7 +554,8 @@ void Ide::pace() {
     constexpr uint64_t CHUNK = 20000;
     while (GetTime() < until) {
       const uint64_t done = computer_.runBudget(CHUNK);
-      if (stopped(done < CHUNK)) return;
+      if (stopped(done < CHUNK && !computer_.hitHost)) return;
+      if (computer_.hitHost) return;
     }
     return;
   }
@@ -570,6 +576,11 @@ void Ide::pace() {
       const uint64_t done = computer_.runToNextFrame();
       owed_ -= 1.0;
       if (stopped(computer_.machine().status != Status::Running)) return;
+      if (computer_.hitHost) {
+        // The frame is not done yet, so it is still owed.
+        owed_ += 1.0;
+        break;
+      }
       if (done == 0) break;  // nothing advanced: avoid a busy spin
     }
   } else if (s.ips <= 0) {
@@ -578,7 +589,8 @@ void Ide::pace() {
     constexpr uint64_t CHUNK = 20000;
     while (GetTime() < until) {
       const uint64_t done = computer_.runBudget(CHUNK);
-      if (stopped(done < CHUNK)) return;
+      if (stopped(done < CHUNK && !computer_.hitHost)) return;
+      if (computer_.hitHost) return;
     }
   } else {
     owed_ += dt * s.ips;
@@ -587,7 +599,9 @@ void Ide::pace() {
     if (n == 0) return;
     owed_ -= static_cast<double>(n);
     const uint64_t done = computer_.runBudget(n);
-    stopped(done < n);
+    if (stopped(done < n && !computer_.hitHost)) return;
+    // The instructions the host cut off are still owed.
+    if (computer_.hitHost) owed_ += static_cast<double>(n - done);
   }
 }
 

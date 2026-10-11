@@ -244,6 +244,46 @@ TEST_SUITE("storage commands") {
     CHECK(r.slots.size() == 2);
   }
 
+  // The virtual computer ends its run slice on this flag, so a program
+  // cannot keep the host at the disk for a whole frame.
+  TEST_CASE("the device says when a command asked the host, and only then") {
+    Rig r;
+    r.slots.emplace_back("GAME", "10 END\n");
+    bool asked = false;
+    r.dev->attachHostFlag(&asked);
+    r.block(BLOCK, 100);
+    r.name("GAME");
+    // No host: the slots answer, and nobody was asked.
+    CHECK_FALSE(r.dev->hosted());
+    r.out(STO_CMD, STO_LOAD);
+    r.out(STO_CMD, STO_SAVE);
+    CHECK_FALSE(asked);
+    Storage::Host host;
+    host.find = [](const std::string&) -> std::optional<std::string> { return std::nullopt; };
+    host.saved = [](const std::string&, const std::string&) {};
+    r.dev->setHost(host);
+    CHECK(r.dev->hosted());
+    // The cartridge's own commands never reach the host.
+    r.out(STO_CMD, STO_CATALOG);
+    r.out(STO_CMD, STO_FIND);
+    CHECK_FALSE(asked);
+    r.out(STO_CMD, STO_LOAD);
+    CHECK(asked);
+    asked = false;
+    r.out(STO_CMD, STO_SAVE);
+    CHECK(asked);
+    // A name the device refuses is not the host's to hear.
+    asked = false;
+    r.name("two words");
+    r.out(STO_CMD, STO_LOAD);
+    r.out(STO_CMD, STO_SAVE);
+    CHECK_FALSE(asked);
+    asked = false;
+    r.name("GAME");
+    r.out(STO_CMD, STO_DELETE);
+    CHECK_FALSE(asked);
+  }
+
   TEST_CASE("LOAD of a missing slot says so and writes nothing") {
     Rig r;
     r.block(BLOCK, 100);

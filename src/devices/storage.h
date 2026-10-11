@@ -82,6 +82,11 @@ class Storage : public ChainedDevice {
     std::function<void(const std::string& name, const std::string& text)> saved;
   };
   void setHost(Host host) { host_ = std::move(host); }
+  bool hosted() const { return host_.find || host_.saved; }
+  // Where the device says that a command asked the host: a LOAD its find
+  // answered, a SAVE its saved heard. The virtual computer ends its run
+  // slice on it. Null, and nobody is told.
+  void attachHostFlag(bool* asked) { hostAsked_ = asked; }
 
   // The machine's data RAM, RAM_SIZE bytes, like the ACP takes it.
   void attachRam(uint8_t* ram) { ram_ = ram; }
@@ -95,6 +100,7 @@ class Storage : public ChainedDevice {
   const std::vector<RomAsset>* assets_ = nullptr;
   std::function<void()> onChange_;
   Host host_;
+  bool* hostAsked_ = nullptr;
 
   uint8_t addrHi_ = 0;
   uint8_t addrLo_ = 0;
@@ -112,6 +118,7 @@ class Storage : public ChainedDevice {
   BasicSlots::iterator find(const std::string& name);
 
   void run(uint8_t cmd);
+  void askedHost();
   uint8_t load();
   uint8_t save();
   uint8_t remove();
