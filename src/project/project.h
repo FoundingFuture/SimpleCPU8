@@ -143,7 +143,8 @@ std::filesystem::path defaultLibraries(const std::filesystem::path& projectsFold
 
 // A library's file by its name in any case, with .bas after it in any
 // case, in the first of the folders that has one. An empty path when
-// none has.
+// none has. A link counts only when the file it leads to is a .bas file
+// inside the same libraries folder.
 std::filesystem::path libraryFile(const std::vector<std::filesystem::path>& libraries, const std::string& name);
 
 enum class Kind { C, Basic, Assembly, Microcode };

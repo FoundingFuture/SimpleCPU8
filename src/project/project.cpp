@@ -696,14 +696,23 @@ fs::path libraryFile(const std::vector<fs::path>& libraries, const std::string& 
   };
   for (const fs::path& folder : libraries) {
     if (folder.empty()) continue;
+    std::error_code ec;
+    const fs::path home = fs::canonical(folder, ec);
+    if (ec) continue;
     // The folder is walked in name order, so two files that differ only
     // in case give the same answer on every system.
     std::vector<fs::path> found;
-    std::error_code ec;
     for (const auto& entry : fs::directory_iterator(folder, ec)) {
       if (!entry.is_regular_file(ec)) continue;
       const fs::path& p = entry.path();
-      if (upper(p.extension().string()) == ".BAS" && upper(p.stem().string()) == upper(name)) found.push_back(p);
+      if (upper(p.extension().string()) != ".BAS" || upper(p.stem().string()) != upper(name)) continue;
+      // DESIGN: the check a file by path gets, in readProgramFileIn. A
+      // libraries folder may come with somebody else's project, and the
+      // build puts a library into the ROM. So the file's real place,
+      // every link followed, is a .bas file inside the folder's own.
+      const fs::path real = fs::canonical(p, ec);
+      if (ec || !inside(home, real) || upper(real.extension().string()) != ".BAS") continue;
+      found.push_back(p);
     }
     std::sort(found.begin(), found.end());
     if (!found.empty()) return found.front();

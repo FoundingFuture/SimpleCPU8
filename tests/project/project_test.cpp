@@ -345,6 +345,63 @@ TEST_SUITE("simplecpu-make new") {
     CHECK(b.cartridge->basic[1].second.find("THE PROJECT'S") != std::string::npos);
   }
 
+  // A library by name gets the check a file by path gets. A libraries
+  // folder may come with a project somebody else made, and a link in it
+  // must not put a file from elsewhere into the ROM.
+  TEST_CASE("a link in a libraries folder to a file outside it is no library") {
+    TempDir t;
+    const fs::path libs = t.path / "libraries";
+    write(libs / "shapes.bas", "100 RETURN\n");
+    write(libs / "notes.txt", "NOT A PROGRAM\n");
+    write(t.path / "outside" / "secret.txt", "PRIVATE\n");
+    write(t.path / "outside" / "other.bas", "10 REM OUTSIDE\n");
+    std::error_code ec;
+    fs::create_symlink(t.path / "outside" / "secret.txt", libs / "keys.bas", ec);
+    // A system that makes no links here has nothing to check.
+    if (ec) return;
+    fs::create_symlink(t.path / "outside" / "other.bas", libs / "other.bas");
+    fs::create_symlink(libs / "notes.txt", libs / "notes.bas");
+    fs::create_symlink(libs / "shapes.bas", libs / "forms.bas");
+    CHECK(project::libraryFile({libs}, "SHAPES") == libs / "shapes.bas");
+    CHECK(project::libraryFile({libs}, "KEYS").empty());
+    CHECK(project::libraryFile({libs}, "OTHER").empty());
+    // Inside the folder, and still not a program's file.
+    CHECK(project::libraryFile({libs}, "NOTES").empty());
+    // A link that stays inside the folder is a second name for a library.
+    CHECK(project::libraryFile({libs}, "FORMS") == libs / "forms.bas");
+    // A libraries folder that is itself a link is the folder it leads to.
+    fs::create_directory_symlink(libs, t.path / "linked");
+    CHECK(project::libraryFile({t.path / "linked"}, "SHAPES") == t.path / "linked" / "shapes.bas");
+    // The next folder is asked when the first has only the link.
+    write(t.path / "more" / "keys.bas", "10 REM KEYS\n");
+    CHECK(project::libraryFile({libs, t.path / "more"}, "KEYS") == t.path / "more" / "keys.bas");
+  }
+
+  TEST_CASE("the ROM takes a plain library and refuses one that is a link to outside") {
+    TempDir t;
+    const fs::path game = t.path / "game";
+    const fs::path libs = t.path / "libraries";
+    write(game / "src" / "autorun.bas", "10 INCLUDE SHAPES\n20 INCLUDE KEYS\n");
+    write(libs / "shapes.bas", "100 RETURN\n");
+    write(t.path / "outside" / "secret.txt", "PRIVATE\n");
+    std::error_code ec;
+    fs::create_symlink(t.path / "outside" / "secret.txt", libs / "keys.bas", ec);
+    if (ec) return;
+    project::Options opts;
+    opts.libraries = {libs};
+    project::Built b = project::build(project::layoutOf(game), opts);
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_EQ(b.errors.size(), 1u);
+    CHECK(b.errors[0].find("autorun.bas:2: INCLUDE KEYS") != std::string::npos);
+    // Without the link the same project builds, with its plain library.
+    write(game / "src" / "autorun.bas", "10 INCLUDE SHAPES\n");
+    b = project::build(project::layoutOf(game), opts);
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    REQUIRE_EQ(b.cartridge->basic.size(), 2u);
+    CHECK(b.cartridge->basic[1].first == "SHAPES");
+    for (const auto& slot : b.cartridge->basic) CHECK(slot.second.find("PRIVATE") == std::string::npos);
+  }
+
   TEST_CASE("an INCLUDE that names no file is a build error with its line") {
     TempDir t;
     write(t.path / "game" / "src" / "autorun.bas", "10 PRINT 1\n20 INCLUDE NOPE\n");
