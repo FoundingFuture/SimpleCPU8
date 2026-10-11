@@ -308,6 +308,79 @@ TEST_SUITE("simplecpu-make new") {
   }
 #endif
 
+#if SC8_HAVE_BASIC
+  // A library is a .bas file of routines in the libraries folder. A
+  // project INCLUDEs it, and the ROM carries it, so the machine that
+  // plays the ROM needs no libraries folder.
+  TEST_CASE("the ROM carries every library the INCLUDE chain reaches, after the project's own files") {
+    TempDir t;
+    const fs::path game = t.path / "game";
+    const fs::path libs = t.path / "libraries";
+    write(game / "src" / "autorun.bas", "10 INCLUDE GRAPHICS\n15 INCLUDE LOCAL\n20 GOSUB GRAPHICS:1000\n30 GOSUB LOCAL:10\n");
+    write(game / "src" / "local.bas", "5 INCLUDE GRAPHICS\n10 RETURN\n");
+    write(libs / "graphics.bas", "10 INCLUDE shapes\n1000 GOSUB SHAPES:100\n1010 RETURN\n");
+    write(libs / "Shapes.BAS", "100 RETURN\n");
+    write(libs / "unused.bas", "10 RETURN\n");
+    project::Options opts;
+    opts.libraries = {libs};
+    project::Built b = project::build(project::layoutOf(game), opts);
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    std::vector<std::string> names;
+    for (const auto& slot : b.cartridge->basic) names.push_back(slot.first);
+    CHECK(names == std::vector<std::string>{"AUTORUN", "LOCAL", "GRAPHICS", "SHAPES"});
+    CHECK(b.cartridge->basic[2].second == "10 INCLUDE shapes\n1000 GOSUB SHAPES:100\n1010 RETURN\n");
+  }
+
+  TEST_CASE("a project's own file wins over a library of the same name") {
+    TempDir t;
+    const fs::path game = t.path / "game";
+    write(game / "src" / "autorun.bas", "10 INCLUDE GRAPHICS\n20 GOSUB GRAPHICS:1000\n");
+    write(game / "src" / "graphics.bas", "1000 REM THE PROJECT'S\n1010 RETURN\n");
+    write(t.path / "libraries" / "graphics.bas", "1000 REM THE LIBRARY'S\n1010 RETURN\n");
+    project::Options opts;
+    opts.libraries = {t.path / "libraries"};
+    project::Built b = project::build(project::layoutOf(game), opts);
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    REQUIRE_EQ(b.cartridge->basic.size(), 2u);
+    CHECK(b.cartridge->basic[1].second.find("THE PROJECT'S") != std::string::npos);
+  }
+
+  TEST_CASE("an INCLUDE that names no file is a build error with its line") {
+    TempDir t;
+    write(t.path / "game" / "src" / "autorun.bas", "10 PRINT 1\n20 INCLUDE NOPE\n");
+    project::Options opts;
+    opts.libraries = {t.path / "libraries"};
+    project::Built b = project::build(project::layoutOf(t.path / "game"), opts);
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_FALSE(b.errors.empty());
+    CHECK(b.errors[0].find("autorun.bas:2: INCLUDE NOPE") != std::string::npos);
+    CHECK(b.errors[0].find("libraries") != std::string::npos);
+  }
+
+  TEST_CASE("the default libraries folder is libraries in the projects folder, and nothing without one") {
+    CHECK(project::defaultLibraries("/home/me/projects") == fs::path("/home/me/projects") / "libraries");
+    CHECK(project::defaultLibraries({}).empty());
+  }
+
+  TEST_CASE("the files a program INCLUDEs are read off the lines that open with the word") {
+    CHECK(project::includesOf("10 include graphics\n20 PRINT \"INCLUDE NO\"\n30 REM INCLUDE NEITHER\n40 INCLUDE Tools.bas\n") ==
+          std::vector<std::string>{"GRAPHICS", "TOOLS"});
+    CHECK(project::includesOf("10 A = 1 : INCLUDE LATE\n").empty());
+  }
+
+  TEST_CASE("an included file's mistake is reported when the program that includes it is built") {
+    TempDir t;
+    write(t.path / "game" / "src" / "autorun.bas", "10 INCLUDE GRAPHICS\n20 GOSUB GRAPHICS:999\n");
+    write(t.path / "libraries" / "graphics.bas", "1000 RETURN\n");
+    project::Options opts;
+    opts.libraries = {t.path / "libraries"};
+    project::Built b = project::build(project::layoutOf(t.path / "game"), opts);
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_FALSE(b.errors.empty());
+    CHECK(b.errors[0].find("autorun.bas:2: THERE IS NO LINE 999") != std::string::npos);
+  }
+#endif
+
   TEST_CASE("a folder that holds something is left alone") {
     TempDir t;
     write(t.path / "keep.txt", "mine\n");

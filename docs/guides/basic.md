@@ -22,6 +22,7 @@ one idea and one small program to type in.
 - [Drawing](#drawing)
 - [Reading keys](#reading-keys)
 - [Saving and loading](#saving-and-loading)
+- [Libraries](#libraries)
 - [The IDE](#the-ide)
 - [Longer programs](#longer-programs)
 - [A small game](#a-small-game)
@@ -801,9 +802,26 @@ READY
 ```
 
 `!SAVE` writes the program under a name of up to 16 characters.
-`!CATALOG` lists the names. `!LOAD` replaces the program in memory with
-the saved one. `!DELETE "FIRST"` removes it. Loading a name that is not
+`!CATALOG` lists the names. `!LOAD` brings the saved program back into
+the empty memory. `!DELETE "FIRST"` removes it. Loading a name that is not
 there says `NO PROGRAM CALLED FIRST ON THE CARTRIDGE`.
+
+The four words work without the exclamation mark too: `SAVE "FIRST"`,
+`LOAD "FIRST"`, `DELETE "FIRST"` and `CATALOG`.
+
+Saving under a name the cartridge already holds asks first:
+
+```text
+>SAVE "FIRST"
+OVERWRITE FIRST (Y/N)?
+```
+
+Press `Y` and the old program is replaced. Any other key leaves it.
+
+`LOAD` with a program already in memory does not throw that program
+away. The loaded one comes in beside it, as a second file. The chapter
+after this one says what files are. To swap one program for another,
+type `NEW ALL` first.
 
 When you started with `./r`, the cartridge lives only in memory. Close
 the window and the saved programs go with it. To keep them on disk,
@@ -832,17 +850,104 @@ folder with a `src` folder holding `.bas` files is a BASIC project.
 finished game that starts by itself. `simplecpu-make new mygame --basic`
 lays out a new project with a first program in it.
 
+## Libraries
+
+A routine you wrote once is worth keeping. A library is a file of
+routines that any program can call, so nothing is copied from program to
+program.
+
+A program names the files it uses with `INCLUDE`. It calls a line of
+one with the file's name, a colon and the line number:
+
+```basic
+10 INCLUDE SHAPES
+20 X = 100 : Y = 100 : R = 30 : C = 255
+30 GOSUB SHAPES:2200
+40 PRINT "BACK"
+```
+
+`INCLUDE SHAPES` brings the file `SHAPES` in beside your program before
+line 10 runs. `GOSUB SHAPES:2200` goes to line 2200 of that file. Its
+`RETURN` comes back to line 40 of yours. `GOTO`, `THEN` and `RESTORE`
+take a file's name the same way. A line number with no name means the
+file the line is in.
+
+The machine now holds two files. Yours is the main file, the one `RUN`
+runs. `FILE` says which file you are typing into, and `FILE` with a name
+goes to another:
+
+```text
+>FILE SHAPES
+READY
+SHAPES>LIST
+```
+
+The prompt shows the file's name while it is not the main file. `LIST`,
+`NEW`, `RENUM` and `SAVE` work on the file you are in. A line you type
+goes into it. `FILE MAIN` goes back when your program has no name yet. A
+loaded program has the name it was loaded under.
+
+`FILE` with a name the machine does not know starts a new empty file.
+That is how a library begins:
+
+```basic
+FILE TOOLS
+100 PRINT "A TOOL"
+110 RETURN
+SAVE
+```
+
+`SAVE` with no name saves the file you are in under its own name.
+
+A library and the program that calls it share every variable. `A` in
+the library is `A` in your program. So a library says at its top which
+variables it uses:
+
+```basic
+1000 REM SHAPES: drawing routines any program can call.
+1030 REM SHAPES reads X, Y, W, H, R and C.
+1040 REM SHAPES changes X0, X1, X2 and X3. Keep those free.
+```
+
+Read that block before you call a library, and write one when you make
+your own.
+
+Three things can go wrong, and each has its message:
+
+| Message | Means |
+|---|---|
+| `FILE NOT FOUND: SHAPES IN LINE 10` | no file called SHAPES is on the cartridge or among the libraries |
+| `FILE NOT FOUND: SHAPES IN LINE 30` | line 30 calls SHAPES, and no `INCLUDE SHAPES` brought it in |
+| `SYNTAX ERROR IN SHAPES:2010` | the mistake is in line 2010 of the file SHAPES |
+
+An `INCLUDE` must open its line. A file that is already in the machine
+is not loaded again, so two files may each include a third. The machine
+holds eight files at most, and all of them share its 16384 bytes of
+program memory.
+
+In a project, a library is a `.bas` file. The build looks for `SHAPES`
+among the project's own files first. Then it looks in the folder
+`libraries` beside the project's folder. It puts every library the
+program includes into the cartridge, so the cartridge runs anywhere.
+`examples/basic/shapes` is a project that draws with the library
+`examples/basic/libraries/shapes.bas`.
+
 ## The IDE
 
 `./r --ide` opens the IDE, a bigger window with more panes. File, New
 project, BASIC lays out a BASIC project with one file, `autorun.bas`.
-The IDE opens it on the BASIC level. The editor is on the left, the
-machine's screen on the right, and this guide under the screen. Nothing
-else is in the way. The Level menu shows the files and the messages
-when you want them, and F2 opens the full Project level.
+The IDE opens it in the BASIC view. The project's files are in a column
+on the left. The editor is in the middle, the machine's screen on the
+right, and this guide under the screen.
 
-Type a program in the editor. Press Run in BASIC. The IDE boots BASIC,
-puts the program in the machine's memory and types `RUN` for you.
+Type a program in the editor. Press Run. The IDE boots BASIC, puts the
+program in the machine's memory and types `RUN` for you. Check reads the
+program for mistakes without running it. Step runs one line and stops
+before the next, with an arrow beside it.
+
+A click in the column before a line sets a breakpoint, shown as a red
+dot. The program stops when it reaches that line, before the line runs.
+Run goes on from there.
 
 From then on the editor and the machine hold one program. Change a line
 in the editor and type `LIST` on the small screen: the change is there.
@@ -874,6 +979,13 @@ Save writes the editor's text to the file.
 Build reads every `.bas` file of the project with `CHECK`. Each mistake
 shows in the Messages pane with the file and its line, as in
 `autorun.bas:3: UNKNOWN WORD RUN IN LINE 110`, and the build stops.
+
+Every `.bas` file of the project has a tab in the editor. The tab in
+front and the machine's current file are one thing. Click a tab and the
+IDE types `FILE` for you. Type `FILE` on the small screen and its tab
+comes to the front. A library the program includes shows under Libraries
+in the column. It opens read only, so a project does not change a
+library by accident. Edit library on its tab lets you change it.
 
 ## Longer programs
 
@@ -1046,11 +1158,12 @@ Commands you type at the prompt:
 |---|---|
 | `RUN` | runs the stored program from its lowest line |
 | `LIST` | prints the stored program, or part of it: `LIST 20`, `LIST 20-40`, `LIST -40`, `LIST 20-` |
-| `NEW` | throws the stored program away |
+| `NEW` | empties the file you are in, and `NEW ALL` empties every file |
+| `FILE N` | goes to the file N, loading or starting it, and `FILE` alone names the file you are in |
 | `RENUM s,i` | numbers the lines again from s in steps of i, 10 and 10 when left out |
 | `CHECK n` | reads the stored program for mistakes without running it, from line n when given |
 
-These five work only at the prompt. In a program line each one is an
+These six work only at the prompt. In a program line each one is an
 `UNKNOWN WORD`.
 
 Statements, in a program or at the prompt:
@@ -1064,6 +1177,8 @@ Statements, in a program or at the prompt:
 | `IF cond THEN 100` | goes to line 100 when cond is not 0 |
 | `GOTO 100` | goes to line 100 |
 | `GOSUB 100` | goes to line 100 and remembers where it was |
+| `GOSUB N:100` | the same in the file N, as `GOTO`, `THEN` and `RESTORE` take it too |
+| `INCLUDE N` | brings the file N in beside the program before it runs. It must open its line |
 | `RETURN` | goes back to the line after the last `GOSUB` |
 | `FOR I=a TO b STEP s` | starts a counted loop, `STEP` optional |
 | `NEXT` | adds the step and goes back while I is in range |
@@ -1086,10 +1201,10 @@ Statements, in a program or at the prompt:
 | `LOADFONT n` | loads the font n from the ROM, or the built-in font when n is left out, and clears the screen |
 | `CALL n` or `JSR n` | runs machine code at slot n, the A register goes to box 4 |
 | `JMP n` | jumps to machine code at slot n and never comes back |
-| `!SAVE "N"` | saves the program into the cartridge as N |
-| `!LOAD "N"` | loads N from the cartridge |
-| `!DELETE "N"` | removes N from the cartridge |
-| `!CATALOG` | lists the names in the cartridge |
+| `SAVE "N"` or `!SAVE "N"` | saves the file you are in into the cartridge as N, or under its own name with no N |
+| `LOAD "N"` or `!LOAD "N"` | loads N from the cartridge, as the program or as a file beside it |
+| `DELETE "N"` or `!DELETE "N"` | removes N from the cartridge |
+| `CATALOG` or `!CATALOG` | lists the names in the cartridge |
 
 Functions, used inside an expression:
 

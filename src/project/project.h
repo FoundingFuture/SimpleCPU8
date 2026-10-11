@@ -120,7 +120,31 @@ struct Options {
   std::vector<std::pair<std::string, std::string>> meta;
   std::map<std::string, std::string> defines;
   bool keepAsm = false;  // also write the generated assembly beside the ROM
+  // The libraries folders: .bas files of routines any project may
+  // INCLUDE. A name a project's own files do not settle is looked up in
+  // each in turn, by its file name in any case. None means no libraries.
+  std::vector<std::filesystem::path> libraries;
 };
+
+// The files a BASIC text INCLUDEs, in line order: each name in capitals,
+// without a .BAS after it. Only a line that opens with INCLUDE counts,
+// which is where the interpreter looks for one.
+std::vector<std::string> includesOf(const std::string& text);
+
+// The name of a libraries folder. A folder of projects holds one beside
+// the projects, and it is no project itself. The examples' builder and
+// the IDE's example list pass over it.
+constexpr const char* LIBRARIES_FOLDER = "libraries";
+
+// Where the libraries are when nobody says: the folder libraries in the
+// folder the projects sit in. The IDE asks with its projects folder and
+// with the folder a project is in, simplecpu-make with the latter.
+std::filesystem::path defaultLibraries(const std::filesystem::path& projectsFolder);
+
+// A library's file by its name in any case, with .bas after it in any
+// case, in the first of the folders that has one. An empty path when
+// none has.
+std::filesystem::path libraryFile(const std::vector<std::filesystem::path>& libraries, const std::string& name);
 
 enum class Kind { C, Basic, Assembly, Microcode };
 

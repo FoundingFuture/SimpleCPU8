@@ -62,6 +62,7 @@ void Settings::load() {
     const std::string key = trim(line.substr(0, eq));
     const std::string value = trim(line.substr(eq + 1));
     if (key == "projects") projectsDir = value;
+    else if (key == "libraries") librariesDir = value;
     else if (key == "scale") {
       const float f = std::strtof(value.c_str(), nullptr);
       if (f >= 0.5f && f <= 4.0f) uiScale = f;
@@ -82,6 +83,7 @@ bool Settings::save() const {
   std::ostringstream o;
   o << "# SimpleCPU-8 IDE settings\n";
   o << "projects = " << projectsDir << "\n";
+  o << "libraries = " << librariesDir << "\n";
   o << "scale = " << uiScale << "\n";
   o << "format_asm = " << (formatAssembly ? 1 : 0) << "\n";
   o << "error_sound = " << (errorSound ? 1 : 0) << "\n";

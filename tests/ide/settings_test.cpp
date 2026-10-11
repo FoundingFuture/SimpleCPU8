@@ -66,7 +66,21 @@ TEST_SUITE("the settings folder") {
     CHECK(next.columnKnown);
   }
 
-  // A text-mode stream on Windows writes CR LF. This fails there alone.
+  // The libraries BASIC programs INCLUDE live in one folder, which
+  // Preferences may name. Unset, it is empty here and the project
+  // library names the default.
+  TEST_CASE("the libraries folder is kept, and is empty until it is set") {
+    FakeHome home;
+    Settings s;
+    CHECK(s.librariesDir.empty());
+    s.librariesDir = (home.root / "elsewhere").string();
+    REQUIRE(s.save());
+    Settings next;
+    next.load();
+    CHECK(next.librariesDir == s.librariesDir);
+  }
+
+
   TEST_CASE("settings.txt has LF line ends") {
     FakeHome home;
     Settings s;

@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -71,6 +72,17 @@ class Storage : public ChainedDevice {
   // an empty list, and every name is STO_NOT_FOUND.
   void attachAssets(const std::vector<RomAsset>* assets) { assets_ = assets; }
 
+  // The host's part in LOAD and SAVE. find answers LOAD before the slots
+  // do: with a project's own file, a library, or the file a path names.
+  // Nothing means the slots decide. saved hears every SAVE after the
+  // slot is written. The IDE is such a host. A machine with none has its
+  // slots only.
+  struct Host {
+    std::function<std::optional<std::string>(const std::string& name)> find;
+    std::function<void(const std::string& name, const std::string& text)> saved;
+  };
+  void setHost(Host host) { host_ = std::move(host); }
+
   // The machine's data RAM, RAM_SIZE bytes, like the ACP takes it.
   void attachRam(uint8_t* ram) { ram_ = ram; }
 
@@ -82,6 +94,7 @@ class Storage : public ChainedDevice {
   BasicSlots* slots_ = nullptr;
   const std::vector<RomAsset>* assets_ = nullptr;
   std::function<void()> onChange_;
+  Host host_;
 
   uint8_t addrHi_ = 0;
   uint8_t addrLo_ = 0;
@@ -93,7 +106,9 @@ class Storage : public ChainedDevice {
 
   uint8_t byteAt(uint32_t at) const;
   void putByte(uint32_t at, uint8_t v);
-  bool readName(std::string& name) const;
+  // The name from RAM. A path is allowed only where `path` says so.
+  bool readName(std::string& name, bool path = false) const;
+  // The slot of that name: the exact name, else the name in any case.
   BasicSlots::iterator find(const std::string& name);
 
   void run(uint8_t cmd);

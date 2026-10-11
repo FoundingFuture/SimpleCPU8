@@ -1,6 +1,7 @@
 #include <doctest.h>
 
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <string>
@@ -141,6 +142,106 @@ TEST_SUITE("storage commands") {
     CHECK(r.ram[BLOCK + 7] == 0);
     CHECK(r.ram[BLOCK + 8] == 0xaa);
     CHECK(r.changes == 0);
+  }
+
+  // BASIC names a file in capitals, whatever the case of the slot.
+  TEST_CASE("LOAD finds a slot in any case, the exact name first") {
+    Rig r;
+    r.slots.emplace_back("graphics", "10 REM small\n");
+    r.slots.emplace_back("GRAPHICS", "10 REM capitals\n");
+    r.slots.emplace_back("Tools", "10 REM tools\n");
+    r.block(BLOCK, 100);
+    r.name("GRAPHICS");
+    r.out(STO_CMD, STO_LOAD);
+    CHECK(r.status() == STO_OK);
+    CHECK(r.textAt(BLOCK) == "10 REM capitals\n");
+    r.name("TOOLS");
+    r.out(STO_CMD, STO_LOAD);
+    CHECK(r.status() == STO_OK);
+    CHECK(r.textAt(BLOCK) == "10 REM tools\n");
+  }
+
+  TEST_CASE("SAVE replaces a slot whose name differs only in case") {
+    Rig r;
+    r.slots.emplace_back("Tools", "old");
+    r.putText(BLOCK, "new");
+    r.block(BLOCK, 0);
+    r.name("TOOLS");
+    r.out(STO_CMD, STO_SAVE);
+    CHECK(r.status() == STO_OK);
+    REQUIRE(r.slots.size() == 1);
+    CHECK(r.slots[0].first == "Tools");
+    CHECK(r.slots[0].second == "new");
+  }
+
+  // A machine with no folder has only its slots, so a path is the slot
+  // its file's name stands for, or nothing.
+  TEST_CASE("LOAD of a path with no host finds the slot its stem names") {
+    Rig r;
+    r.slots.emplace_back("GRAPHICS", "10 REM lib\n");
+    r.block(BLOCK, 100);
+    r.name("../graphlib/graphics.bas");
+    r.out(STO_CMD, STO_LOAD);
+    CHECK(r.status() == STO_OK);
+    CHECK(r.textAt(BLOCK) == "10 REM lib\n");
+    r.name("../graphlib/other.bas");
+    r.out(STO_CMD, STO_LOAD);
+    CHECK(r.status() == STO_NOT_FOUND);
+  }
+
+  TEST_CASE("a path is longer than a slot's name, and only LOAD takes one") {
+    Rig r;
+    const std::string path = "../" + std::string(60, 'd') + "/graphics.bas";
+    r.slots.emplace_back("GRAPHICS", "x");
+    r.block(BLOCK, 100);
+    r.name(path);
+    r.out(STO_CMD, STO_LOAD);
+    CHECK(r.status() == STO_OK);
+    r.putText(BLOCK, "x");
+    r.out(STO_CMD, STO_SAVE);
+    CHECK(r.status() == STO_BAD_NAME);
+    r.name(std::string(120, 'p') + ".bas");
+    r.out(STO_CMD, STO_LOAD);
+    CHECK(r.status() == STO_BAD_NAME);
+  }
+
+  // The IDE is such a host: it answers with the project's documents, the
+  // libraries and files by path, before the cartridge's own slots.
+  TEST_CASE("a host answers LOAD before the slots do, and hears every SAVE") {
+    Rig r;
+    r.slots.emplace_back("GAME", "from the slot");
+    std::vector<std::string> asked;
+    std::vector<std::pair<std::string, std::string>> saved;
+    Storage::Host host;
+    host.find = [&](const std::string& name) -> std::optional<std::string> {
+      asked.push_back(name);
+      if (name == "GAME") return "from the host";
+      if (name == "../lib/tools.bas") return "by path";
+      return std::nullopt;
+    };
+    host.saved = [&](const std::string& name, const std::string& text) { saved.emplace_back(name, text); };
+    r.dev->setHost(host);
+    r.block(BLOCK, 100);
+    r.name("GAME");
+    r.out(STO_CMD, STO_LOAD);
+    CHECK(r.textAt(BLOCK) == "from the host");
+    r.name("../lib/tools.bas");
+    r.out(STO_CMD, STO_LOAD);
+    CHECK(r.status() == STO_OK);
+    CHECK(r.textAt(BLOCK) == "by path");
+    r.name("NOPE");
+    r.out(STO_CMD, STO_LOAD);
+    CHECK(r.status() == STO_NOT_FOUND);
+    CHECK(asked == std::vector<std::string>{"GAME", "../lib/tools.bas", "NOPE"});
+    r.putText(BLOCK, "10 REM kept");
+    r.name("TOOLS");
+    r.out(STO_CMD, STO_SAVE);
+    CHECK(r.status() == STO_OK);
+    REQUIRE(saved.size() == 1);
+    CHECK(saved[0].first == "TOOLS");
+    CHECK(saved[0].second == "10 REM kept");
+    // The slot is written too: the cartridge is what the machine has.
+    CHECK(r.slots.size() == 2);
   }
 
   TEST_CASE("LOAD of a missing slot says so and writes nothing") {

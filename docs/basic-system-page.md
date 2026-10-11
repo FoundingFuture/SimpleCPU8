@@ -25,22 +25,24 @@ reads them.
 | $05 | SYS_COL | byte | cursor column, 0 to SYS_COLS minus 1 |
 | $06 | SYS_ROW | byte | cursor row, 0 to SYS_ROWS minus 1 |
 | $07 | SYS_KEY | byte | the last key pressed, 0 before any |
-| $08 | SYS_PROG | word | where the stored program starts |
-| $0A | SYS_PROG_LEN | word | its length in bytes, 3 for an empty program |
+| $08 | SYS_PROG | word | where the program store starts |
+| $0A | SYS_PROG_LEN | word | its length in bytes, 158 for an empty program |
 | $0C | SYS_VARS | word | the integer variables, 11 words per letter |
 | $0E | SYS_HEAP | word | where the string heap starts |
 | $10 | SYS_HEAP_TOP | word | bytes of the heap in use |
 | $12 | SYS_ERR | byte | the last error code, cleared when the next command starts |
-| $13 | SYS_ERR_LINE | word | the line it happened on, 0 in direct mode |
+| $13 | SYS_ERR_LINE | word | the line it happened on, 0 in direct mode. SYS_FILE has its file |
 | $15 | SYS_RUNNING | byte | 1 while a program runs |
-| $16 | SYS_PC | word | the offset in the program of the line being run |
+| $16 | SYS_PC | word | the offset in the store of the line RUN goes to next |
 | $18 | SYS_CALL | word | the instruction slot the last CALL or JMP went to |
 | $1A | SYS_USR | 6 | USR's three parameter words on the way in, its answer on the way out |
-| $20 | SYS_READ | word | the offset in the program of READ's next value, 0 for the first value |
+| $20 | SYS_READ | word | the offset in the store of READ's next value, 0 for the first value |
 | $22 | SYS_COLS | byte | the text grid's columns, 42 at power on |
 | $23 | SYS_ROWS | byte | the text grid's rows, 32 at power on |
 | $24 | SYS_PROMPT | byte | 1 while the prompt waits for a line, 0 otherwise |
-| $25 | reserved | 11 | kept free for BASIC, $25 to $2F |
+| $25 | SYS_FILE | word | the index of the file the running line is in, 0 for the main file |
+| $27 | SYS_EDIT | byte | the index of the current file, the one a typed line goes into |
+| $28 | reserved | 8 | kept free for BASIC, $28 to $2F |
 
 SYS_PROMPT is 0 from the start of BASIC's main until its first prompt.
 It is 0 again from the Enter that ends a line. AUTORUN, LOAD and a typed
@@ -48,30 +50,78 @@ line store a program line by line with no program running. SYS_RUNNING
 at 0 does not mean the program is whole. The IDE reads and writes the
 program only while SYS_PROMPT is 1.
 
+While a program runs, SYS_PC is one line ahead. RUN writes a line's
+number to SYS_ERR_LINE, moves SYS_PC to the line after it, and then runs
+the line. A jump sets SYS_PC to its target. So SYS_ERR_LINE and SYS_FILE
+name the line that runs, and SYS_PC the line that comes next. The IDE
+sees a line start by this: SYS_PC moves one record on while SYS_ERR_LINE
+holds that record's number.
+
 The integer variables sit in 11 word slots per letter: the bare name first,
 then the digit forms 0 to 9. So `B` is slot 11 and `B7` is slot 19, and
 `DEEK(DEEK(12) + 22)` reads `B`.
 
 ## Where BASIC's memory lies
 
-The interpreter's globals start after the zero page and end at $B694,
-46,741 bytes. SYS_PROG, SYS_VARS and SYS_HEAP give a program the three a
+The interpreter's globals start after the zero page and end at $BA23,
+47,396 bytes. SYS_PROG, SYS_VARS and SYS_HEAP give a program the three a
 program reads, so it never needs the addresses below, which are this
 build's.
 
 | From | To | Bytes | Holds |
 |---|---|---|---|
-| $0456 | $1055 | 3,072 | the string heap, SYS_HEAP |
-| $1076 | $6875 | 22,528 | the text block SAVE, LOAD and CATALOG go through |
-| $6876 | $6AB1 | 572 | the integer variables, SYS_VARS |
-| $6AB2 | $AAB1 | 16,384 | the program, SYS_PROG, and its DATA bytes after it |
-| $AAB2 | $AEB1 | 1,024 | the jump cache |
-| $B695 | the C stack | | free for a program's tables |
+| $0510 | $110F | 3,072 | the string heap, SYS_HEAP |
+| $1130 | $692F | 22,528 | the text block SAVE, LOAD and CATALOG go through |
+| $6930 | $6B6B | 572 | the integer variables, SYS_VARS |
+| $6B6C | $AB6B | 16,384 | the program store, SYS_PROG, and its DATA bytes after it |
+| $ADA8 | $B1A7 | 1,024 | the jump cache |
+| $BA24 | the C stack | | free for a program's tables |
 | $F000 | $FFFF | 4,096 | the text screen |
 
 The C stack starts at $F000 and grows down. The Centipede prototypes took
 it down to $EE96, 362 bytes. The program keeps each keyword as one byte
 and each number with its value, docs/design/basic-speed.md.
+
+## The program store
+
+The store holds up to 8 files in its 16,384 bytes. One is the main file,
+which RUN runs. INCLUDE, FILE and LOAD bring the others in beside it. A
+table of 154 bytes at its head names them.
+
+| Offset | Size | Holds |
+|---|---|---|
+| 0 | byte | how many entries the table has in use |
+| 1 | byte | spare |
+| 2 | 19 each | an entry per file, 8 of them |
+
+An entry is the file's name, up to 16 characters in capitals, padded
+with zeros to 17 bytes. Then comes the offset of the file's first record
+as a word. An offset of 0 is a file a line names that is not loaded. A
+file's index is its entry's place, and the main file is index 0, called
+MAIN until a LOAD names it.
+
+Each loaded file has one block of records, in line order.
+
+| Byte | Holds |
+|---|---|
+| 0 | the index of the file the line is in |
+| 1, 2 | the line number, high byte first |
+| 3 | the record's length, this byte's four included |
+| 4 on | the text, then a zero |
+
+A record numbered 0 ends its file's block. It is 4 bytes. So the line
+after a file's last is never another file's, and a program that runs off
+the end of a file ends there. A new file's block goes after every
+other, so loading one moves no record. An empty store is the table and
+the main file's end record, 158 bytes.
+
+The text holds a keyword as one byte, 128 plus its place in
+src/basic/keywords.h. A number is the byte 191, its value as a word,
+then its digits. A jump target, the line after GOTO, GOSUB, THEN or
+RESTORE, is the byte 192, the target file's index, then the line as a
+word. `GOSUB GRAPHICS:1000` and `GOTO 10` are both stored that way, the
+second with the index of its own file. LIST prints the file's name and a
+colon only for a target in another file.
 
 ## What a program can do with it
 
@@ -123,7 +173,7 @@ A routine called this way has the contract a bang handler has. It may use
 the hardware stack in balance. It may not touch the zero page past the
 system page, which is BASIC's register file. The zero page from $30 to
 $FF is the interpreter's, and a routine reads and writes nothing there.
-$25 to $2F are reserved for future system page words, and they are not a
+$28 to $2F are reserved for future system page words, and they are not a
 routine's either.
 
 ## Asking a routine for an answer
@@ -167,8 +217,10 @@ example. docs/standalone.md, under Making a program, has the project side.
 
 This BASIC has room to explain itself, so a message says what went
 wrong in words. A syntax error adds what it expected and what it found.
-Every message ends with `IN LINE n` when a program was running. The code
-stays in SYS_ERR until the next command. Codes 1 to 12 keep the numbers
+Every message ends with `IN LINE n` when a program was running. A line of
+another file than the main one reads `IN NAME:n`, as in
+`SYNTAX ERROR IN GRAPHICS:1010`. The code stays in SYS_ERR until the next
+command. Codes 1 to 12 keep the numbers
 they always had. Code 3 is no longer raised: codes 15 to 18 split it.
 
 | Code | Name | On the screen |
@@ -207,5 +259,7 @@ they always had. Code 3 is no longer raised: codes 15 to 18 split it.
 | 31 | E_HEXWIDTH | `HEX WIDTH IS OUT OF RANGE [1,4]` |
 | 32 | E_TEXTSIZE | `TEXT SIZE IS OUT OF RANGE [4,8]` |
 | 33 | E_NOFONT | `NO FONT CALLED name ON THE CARTRIDGE` |
+| 34 | E_NOFILE | `FILE NOT FOUND: name` |
+| 35 | E_FILES | `TOO MANY FILES: 8 AT MOST` |
 
 The codes are in src/basic/basic.h and the messages in run.c.

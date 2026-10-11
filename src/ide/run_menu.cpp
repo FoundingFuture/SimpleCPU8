@@ -102,19 +102,20 @@ void Ide::checkBasicDoc(Doc& doc) {
     reportErrors({doc.name + ": " + why});
     return;
   }
-  // Stored first, so LIST on the machine shows what was checked.
-  if (basicAtReady()) {
-    syncDoc_ = doc.name;
-    pushProgram();
-  }
-  const CartridgeResult rom = decodeCartridge(std::vector<uint8_t>(basicRom().begin(), basicRom().end()));
+  // The program is stored by the exchange every frame makes at READY,
+  // so LIST on the machine shows what was checked.
+  librariesStale_ = true;
+  CartridgeResult rom = decodeCartridge(std::vector<uint8_t>(basicRom().begin(), basicRom().end()));
   if (!rom.cartridge) {
     reportErrors({"BASIC ROM: " + rom.error});
     return;
   }
+  // Every .bas of the project and every library it includes is a slot,
+  // so the program's INCLUDE lines find their files.
+  rom.cartridge->basic = basicSlots();
   // The check runs on a machine of its own, so the one on screen keeps
   // its picture and its program's state.
-  const basic::Checked checked = basic::checkProgram(*rom.cartridge, doc.text);
+  const basic::Checked checked = basic::checkProgram(*rom.cartridge, doc.text, basic::fileNameOf(doc.name));
   const std::vector<std::string> rows = basic::splitLines(doc.text);
   std::vector<std::string> errors;
   for (const basic::Issue& issue : checked.issues) {
@@ -293,7 +294,18 @@ int Ide::currentLine(const Doc& doc) {
 }
 
 void Ide::showWhere() {
-  if (basicBooted_) return;
+  if (basicBooted_) {
+    // The file the BASIC line is in comes forward, a library's too. The
+    // IDE picked this tab, so no FILE goes to the machine for it.
+    if (!basicMidProgram()) return;
+    const std::string name = runningBasicDoc();
+    for (size_t i = 0; i < docs_.size(); i++) {
+      if (docs_[i].name != name) continue;
+      if (activeName_[static_cast<int>(View::Basic)] != name || !docs_[i].open) activate(i);
+      lastBasicTab_ = name;
+    }
+    return;
+  }
   const project::SourceLine* at = pcLines_.at(computer_.machine().pc);
   if (!at) return;
   for (size_t i = 0; i < docs_.size(); i++) {
@@ -329,6 +341,11 @@ void Ide::toggleMicrocodeLock() {
 }
 
 bool Ide::addBreak(const std::string& spec) {
+  // A library's document is there once the libraries were looked up.
+  if (librariesStale_) {
+    librariesStale_ = false;
+    refreshLibraries();
+  }
   const size_t colon = spec.rfind(':');
   if (colon == std::string::npos) return false;
   const Doc* doc = docNamed(spec.substr(0, colon));

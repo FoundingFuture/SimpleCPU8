@@ -87,7 +87,8 @@ void Ide::readExamples() {
   for (const project::ExampleKind& k : project::EXAMPLE_KINDS) {
     ExampleGroup g{k.label, {}};
     for (const auto& entry : fs::directory_iterator(examplesRoot() / k.folder, ec)) {
-      if (!entry.is_directory()) continue;
+      // A libraries folder beside the examples holds libraries, not a project.
+      if (!entry.is_directory() || entry.path().filename() == project::LIBRARIES_FOLDER) continue;
       g.items.push_back({entry.path().filename().string(), readmeTitle(entry.path()), entry.path().string()});
     }
     std::sort(g.items.begin(), g.items.end(), [](const Example& a, const Example& b) { return a.name < b.name; });
@@ -130,7 +131,14 @@ void Ide::addDoc(const std::string& name, const std::string& text) {
   d.text.reserve(d.text.size() + (1 << 16));
   d.dirty = projectDir_.empty();
   docs_.push_back(std::move(d));
-  std::sort(docs_.begin(), docs_.end(), [](const Doc& a, const Doc& b) { return a.name < b.name; });
+  sortDocs();
+}
+
+// The project's own documents by name, then the libraries by name.
+void Ide::sortDocs() {
+  std::sort(docs_.begin(), docs_.end(), [](const Doc& a, const Doc& b) {
+    return a.library != b.library ? b.library : a.name < b.name;
+  });
 }
 
 Doc* Ide::docNamed(const std::string& name) {
@@ -269,7 +277,6 @@ void Ide::removeDoc(const std::string& name) {
     filesChanged_ = true;
   }
   docs_.erase(it);
-  if (syncDoc_ == name) syncDoc_.clear();
   settleActive();
 }
 
@@ -329,8 +336,11 @@ project::Layout Ide::layout() const {
 }
 
 std::vector<project::Source> Ide::sources() const {
+  // A library is the libraries folder's, not the project's.
   std::vector<project::Source> out;
-  for (const Doc& d : docs_) out.push_back({d.name, d.text});
+  for (const Doc& d : docs_) {
+    if (!d.library) out.push_back({d.name, d.text});
+  }
   return out;
 }
 
@@ -353,7 +363,7 @@ void Ide::openProject(const std::string& dir) {
   forgetSourceBreaks();
   assetsStale_ = true;
   filesChanged_ = false;
-  syncDoc_.clear();
+  syncBases_.clear();
   for (const auto& entry : fs::directory_iterator(l.sources, ec)) {
     if (!entry.is_regular_file()) continue;
     const std::string name = entry.path().filename().string();
@@ -410,7 +420,7 @@ void Ide::openRomAsProject(const std::string& path) {
   forgetSourceBreaks();
   assetsStale_ = true;
   filesChanged_ = false;
-  syncDoc_.clear();
+  syncBases_.clear();
   const project::Carried carry = project::carried(*r.cartridge);
   if (!carry.sources.empty()) {
     // The ROM carries its project: every source is a document, the
@@ -526,6 +536,16 @@ bool Ide::layOut(Doc& doc) {
 }
 
 void Ide::saveDoc(Doc& doc) {
+  // A library is saved into its own file in the libraries folder.
+  if (doc.library) {
+    if (writeText(doc.path, doc.text)) {
+      doc.dirty = false;
+      note("saved the library " + doc.path);
+    } else {
+      note("cannot write " + doc.path);
+    }
+    return;
+  }
   if (refuseExample("saved")) return;
   if (projectDir_.empty()) {
     note("the project has no folder yet: use File, Save project as");
@@ -629,6 +649,12 @@ void Ide::buildProject(bool run) {
   builtRom_.clear();
   lastBuildOk_ = false;
   project::Options o;
+  o.libraries = libraryFolders();
+  // A library is built from its file, so an edit in its tab goes there
+  // first.
+  for (Doc& d : docs_) {
+    if (d.library && d.dirty) saveDoc(d);
+  }
   project::Built built;
   if (example_) {
     // The open documents, with the example's own assets and README. The
@@ -647,6 +673,7 @@ void Ide::buildProject(bool run) {
   }
   for (const std::string& n : built.notes) note(n);
   reportErrors(built.errors);
+  librariesStale_ = true;
   if (!built.cartridge) return;
   lastBuildOk_ = true;
   insertBuilt(built, projectTitle_);
@@ -675,7 +702,9 @@ project::Built Ide::buildInMemory() {
   } else {
     for (const std::filesystem::path& p : project::assetFiles(layout())) assetNames.push_back(p.filename().string());
   }
-  project::Built built = project::buildSources(sources(), assets, project::Options{}, projectTitle_, "",
+  project::Options o;
+  o.libraries = libraryFolders();
+  project::Built built = project::buildSources(sources(), assets, o, projectTitle_, "",
                                                carriedProject_ ? std::optional<Cartridge>{} : romBase_, assetNames);
   built.notes.insert(built.notes.begin(), notes.begin(), notes.end());
   // A ROM without a project keeps its program, and its slots and
@@ -718,10 +747,11 @@ void Ide::loadCartridge(Cartridge cart, const std::string& what) {
   setRunning(false);
   basicBooted_ = false;
   pushPending_ = false;
-  // A new ROM or a fresh interpreter: the document is the partner that
-  // brings its program in, not the empty memory that wipes it.
-  syncDoc_.clear();
-  syncBase_.clear();
+  // A new ROM or a fresh interpreter: the documents bring their programs
+  // in, not the empty memory that wipes them.
+  syncBases_.clear();
+  shownEdit_ = -1;
+  lastBasicTab_.clear();
   basicLines_.reset();
   computer_.insert(std::move(cart));
   applyLock();
@@ -736,161 +766,6 @@ void Ide::burnRom(const std::string& path) {
   std::ofstream o(path, std::ios::binary);
   o.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
   note(o ? "burned " + path + " (" + std::to_string(bytes.size()) + " bytes)" : "cannot write " + path);
-}
-
-// ---- BASIC
-
-// The built in interpreter alone, for a quick run of a .bas document
-// without a build.
-void Ide::bootBasic() {
-  CartridgeResult r = decodeCartridge(std::vector<uint8_t>(basicRom().begin(), basicRom().end()));
-  if (!r.cartridge) {
-    note("BASIC ROM: " + r.error);
-    return;
-  }
-  builtAssembly_.clear();
-  haveSource_ = false;
-  pcLines_ = {};
-  stepLine_.clear();
-  loadCartridge(std::move(*r.cartridge), "the BASIC ROM");
-  basicBooted_ = true;
-  refreshWatch();
-}
-
-// Run the active .bas document: boot the interpreter unless the machine
-// already runs one, put the program in its memory and type RUN. The push
-// waits for the boot, since the system page is empty until then.
-void Ide::runInBasic() {
-  Doc* d = activeDocOf(View::Basic);
-  if (!d) return;
-  syncDoc_ = d->name;
-  if (!basicBooted_ || computer_.machine().status != Status::Running) bootBasic();
-  pushPending_ = true;
-  afterPush_ = "RUN\n";
-  setRunning(true);
-}
-
-// BASIC's own word that it waits at its prompt. No program running is not
-// enough: AUTORUN, LOAD and a typed line store lines with none running.
-// A program read or written between two of them came out mixed.
-bool Ide::basicAtReady() const {
-  if (!basicBooted_ || computer_.machine().status != Status::Running) return false;
-  return basic::atPrompt(computer_.machine().ram) && typingPos_ >= typing_.size();
-}
-
-void Ide::writeProgram(const std::vector<uint8_t>& bytes) {
-  basic::storeProgram(computer_.machine().ram, bytes);
-}
-
-bool Ide::pushProgram() {
-  if (!basicAtReady()) return false;
-  Doc* d = nullptr;
-  for (Doc& doc : docs_) {
-    if (doc.name == syncDoc_) d = &doc;
-  }
-  if (!d) return false;
-  std::vector<uint8_t> bytes = basic::encodeProgram(d->text);
-  writeProgram(bytes);
-  syncBase_ = std::move(bytes);
-  return true;
-}
-
-void Ide::setDocText(Doc& doc, std::string text) {
-  doc.text = std::move(text);
-  if (ImGuiInputTextState* state = ImGui::GetInputTextState(ImGui::GetActiveID())) {
-    state->ReloadUserBufAndKeepSelection();
-  }
-}
-
-// The document in step with the interpreter: the .bas document in the
-// BASIC view's editor, else the one last in step, else autorun.bas, which
-// a built BASIC project boots into.
-Doc* Ide::basicPartner() {
-  if (Doc* active = activeDocOf(View::Basic)) return active;
-  for (Doc& d : docs_) {
-    if (d.name == syncDoc_) return &d;
-  }
-  for (Doc& d : docs_) {
-    if (d.name == "autorun.bas") return &d;
-  }
-  return nullptr;
-}
-
-// Once per frame while BASIC waits at READY. A pending push from Run in
-// BASIC goes first. Then the memory and the document are compared with
-// the program they last agreed on: a side that moved carries the other
-// along, and two sides that both moved are merged line by line.
-void Ide::syncBasic() {
-  if (!basicAtReady()) return;
-  Doc* d = basicPartner();
-  // A line BASIC would misread stops the exchange both ways until it is
-  // changed, and a Run in BASIC waiting on it is dropped. Syncing the rest
-  // would take the line out of the document at the next merge.
-  const std::string why = d ? basic::refusal(d->text) : "";
-  if (!why.empty()) {
-    if (why != refusalNoted_) note(d->name + ": " + why);
-    refusalNoted_ = why;
-    pushPending_ = false;
-    return;
-  }
-  refusalNoted_.clear();
-  if (pushPending_) {
-    if (d && syncDoc_.empty()) syncDoc_ = d->name;
-    if (!pushProgram()) return;
-    pushPending_ = false;
-    typing_ = afterPush_;
-    typingPos_ = 0;
-    return;
-  }
-  if (!d) return;
-  const auto& ram = computer_.machine().ram;
-  const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
-  const size_t len = static_cast<size_t>((ram[basic::SYS_PROG_LEN] << 8) | ram[basic::SYS_PROG_LEN + 1]);
-  if (len < 3 || len > basic::PROGRAM_MAX || prog + len > ram.size()) return;
-  const auto first = ram.begin() + static_cast<std::ptrdiff_t>(prog);
-  const std::vector<uint8_t> machine(first, first + static_cast<std::ptrdiff_t>(len));
-  // A document that just became the partner brings its program along.
-  if (d->name != syncDoc_) {
-    syncDoc_ = d->name;
-    syncBase_ = machine;
-  }
-  const std::vector<uint8_t> doc = basic::encodeProgram(d->text);
-  if (doc == machine) {
-    syncBase_ = machine;
-    return;
-  }
-  const bool docMoved = doc != syncBase_;
-  const bool machineMoved = machine != syncBase_;
-  const std::vector<uint8_t> result = !machineMoved ? doc
-                                      : !docMoved   ? machine
-                                                    : basic::mergePrograms(syncBase_, doc, machine);
-  if (result != machine) writeProgram(result);
-  if (result != doc) {
-    setDocText(*d, basic::patchText(d->text, result));
-    d->dirty = true;
-    // NEW typed on the computer empties the document too. The file keeps
-    // the old program until the next save, and the person should know.
-    if (result.size() <= 3 && doc.size() > 3) {
-      note("NEW on the computer emptied " + d->name + ". The file on disk keeps the old program until you save.");
-    }
-  }
-  syncBase_ = result;
-}
-
-// Commands for the interpreter go through the key queue, the way a person
-// types them. The queue holds 64 events and a key is two. The pump waits
-// above 32 queued. Programs do not go this way: pushProgram writes them
-// into the interpreter's memory.
-void Ide::typeIntoMachine() {
-  InputBus& in = computer_.input();
-  while (typingPos_ < typing_.size() && in.queued() <= 32) {
-    const char c = typing_[typingPos_++];
-    if (c == '\r') continue;
-    const int code = c == '\n' ? 13 : std::toupper(static_cast<unsigned char>(c));
-    if (code < 1 || code > 127) continue;
-    in.pushKey(static_cast<uint8_t>(code), false);
-    in.pushKey(static_cast<uint8_t>(code), true);
-  }
 }
 
 // ---- the panes
@@ -914,9 +789,15 @@ void Ide::editorPane(View view) {
       ImGuiTabItemFlags flags = d.dirty ? ImGuiTabItemFlags_UnsavedDocument : 0;
       if (pending && selectTab_[v] == d.name) flags |= ImGuiTabItemFlags_SetSelected;
       bool open = true;
-      if (ImGui::BeginTabItem(d.name.c_str(), &open, flags)) {
+      // The ### keeps one tab whatever the label says.
+      const std::string label = d.name + (d.library ? " (library)" : "") + "###" + d.name;
+      if (ImGui::BeginTabItem(label.c_str(), &open, flags)) {
         if (!pending) picked = d.name;
         ImGui::EndTabItem();
+      }
+      if (d.library && ImGui::BeginPopupContextItem()) {
+        if (ImGui::MenuItem("Edit library", nullptr, !d.readOnly)) d.readOnly = !d.readOnly;
+        ImGui::EndPopup();
       }
       if (!open) d.open = false;
     }
@@ -964,7 +845,15 @@ void Ide::editorBody(Doc& doc) {
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s, F10", stepLabel());
   if (kind == DocKind::Basic) {
     ImGui::SameLine();
-    if (basicAtReady() && syncDoc_ == d->name) {
+    if (d->readOnly) {
+      ImGui::TextDisabled("a library, read only");
+      ImGui::SameLine();
+      if (ImGui::SmallButton("Edit library")) d->readOnly = false;
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s is shared by every project that includes it. Editing changes it for all of them.",
+                          d->path.c_str());
+      }
+    } else if (basicAtReady() && inStep(*d)) {
       ImGui::TextDisabled("in step with the computer: LIST shows this text, and lines typed there show up here");
     } else if (basicBooted_ && computer_.machine().status == Status::Running) {
       ImGui::TextDisabled("a program is running: changes go across when it stops at READY");
@@ -1031,16 +920,20 @@ void Ide::editorBody(Doc& doc) {
       }
     }
     gutter.marks = &gutterMarks_;
-    if (codeEditor("##doc", d->text, Syntax::Basic, ImVec2(-1.0f, -1.0f),
-                   ImGuiInputTextFlags_AllowTabInput | BasicAssist::FLAGS, BasicAssist::callback, &basicAssist_,
-                   &gutter)) {
+    // A library stays as its file has it until Edit library.
+    if (d->readOnly) {
+      codeEditor("##doc", d->text, Syntax::Basic, ImVec2(-1.0f, -1.0f), ImGuiInputTextFlags_ReadOnly, nullptr,
+                 nullptr, &gutter);
+    } else if (codeEditor("##doc", d->text, Syntax::Basic, ImVec2(-1.0f, -1.0f),
+                          ImGuiInputTextFlags_AllowTabInput | BasicAssist::FLAGS, BasicAssist::callback,
+                          &basicAssist_, &gutter)) {
       d->dirty = true;
     }
     // Whenever the box is not being typed in, the text stands in number
     // order with its reserved words in capitals: a file opened out of
     // order, lines typed on the machine's screen, the editor just left.
     const bool resting = !ImGui::IsItemActive();
-    if (resting && BasicAssist::sortText(d->text)) d->dirty = true;
+    if (resting && !d->readOnly && BasicAssist::sortText(d->text)) d->dirty = true;
     if (std::string n = basicAssist_.takeNote(); !n.empty()) note(n);
     if (gutter.clicked) toggleBasicBreak(*d, gutter.clicked);
     // A line that no longer exists loses its breakpoint, once the person

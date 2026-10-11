@@ -145,6 +145,13 @@ assembly, so `simplecpu-make` builds in this order:
    A C function they name is kept, with everything it calls.
 4. It assembles the C's output and the `.asm` files into one ROM.
 
+A BASIC program may `INCLUDE` a library, a `.bas` file of routines kept
+outside the project. The build looks for the name among the project's own
+files first. Then it looks in the folder `libraries` beside the project's
+folder, or in the one `--libraries DIR` names. Every library the program
+includes goes into the ROM. docs/guides/basic.md, chapter Libraries, has
+the BASIC side.
+
 A C function called from BASIC or assembly must not be `static`, since
 its label is private to its file. The build refuses such a call:
 

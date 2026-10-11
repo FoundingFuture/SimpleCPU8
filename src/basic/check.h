@@ -22,8 +22,11 @@ struct Checked {
 };
 
 // Boot `interpreter`, a cartridge with BASIC's program, LOAD `text` into it
-// and CHECK it, again after each mistake from the line after it. The
-// cartridge's own BASIC slots are left out, so its AUTORUN does not run.
-Checked checkProgram(const Cartridge& interpreter, const std::string& text);
+// and CHECK it, again after each mistake from the line after it. The text
+// is the slot `name`, the file's own name in the store, so a line that
+// names its own file finds it. The cartridge's other slots stay for the
+// program to INCLUDE. Its AUTORUN is left out, so it does not run at
+// power on, and a program of that name is checked under another.
+Checked checkProgram(const Cartridge& interpreter, const std::string& text, const std::string& name = "");
 
 }  // namespace sc8::basic

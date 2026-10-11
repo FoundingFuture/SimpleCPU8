@@ -218,6 +218,29 @@ TEST_SUITE("a BASIC line starting, seen in the system page") {
     CHECK(linesStarted("10 GOSUB 100\n20 END\n100 A = 1\n110 RETURN\n") == std::vector<int>{10, 100, 110, 20});
   }
 
+  // A line carries its file's index, so a breakpoint in a library is
+  // told from one on the same number in the main file.
+  TEST_CASE("a line that starts in an included file says which file it is in") {
+    basic::Session s;
+    s.slots.emplace_back("LIB", "20 A = 2\n30 RETURN\n");
+    s.load();
+    s.runBudget(3000000);
+    basic::FileTable files{{"MAIN"}};
+    basic::Store store;
+    store.files.push_back({"MAIN", true, basic::encodeLines("10 INCLUDE LIB\n20 GOSUB LIB:20\n30 A = 3\n", files, 0)});
+    store.adopt(files);
+    basic::storeProgram(s.m->ram, basic::writeStore(store));
+    for (char c : std::string("RUN\r")) s.pushKey(c == '\r' ? 13 : c, false);
+    BasicLines watch;
+    std::vector<std::pair<int, int>> started;
+    for (int i = 0; i < 6000000 && started.size() < 20; i++) {
+      if (!s.m->instructionStep()) break;
+      if (const int n = watch.started(s.m->ram)) started.emplace_back(watch.file(), n);
+      if (!started.empty() && basic::atPrompt(s.m->ram)) break;
+    }
+    CHECK(started == std::vector<std::pair<int, int>>{{0, 10}, {0, 20}, {1, 20}, {1, 30}, {0, 30}});
+  }
+
   TEST_CASE("a line typed at the prompt starts no program line") {
     basic::Session s;
     s.load();

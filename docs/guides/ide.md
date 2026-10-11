@@ -4,6 +4,52 @@
 microcode tools around one running machine. This guide covers its panes
 one at a time.
 
+## Views
+
+The IDE has four views, one for each language: BASIC, C, ASSEMBLY and
+MICROCODE. The four tabs at the left of the menu bar pick one, and so do
+F1 to F4. A view is the editor of its language with the panes that
+language needs around it, and every view runs the machine.
+
+Each view's editor has a tab for every open document of its kind. The
+BASIC view holds the `.bas` files, the C view `.c` and `.h`, the
+ASSEMBLY view `.asm`, and the MICROCODE view `microcode.txt`. A view
+keeps its own pane layout, its own guide and its own speed.
+
+`simplecpu-ide --view c` starts in a view: `basic`, `c`, `assembly` or
+`microcode`. `--level` still takes the names of the four levels the
+views replaced: `basic`, `project`, `run` and `cpu`.
+
+## The project column
+
+The project's files stand in a column at the left of the window. It
+belongs to no view, so switching views leaves it alone. Its tree groups
+the sources by kind, then the libraries a BASIC program includes, the
+assets, and what the last build made. A click opens a file in the view
+that owns its kind. New file, Add asset, New sprite and New font are the
+buttons at its top.
+
+The button at the column's top collapses it to a narrow bar, and a click
+on the bar opens it again. Cmd-B does both, or Ctrl-B outside a Mac. A
+drag on its right edge sets its width.
+
+## The Run menu
+
+The Run menu has the same items in every view. Each works at the level
+of code the view shows.
+
+| Item | BASIC | C | ASSEMBLY | MICROCODE |
+|---|---|---|---|---|
+| Run, F5 | types `RUN` for the program | builds if a document changed, then runs | the same | the same |
+| Check, F7 | reads the program with BASIC's `CHECK` | builds and shows the messages | the same | parses the set and checks every row |
+| Step, F10 | one BASIC line | one line of C | one instruction | one row |
+| Pause, F5 | pauses | pauses | pauses | pauses |
+| Stop | breaks the program | powers the machine on again | the same | the same |
+
+Speed is the view's own choice of the speed ladder. Microcode picks the
+set the machine runs: the project's `microcode.txt`, naive or optimal.
+Lock the running set keeps it whatever a later build or ROM brings.
+
 ## Messages
 
 The Messages pane lists what the IDE did and what went wrong. A build
@@ -14,8 +60,8 @@ Preferences, Sound on a build error turns them off.
 
 ## Line numbers and breakpoints
 
-The editor numbers the lines of a C or assembly document in a column
-left of the text. The column sits outside the text box, so a number is
+The editor numbers the lines of a C, assembly or microcode document in
+a column left of the text. The column sits outside the text box, so a number is
 never edited, selected or copied. A build error's line number is the one
 in that column.
 
@@ -33,9 +79,22 @@ removes it. A line joined onto the one above takes its breakpoint along.
 
 Each build places the breakpoints again, so they stay on their lines
 when the code moves. A click in a document edited since the last build
-sets the dot, and the next build gives it an address. The Run level's
-Breakpoints pane lists them as `hello.c:14` with their address, beside
-the ones set in the Listing's margin.
+sets the dot, and the next build gives it an address.
+
+A BASIC document has the column without the numbers, since its lines
+carry their own. A breakpoint there belongs to the BASIC line number.
+The program stops when that line starts, before it runs, and Messages
+says `Stopped at line 1000 in GAME.BAS`. The IDE watches the
+interpreter's system page for this. The program and the interpreter are
+not changed. A line that leaves the document loses its breakpoint.
+
+In `microcode.txt` a breakpoint belongs to a row. The machine stops
+inside the instruction, before that row runs. The optimal set is sealed
+and shows no row, so it refuses one.
+
+The Breakpoints pane is in every view. It lists them all with their
+document and line, beside the ones set in the Listing's margin. A click
+on one shows its line in its view.
 
 ## Idle
 
@@ -45,7 +104,7 @@ frame: a running machine, a tune the sound chip still plays, and a
 playing sprite preview. The text cursor does not blink, since a blink
 would need a frame twice a second.
 
-The Files pane reads the assets folder when a project opens and when the
+The project column reads the assets folder when a project opens and when the
 IDE adds, removes or saves an asset. It reads it again when the window
 comes back to the front, so a file another program changed shows up.
 
@@ -73,8 +132,8 @@ read that file.
 
 ### Opening a sprite
 
-- Double-click a picture under Assets in the Files pane.
-- Press New sprite in the Files pane, and give a name, a frame size and a
+- Double-click a picture under Assets in the project column.
+- Press New sprite in the project column, and give a name, a frame size and a
   frame count.
 - Name the picture on the command line.
 
@@ -140,8 +199,8 @@ mode. The file decides the mode, and the title says which:
 
 ### Opening a font
 
-- Double-click a `.font` under Assets in the Files pane.
-- Press New font in the Files pane and give it a name. The IDE writes a
+- Double-click a `.font` under Assets in the project column.
+- Press New font in the project column and give it a name. The IDE writes a
   copy of the built-in font as `assets/<name>.font` and opens it.
 - Name the font on the command line.
 

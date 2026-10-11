@@ -100,9 +100,9 @@ std::string canonicalLine(std::string_view body);
 // Each word it puts in capitals is one byte, 128 plus the word's place in
 // basic/keywords.h. A number is KW_LITERAL, its value high byte first,
 // then its digits. The line after GOTO, GOSUB, THEN or RESTORE is
-// KW_TARGET, its file's index and its number: `own` for a bare number,
-// the named file's for NAME:number, which gets an entry in `files` when
-// it has none. Numbers and targets take their marker while the line
+// KW_TARGET, its file's index and its number. A bare number takes `own`.
+// NAME:number takes the named file's index, and the name gets an entry
+// in `files` when it has none. Numbers and targets take their marker while the line
 // stays within 250 bytes. A DATA line stays canonicalLine's text.
 // crunch in edit.c is the machine's copy of the rule.
 std::string crunchLine(std::string_view body, FileTable& files, int own);

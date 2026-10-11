@@ -116,10 +116,12 @@ void Ide::columnBar() {
   };
   for (int v = 0; v < VIEW_COUNT; v++) {
     const View view = static_cast<View>(v);
-    const bool any = std::any_of(docs_.begin(), docs_.end(),
-                                 [&](const Doc& d) { return viewOfKind(docKindOf(d.name)) == view; });
+    const bool any = std::any_of(docs_.begin(), docs_.end(), [&](const Doc& d) {
+      return !d.library && viewOfKind(docKindOf(d.name)) == view;
+    });
     if (any) label(viewLabel(view), view == view_ ? ImGui::GetColorU32(ImGuiCol_Text) : plain);
   }
+  if (std::any_of(docs_.begin(), docs_.end(), [](const Doc& d) { return d.library; })) label("LIBRARIES", plain);
   label("ASSETS", plain);
   label("BUILD", plain);
 }
@@ -169,18 +171,37 @@ void Ide::columnTree() {
   std::optional<size_t> opened;
   for (int v = 0; v < VIEW_COUNT; v++) {
     const View view = static_cast<View>(v);
-    const bool any = std::any_of(docs_.begin(), docs_.end(),
-                                 [&](const Doc& d) { return viewOfKind(docKindOf(d.name)) == view; });
+    const bool any = std::any_of(docs_.begin(), docs_.end(), [&](const Doc& d) {
+      return !d.library && viewOfKind(docKindOf(d.name)) == view;
+    });
     if (!any || !ImGui::TreeNodeEx(viewLabel(view), GROUP)) continue;
     for (size_t i = 0; i < docs_.size(); i++) {
       const Doc& d = docs_[i];
-      if (viewOfKind(docKindOf(d.name)) != view) continue;
+      if (d.library || viewOfKind(docKindOf(d.name)) != view) continue;
       const std::string label = d.name + (d.dirty ? " *" : "");
       const bool shown = view == view_ && d.open && activeName_[v] == d.name;
       if (ImGui::Selectable(label.c_str(), shown)) opened = i;
       if (ImGui::BeginPopupContextItem()) {
         if (ImGui::MenuItem(("Remove " + d.name + "...").c_str())) askRemove(d.name);
         ImGui::EndPopup();
+      }
+    }
+    ImGui::TreePop();
+  }
+  // The libraries the project's BASIC programs INCLUDE. They are the
+  // libraries folder's files, not the project's, and open read only.
+  const bool libraries = std::any_of(docs_.begin(), docs_.end(), [](const Doc& d) { return d.library; });
+  if (libraries && ImGui::TreeNodeEx("Libraries", GROUP)) {
+    for (size_t i = 0; i < docs_.size(); i++) {
+      const Doc& d = docs_[i];
+      if (!d.library) continue;
+      const std::string label = d.name + (d.dirty ? " *" : "");
+      const bool shown = view_ == View::Basic && d.open && activeName_[static_cast<int>(View::Basic)] == d.name;
+      if (ImGui::Selectable(label.c_str(), shown)) opened = i;
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("%s\nA library a program of this project includes. It opens read only: Edit library on "
+                          "its tab lets you change it, for every project that uses it.",
+                          d.path.c_str());
       }
     }
     ImGui::TreePop();

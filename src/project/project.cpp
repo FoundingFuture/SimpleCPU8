@@ -573,6 +573,60 @@ static std::vector<std::string> rowWarnings(const std::string& text, const Micro
   return out;
 }
 
+std::vector<std::string> includesOf(const std::string& text) {
+  std::vector<std::string> out;
+  for (size_t at = 0; at < text.size();) {
+    size_t end = text.find('\n', at);
+    if (end == std::string::npos) end = text.size();
+    std::string_view line(text.data() + at, end - at);
+    at = end + 1;
+    // The line's number, then the word, then the name: letters and digits.
+    size_t i = line.find_first_not_of(' ');
+    if (i == std::string_view::npos || !std::isdigit(static_cast<unsigned char>(line[i]))) continue;
+    while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) i++;
+    while (i < line.size() && line[i] == ' ') i++;
+    static const std::string_view WORD = "INCLUDE";
+    if (line.size() < i + WORD.size()) continue;
+    bool word = true;
+    for (size_t k = 0; k < WORD.size(); k++) word = word && std::toupper(static_cast<unsigned char>(line[i + k])) == WORD[k];
+    i += WORD.size();
+    if (!word || (i < line.size() && std::isalnum(static_cast<unsigned char>(line[i])))) continue;
+    while (i < line.size() && line[i] == ' ') i++;
+    std::string name;
+    while (i < line.size() && std::isalnum(static_cast<unsigned char>(line[i])) && name.size() < 16) {
+      name += static_cast<char>(std::toupper(static_cast<unsigned char>(line[i++])));
+    }
+    if (!name.empty()) out.push_back(name);
+  }
+  return out;
+}
+
+fs::path defaultLibraries(const fs::path& projectsFolder) {
+  return projectsFolder.empty() ? fs::path() : projectsFolder / LIBRARIES_FOLDER;
+}
+
+fs::path libraryFile(const std::vector<fs::path>& libraries, const std::string& name) {
+  auto upper = [](std::string s) {
+    for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+  };
+  for (const fs::path& folder : libraries) {
+    if (folder.empty()) continue;
+    // The folder is walked in name order, so two files that differ only
+    // in case give the same answer on every system.
+    std::vector<fs::path> found;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(folder, ec)) {
+      if (!entry.is_regular_file(ec)) continue;
+      const fs::path& p = entry.path();
+      if (upper(p.extension().string()) == ".BAS" && upper(p.stem().string()) == upper(name)) found.push_back(p);
+    }
+    std::sort(found.begin(), found.end());
+    if (!found.empty()) return found.front();
+  }
+  return {};
+}
+
 MicrocodeCheck checkMicrocode(const std::string& text) {
   MicrocodeCheck out;
   const McParsed parsed = parseMicrocode(text);
@@ -855,6 +909,44 @@ Built buildSources(const std::vector<Source>& given, const Assets& assets, const
     c.basic.emplace_back(slotNameFor(p->name), resolved);
     b.sources.push_back(p->name);
   }
+  // Every library the INCLUDE chain reaches goes into the ROM after the
+  // project's own files, so the machine that plays it needs no libraries
+  // folder. A name is the project's own file first, then a library.
+  if (!onBase) {
+    auto have = [&](const std::string& name) {
+      return std::any_of(c.basic.begin(), c.basic.end(), [&](const auto& slot) { return slot.first == name; });
+    };
+    // The list grows while it is walked: a library's own INCLUDE lines
+    // are read when the library comes in.
+    for (size_t i = 0; i < c.basic.size(); i++) {
+      const std::string text = c.basic[i].second;
+      int row = 0;
+      for (size_t from = 0; from < text.size();) {
+        size_t end = text.find('\n', from);
+        if (end == std::string::npos) end = text.size();
+        row++;
+        const std::vector<std::string> names = includesOf(text.substr(from, end - from));
+        from = end + 1;
+        if (names.empty() || have(names[0])) continue;
+        const fs::path file = libraryFile(opts.libraries, names[0]);
+        std::ifstream in(file, std::ios::binary);
+        if (file.empty() || !in) {
+          const std::string who = i < basFiles.size() ? at(basFiles[i]->name) : "library " + c.basic[i].first;
+          std::string folders;
+          for (const fs::path& folder : opts.libraries) folders += (folders.empty() ? "" : " or ") + folder.string();
+          b.errors.push_back(who + ":" + std::to_string(row) + ": INCLUDE " + names[0] +
+                             ": no file of that name in the project" +
+                             (folders.empty() ? ", and no libraries folder is set"
+                                              : " or in the libraries folder " + folders));
+          continue;
+        }
+        std::string library((std::istreambuf_iterator<char>(in)), {});
+        library.erase(std::remove(library.begin(), library.end(), '\r'), library.end());
+        c.basic.emplace_back(names[0], library);
+        b.notes.push_back("library " + names[0] + " from " + file.string());
+      }
+    }
+  }
   if (!b.errors.empty()) return b;
 #if SC8_HAVE_BASIC
   // DESIGN: BASIC reads each file with its own CHECK, on this cartridge's
@@ -863,9 +955,9 @@ Built buildSources(const std::vector<Source>& given, const Assets& assets, const
   // booted to find out.
   if (!onBase && (basicProject || mixedProject)) {
     for (size_t i = 0; i < basFiles.size(); i++) {
-      const std::string& text = c.basic[c.basic.size() - basFiles.size() + i].second;
+      const std::string& text = c.basic[i].second;
       const std::string& name = basFiles[i]->name;
-      const basic::Checked checked = basic::checkProgram(c, text);
+      const basic::Checked checked = basic::checkProgram(c, text, c.basic[i].first);
       for (const basic::Issue& issue : checked.issues) {
         const int line = fileLineOf(text, issue.line);
         b.errors.push_back(at(name) + (line > 0 ? ":" + std::to_string(line) : "") + ": " + issue.message);

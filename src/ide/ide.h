@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <optional>
@@ -25,6 +26,7 @@
 #include <vector>
 
 #include "asm/asm.h"
+#include "basic/program.h"
 #include "ide/basic_assist.h"
 #include "ide/filedialog.h"
 #include "ide/guide.h"
@@ -65,11 +67,17 @@ struct ListLine {
 // whether the text differs from the disk. Its kind follows its name
 // (ide/view.h). `open` says its tab shows in its view's editor. A closed
 // document stays in the project, and the project column opens it again.
+// A library is a .bas file of the libraries folder that a program of the
+// project INCLUDEs. It is no source of the project: `path` is its own
+// file, and it is read only until the person chooses Edit library.
 struct Doc {
   std::string name;
   std::string text;
   bool dirty = false;
   bool open = true;
+  bool library = false;
+  bool readOnly = false;
+  std::string path;
 };
 
 class Ide {
@@ -396,20 +404,44 @@ class Ide {
   void forgetSourceBreaks();
   void typeIntoMachine();
 
-  // BASIC: a .bas document and the interpreter's program memory are two
-  // views of one program, kept in step both ways while BASIC waits at
-  // READY. An edit in the document is written into the memory, so LIST
-  // shows it. A line typed on the small screen appears in the document.
-  // When both sides changed since the last exchange, the lines merge by
-  // number and the document wins a line both changed. While a program
-  // runs, nothing moves; the changes go across at the next READY.
+  // BASIC (basic_files.cpp): a .bas document and its file in the
+  // interpreter's store are two views of one program, a tab per file,
+  // kept in step both ways while BASIC waits at READY. An edit in a
+  // document is written into the store, so LIST shows it. A line typed
+  // on the small screen appears in the document. When both sides changed
+  // a file since the last exchange, its lines merge by number and the
+  // document wins a line both changed. While a program runs, nothing
+  // moves. The changes go across at the next READY.
   void bootBasic();
   void runInBasic();
   bool basicAtReady() const;
-  bool pushProgram();
-  void writeProgram(const std::vector<uint8_t>& bytes);
-  Doc* basicPartner();
+  basic::Store machineStore() const;
+  bool writeStore(const basic::Store& store);
+  bool pushMain();
+  // The document Run runs as the main file, and the document a file of
+  // the store is, by its name.
+  Doc* mainBasicDoc();
+  Doc* docOfFile(const std::string& file);
+  bool inStep(const Doc& doc) const;
   void syncBasic();
+  // The IDE as the storage device's host: LOAD, INCLUDE and FILE find
+  // the project's documents, the libraries and files by path, and a SAVE
+  // goes into the project.
+  void hostStorage();
+  void takeSaves();
+  std::vector<std::pair<std::string, std::string>> savedSlots_;
+  // The folders an INCLUDE finds a library in, and the libraries the
+  // project's programs include as read only documents.
+  std::vector<std::filesystem::path> libraryFolders() const;
+  void refreshLibraries();
+  // The list of libraries is brought up to date at the start of the next
+  // frame. A pane holds a document while it draws, and a refresh may
+  // move every document.
+  bool librariesStale_ = true;
+  // The slots a check of a .bas needs: every .bas of the project, then
+  // every library the INCLUDE chain reaches, read from its file.
+  BasicSlots basicSlots();
+  void sortDocs();
   // Replace a document's text. The editor, when it holds the text,
   // reloads it rather than writing its own copy back.
   void setDocText(Doc& doc, std::string text);
@@ -630,14 +662,17 @@ class Ide {
   std::string manualFilter_;
   std::string manualPage_ = "LD";
 
-  // BASIC sync state. syncDoc_ names the document in step with the
-  // machine, syncBase_ the program both agreed on at the last exchange.
-  std::string syncDoc_;
+  // BASIC sync state: by file name, the records the document and the
+  // store agreed on at the last exchange. A file with an entry is in
+  // step. shownEdit_ is the current file the IDE last saw, and
+  // lastBasicTab_ the tab it last saw in the BASIC view's editor.
+  std::map<std::string, std::vector<uint8_t>> syncBases_;
+  int shownEdit_ = -1;
+  std::string lastBasicTab_;
   // The editor's line numbering for .bas documents, and the document it
   // last watched.
   BasicAssist basicAssist_;
   std::string assistDoc_;
-  std::vector<uint8_t> syncBase_;
   bool basicBooted_ = false;  // the machine runs the interpreter
   // Commands still go through the keyboard: RUN after a push, for one.
   std::string typing_;

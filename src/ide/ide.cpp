@@ -112,6 +112,7 @@ Ide::Ide()
   resetSections();
   registerLayoutHandler();
   settings_.load();
+  hostStorage();
   columnFromSettings_ = settings_.columnKnown;
   for (int v = 0; v < VIEW_COUNT; v++) {
     for (size_t i = 0; i < std::size(LADDER); i++) {
@@ -620,9 +621,11 @@ void Ide::powerOn() {
   basicLines_.reset();
   applyLock();
   pushBreakpoints();
-  // A restarted interpreter starts with an empty program; the document
-  // is the partner that brings it back, not the other way round.
-  syncDoc_.clear();
+  // A restarted interpreter starts with an empty store, and the
+  // documents bring their programs back, not the other way round.
+  syncBases_.clear();
+  shownEdit_ = -1;
+  lastBasicTab_.clear();
 }
 
 void Ide::reset() {
@@ -630,7 +633,9 @@ void Ide::reset() {
   poweredOff_ = false;
   computer_.reset();
   pushBreakpoints();
-  syncDoc_.clear();
+  syncBases_.clear();
+  shownEdit_ = -1;
+  lastBasicTab_.clear();
 }
 
 void Ide::powerOff() {
@@ -905,10 +910,23 @@ std::string Ide::rowNote() const {
          std::to_string(r.line);
 }
 
+// The table at the head of the interpreter's store names the file the
+// running line is in, and the document is the one of that name.
 std::string Ide::runningBasicDoc() const {
-  if (!syncDoc_.empty()) return syncDoc_;
-  for (const Doc& d : docs_) {
-    if (d.name == "autorun.bas") return d.name;
+  const auto& ram = computer_.machine().ram;
+  const size_t prog = static_cast<size_t>((ram[basic::SYS_PROG] << 8) | ram[basic::SYS_PROG + 1]);
+  const size_t file = ram[basic::SYS_FILE + 1];
+  if (file >= basic::FILE_MAX || prog + basic::TABLE_SIZE > ram.size()) return "";
+  std::string name;
+  for (size_t i = 0; i < basic::FILE_NAME - 1; i++) {
+    const uint8_t c = ram[prog + 2 + file * basic::FILE_ENTRY + i];
+    if (c == 0) break;
+    name += static_cast<char>(c);
+  }
+  for (const bool library : {false, true}) {
+    for (const Doc& d : docs_) {
+      if (d.library == library && docKindOf(d.name) == DocKind::Basic && basic::fileNameOf(d.name) == name) return d.name;
+    }
   }
   return "";
 }
@@ -998,6 +1016,10 @@ void Ide::drawScreenOnly() {
 
 void Ide::update() {
   trackWindow();
+  if (librariesStale_) {
+    librariesStale_ = false;
+    refreshLibraries();
+  }
   // Files may have changed outside while the window was behind another.
   const bool focused = IsWindowFocused();
   if (focused && !windowFocused_) assetsStale_ = true;
@@ -1614,6 +1636,20 @@ void Ide::settingsDialog() {
                  [this](const fs::path& p) { editing_.projectsDir = p.string(); });
   }
   ImGui::Spacing();
+  ImGui::TextUnformatted("Libraries folder");
+  ImGui::SetNextItemWidth(400.0f);
+  panes::inputLine("##libraries", editing_.librariesDir, "BASIC libraries: empty is libraries in the projects folder");
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Browse...##libraries")) {
+    dialog_.open(FileDialog::Mode::OpenFolder, "The folder your BASIC libraries live in",
+                 editing_.librariesDir.empty() ? fs::current_path() : fs::path(editing_.librariesDir), {},
+                 [this](const fs::path& p) { editing_.librariesDir = p.string(); });
+  }
+  if (ImGui::IsItemHovered()) {
+    ImGui::SetTooltip("a .bas file here is a library: INCLUDE NAME in a BASIC program finds it, in the project "
+                      "first and then here");
+  }
+  ImGui::Spacing();
   ImGui::TextUnformatted("UI size");
   ImGui::SetNextItemWidth(400.0f);
   if (ImGui::SliderFloat("##scale", &editing_.uiScale, 0.75f, 2.5f, "%.2f x")) {
@@ -1633,6 +1669,7 @@ void Ide::settingsDialog() {
   ImGui::Spacing();
   if (ImGui::Button("Save", ImVec2(90, 0))) {
     settings_ = editing_;
+    librariesStale_ = true;
     applyScale();
     if (!settings_.save()) note("the settings could not be written");
     else note("settings saved to " + Settings::settingsFile().string());

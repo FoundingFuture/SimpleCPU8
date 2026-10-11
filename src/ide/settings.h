@@ -19,6 +19,10 @@ std::optional<std::string> envVar(const char* name);
 
 struct Settings {
   std::string projectsDir;  // where New project and Open project start
+  // The folder of BASIC libraries an INCLUDE finds. Empty means the
+  // default, which project::defaultLibraries names from the projects
+  // folder, so the IDE and simplecpu-make spell it once.
+  std::string librariesDir;
   float uiScale = 1.0f;     // every font and spacing times this
   bool formatAssembly = true;  // lay out .asm documents when they are saved
   bool errorSound = true;      // a tone when a build or a microcode set fails
