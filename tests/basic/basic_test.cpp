@@ -3623,6 +3623,21 @@ TEST_SUITE("the store as the IDE reads and writes it") {
     CHECK_EQ(basic::fileNameOf("averyveryverylongname.bas"), "AVERYVERYVERYLON");
   }
 
+  // A SAVE's name becomes a file on the host's disk, so it is held to
+  // what a file's name in BASIC is: letters and digits, 16 at most.
+  TEST_CASE("a file's name is letters and digits only") {
+    CHECK(basic::isFileName("GRAPHICS"));
+    CHECK(basic::isFileName("tools2"));
+    CHECK(basic::isFileName("ABCDEFGHIJKLMNOP"));
+    CHECK_FALSE(basic::isFileName(""));
+    CHECK_FALSE(basic::isFileName("ABCDEFGHIJKLMNOPQ"));
+    CHECK_FALSE(basic::isFileName("../X"));
+    CHECK_FALSE(basic::isFileName("A:B"));
+    CHECK_FALSE(basic::isFileName("A.BAS"));
+    CHECK_FALSE(basic::isFileName("A B"));
+    CHECK_FALSE(basic::isFileName("HI-SCORE"));
+  }
+
   TEST_CASE("a line's capitals reach the file's name before a target's colon, and never its size") {
     CHECK_EQ(basic::canonicalLine("gosub graphics:1000"), "GOSUB GRAPHICS:1000");
     CHECK_EQ(basic::canonicalLine("if a then tools:5"), "IF a THEN TOOLS:5");

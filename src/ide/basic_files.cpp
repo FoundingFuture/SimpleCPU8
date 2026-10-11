@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <set>
 
 #include "imgui.h"
@@ -26,14 +24,6 @@ namespace fs = std::filesystem;
 namespace sc8 {
 
 namespace {
-
-std::optional<std::string> readFile(const fs::path& p) {
-  std::ifstream in(p, std::ios::binary);
-  if (!in) return std::nullopt;
-  std::string text((std::istreambuf_iterator<char>(in)), {});
-  text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
-  return text;
-}
 
 std::string lowerOf(std::string text) {
   for (char& c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -97,7 +87,7 @@ void Ide::refreshLibraries() {
       text = have->text;
     } else {
       const fs::path file = project::libraryFile(folders, name);
-      const std::optional<std::string> read = file.empty() ? std::nullopt : readFile(file);
+      const std::optional<std::string> read = file.empty() ? std::nullopt : project::readProgramFile(file);
       if (!read) continue;
       text = *read;
       Doc lib;
@@ -137,7 +127,7 @@ BasicSlots Ide::basicSlots() {
     // An open library's tab may hold an edit its file does not have yet.
     const Doc* open = docOfFile(name);
     const fs::path file = project::libraryFile(folders, name);
-    const std::optional<std::string> text = open ? open->text : file.empty() ? std::nullopt : readFile(file);
+    const std::optional<std::string> text = open ? open->text : file.empty() ? std::nullopt : project::readProgramFile(file);
     if (!text) continue;
     slots.emplace_back(name, *text);
     for (const std::string& n : project::includesOf(*text)) queue.push_back(n);
@@ -152,9 +142,12 @@ void Ide::hostStorage() {
   host.find = [this](const std::string& name) -> std::optional<std::string> {
     if (isPath(name)) {
       // A path is read from the disk, against the project's folder.
+      // DESIGN: the program in the machine names the path, and it may be
+      // a ROM somebody else wrote. readProgramFile reads a .bas file of
+      // a slot's size at most, so the machine cannot ask for any file.
       const fs::path base = projectDir_.empty() ? fs::current_path() : fs::path(projectDir_);
       const fs::path file = fs::path(name).is_absolute() ? fs::path(name) : base / name;
-      if (std::optional<std::string> text = readFile(file)) return text;
+      if (std::optional<std::string> text = project::readProgramFile(file)) return text;
       // No such file: the device tries the slot the path's stem names.
       return std::nullopt;
     }
@@ -164,30 +157,41 @@ void Ide::hostStorage() {
     // a library. The cartridge's slots come after both, in the device.
     if (const Doc* d = docOfFile(file)) return d->text;
     const fs::path library = project::libraryFile(libraryFolders(), file);
-    return library.empty() ? std::nullopt : readFile(library);
+    return library.empty() ? std::nullopt : project::readProgramFile(library);
   };
   // The machine is mid instruction here, so the SAVE waits for the frame.
   host.saved = [this](const std::string& name, const std::string& text) { savedSlots_.emplace_back(name, text); };
   computer_.storage().setHost(std::move(host));
 }
 
-// A SAVE on the machine goes into the document of that name. A library's
-// name writes the library's own file. Any other name is a new source of
-// the project. So a file loaded by path is the project's once saved.
+// A SAVE on the machine goes into the document of that name. Any other
+// name is a new source of the project. So a file loaded by path is the
+// project's once saved.
+//
+// DESIGN: the program in the machine names the slot, and it may be a ROM
+// somebody else wrote. A name becomes a file only when it is a file's
+// name in BASIC, letters and digits. A library's file is written only
+// when its tab has Edit library on, the gate that keeps a project from
+// changing a library by accident. Otherwise the cartridge's slot holds
+// what was saved, and nothing on the disk changes.
 void Ide::takeSaves() {
   if (savedSlots_.empty()) return;
   std::vector<std::pair<std::string, std::string>> saves;
   saves.swap(savedSlots_);
   for (const auto& [slot, text] : saves) {
+    if (!basic::isFileName(slot)) {
+      note("SAVE \"" + slot + "\" is in the cartridge only: a file's name is letters and digits, 16 at most");
+      continue;
+    }
     const std::string file = basic::fileNameOf(slot);
     Doc* d = docOfFile(file);
+    const bool library = d ? d->library : !project::libraryFile(libraryFolders(), file).empty();
+    if (library && (!d || d->readOnly)) {
+      note("SAVE \"" + file + "\" is in the cartridge only: " + lowerOf(file) +
+           ".bas is a library, and its file changes once Edit library is on in its tab");
+      continue;
+    }
     if (!d) {
-      const fs::path library = project::libraryFile(libraryFolders(), file);
-      if (!library.empty()) {
-        if (writeText(library, text)) note("SAVE wrote the library " + library.string());
-        else note("SAVE could not write the library " + library.string());
-        continue;
-      }
       addDoc(lowerOf(file) + ".bas", "");
       d = docOfFile(file);
       if (!d) continue;
@@ -196,8 +200,7 @@ void Ide::takeSaves() {
     setDocText(*d, text);
     d->dirty = true;
     // The machine holds what the document holds now.
-    if (!d->library && !projectDir_.empty() && !example_) saveDoc(*d);
-    else if (d->library) saveDoc(*d);
+    if (d->library || (!projectDir_.empty() && !example_)) saveDoc(*d);
   }
   refreshLibraries();
 }

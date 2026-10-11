@@ -121,6 +121,11 @@ int FileTable::add(std::string_view name) {
   return static_cast<int>(names.size()) - 1;
 }
 
+bool isFileName(std::string_view name) {
+  if (name.empty() || name.size() > FILE_NAME - 1) return false;
+  return std::all_of(name.begin(), name.end(), [](char c) { return isLetter(c) || (c >= '0' && c <= '9'); });
+}
+
 // file_of in store.c is the machine's copy of this rule.
 std::string fileNameOf(std::string_view path) {
   const size_t slash = path.find_last_of("/\\");

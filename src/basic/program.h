@@ -90,6 +90,11 @@ struct FileTable {
 // and ../lib/graphics.bas are both the file GRAPHICS.
 std::string fileNameOf(std::string_view path);
 
+// True for a name a file may have: letters and digits, 16 at most. A
+// SAVE's name becomes a file on the host's disk, so the IDE holds it to
+// this before it writes one.
+bool isFileName(std::string_view name);
+
 // A line's body, the text after its number, with every reserved word in
 // capitals, and a file's name before a target's colon. Strings, the rest
 // of a line after REM, INCLUDE, FILE or a bang, names, numbers and

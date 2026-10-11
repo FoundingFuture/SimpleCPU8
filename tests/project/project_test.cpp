@@ -357,6 +357,26 @@ TEST_SUITE("simplecpu-make new") {
     CHECK(b.errors[0].find("libraries") != std::string::npos);
   }
 
+  // The running machine names the file. A program somebody else wrote
+  // must not get the host to read what is not a BASIC program, or more
+  // than a slot holds.
+  TEST_CASE("a program file is read only when it is a .bas file no larger than a slot's text") {
+    TempDir t;
+    write(t.path / "lib" / "graphics.bas", "10 REM OK\r\n20 RETURN\r\n");
+    write(t.path / "lib" / "Tools.BAS", "10 RETURN\n");
+    write(t.path / "lib" / "secret.txt", "10 REM NOT A PROGRAM\n");
+    write(t.path / "lib" / "noextension", "10 REM NEITHER\n");
+    write(t.path / "lib" / "huge.bas", std::string(70000, 'X'));
+    // The text comes back with LF line ends, as a slot holds it.
+    CHECK(project::readProgramFile(t.path / "lib" / "graphics.bas") == std::string("10 REM OK\n20 RETURN\n"));
+    CHECK(project::readProgramFile(t.path / "lib" / "Tools.BAS") == std::string("10 RETURN\n"));
+    CHECK_FALSE(project::readProgramFile(t.path / "lib" / "secret.txt"));
+    CHECK_FALSE(project::readProgramFile(t.path / "lib" / "noextension"));
+    CHECK_FALSE(project::readProgramFile(t.path / "lib" / "huge.bas"));
+    CHECK_FALSE(project::readProgramFile(t.path / "lib" / "missing.bas"));
+    CHECK_FALSE(project::readProgramFile(t.path / "lib"));
+  }
+
   TEST_CASE("the default libraries folder is libraries in the projects folder, and nothing without one") {
     CHECK(project::defaultLibraries("/home/me/projects") == fs::path("/home/me/projects") / "libraries");
     CHECK(project::defaultLibraries({}).empty());

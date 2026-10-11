@@ -1,4 +1,5 @@
 #include "project/project.h"
+#include "devices/storage_ports.h"
 #include "project/breakpoints.h"
 #include "project/text_file.h"
 
@@ -601,6 +602,22 @@ std::vector<std::string> includesOf(const std::string& text) {
   return out;
 }
 
+std::optional<std::string> readProgramFile(const fs::path& file) {
+  std::string ext = file.extension().string();
+  for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  std::error_code ec;
+  if (ext != ".bas" || !fs::is_regular_file(file, ec)) return std::nullopt;
+  // The size is asked before a byte is read: a program in the machine
+  // must not make the host take a large file into memory.
+  const uintmax_t size = fs::file_size(file, ec);
+  if (ec || size > static_cast<uintmax_t>(storage::TEXT_MAX)) return std::nullopt;
+  std::ifstream in(file, std::ios::binary);
+  if (!in) return std::nullopt;
+  std::string text((std::istreambuf_iterator<char>(in)), {});
+  text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+  return text;
+}
+
 fs::path defaultLibraries(const fs::path& projectsFolder) {
   return projectsFolder.empty() ? fs::path() : projectsFolder / LIBRARIES_FOLDER;
 }
@@ -929,8 +946,8 @@ Built buildSources(const std::vector<Source>& given, const Assets& assets, const
         from = end + 1;
         if (names.empty() || have(names[0])) continue;
         const fs::path file = libraryFile(opts.libraries, names[0]);
-        std::ifstream in(file, std::ios::binary);
-        if (file.empty() || !in) {
+        const std::optional<std::string> library = file.empty() ? std::nullopt : readProgramFile(file);
+        if (!library) {
           const std::string who = i < basFiles.size() ? at(basFiles[i]->name) : "library " + c.basic[i].first;
           std::string folders;
           for (const fs::path& folder : opts.libraries) folders += (folders.empty() ? "" : " or ") + folder.string();
@@ -940,9 +957,7 @@ Built buildSources(const std::vector<Source>& given, const Assets& assets, const
                                               : " or in the libraries folder " + folders));
           continue;
         }
-        std::string library((std::istreambuf_iterator<char>(in)), {});
-        library.erase(std::remove(library.begin(), library.end(), '\r'), library.end());
-        c.basic.emplace_back(names[0], library);
+        c.basic.emplace_back(names[0], *library);
         b.notes.push_back("library " + names[0] + " from " + file.string());
       }
     }

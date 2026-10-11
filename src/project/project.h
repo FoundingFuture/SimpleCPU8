@@ -160,6 +160,13 @@ struct ExampleKind {
 constexpr ExampleKind EXAMPLE_KINDS[] = {
     {"assembly", "Assembly"}, {"basic", "BASIC"}, {"c", "C"}, {"microcode", "Microcode"}};
 
+// A BASIC program's file as text with LF line ends, for a library and
+// for a LOAD by path. The running machine names the file, so only a
+// regular file called .bas, in any case, is read, and none larger than
+// the storage device's TEXT_MAX, which is all a slot holds. Nothing for
+// any other file.
+std::optional<std::string> readProgramFile(const std::filesystem::path& file);
+
 // A microcode set's text checked without a build: the parser's errors,
 // then every row through checkRow. Each message opens with its line in
 // the text and a colon. The IDE's CHECK in the MICROCODE view shows them.
