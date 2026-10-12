@@ -93,6 +93,11 @@ if(SC8_BUILD_IDE)
     "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
     "${imgui_SOURCE_DIR}/imgui_demo.cpp")
   target_include_directories(imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}")
+  # DESIGN: a tab is drawn 8 spaces wide, the width src/asm/tabs.h counts
+  # for it. This is the width of the tab Dear ImGui makes once
+  # IndentKeys::wideTabs has left the font's own out.
+  # src/ide/indent_keys.cpp refuses to compile when the two differ.
+  target_compile_definitions(imgui PUBLIC IM_TABSIZE=8)
 
   # rlImGui: the raylib backend for Dear ImGui. Pinned to a commit because the
   # repository carries no release tags.

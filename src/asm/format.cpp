@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 
+#include "asm/tabs.h"
 #include "core/isa.h"
 
 namespace sc8 {
@@ -69,15 +70,10 @@ Parts split(std::string_view line) {
   return p;
 }
 
-// The column a text ends at, with tabs to the next multiple of 8.
-size_t columnOf(std::string_view s) {
-  size_t col = 0;
-  for (char c : s) col = c == '\t' ? (col / 8 + 1) * 8 : col + 1;
-  return col;
-}
-
+// Spaces up to a column of the line that starts at lineStart, one at
+// least. The line's indentation may be tabs, so columns are counted.
 void padTo(std::string& out, size_t lineStart, size_t column) {
-  const size_t at = out.size() - lineStart;
+  const size_t at = columnOf(std::string_view(out).substr(lineStart));
   out.append(column > at ? column - at : 1, ' ');
 }
 
@@ -153,7 +149,9 @@ std::string formatAssembly(std::string_view source, const AsmLayout& layout) {
       }
     }
     if (!p.body.empty()) {
-      padTo(out, start, mnemonic);
+      // asm/tabs.h: tabs in the indentation, spaces after a label.
+      if (out.size() == start) out += indentTo(mnemonic);
+      else padTo(out, start, mnemonic);
       size_t word = 0;
       while (word < p.body.size() && !isSpace(p.body[word])) word++;
       out += p.body.substr(0, word);

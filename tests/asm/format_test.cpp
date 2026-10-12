@@ -28,18 +28,33 @@ TEST_SUITE("assembly layout") {
     CHECK_EQ(operandColumn({}), 15);
     CHECK_EQ(formatAssembly("loop: SUB A <- 1\n  JZ done\nHLT"),
              "loop:   SUB    A <- 1\n"
-             "        JZ     done\n"
-             "        HLT");
+             "\tJZ     done\n"
+             "\tHLT");
+  }
+
+  // A tab is 8 columns, and the editor draws one truly only at the start
+  // of a line. So the indentation is tabs, and the space after a label
+  // or before a comment stays spaces.
+  TEST_CASE("a line without a label is indented with tabs") {
+    CHECK_EQ(formatAssembly("NOP"), "\tNOP");
+    CHECK_EQ(formatAssembly("a: NOP"), "a:      NOP");
+    AsmLayout wide;
+    wide.mnemonicColumn = 12;
+    CHECK_EQ(formatAssembly("NOP\na: NOP", wide), "\t    NOP\na:          NOP");
+  }
+
+  TEST_CASE("a source indented with tabs lays out as one indented with spaces") {
+    CHECK_EQ(formatAssembly("\tLD A <- 1 ; one\nx:\tNOP\t; two"), formatAssembly("    LD A <- 1 ; one\nx: NOP ; two"));
   }
 
   TEST_CASE("a long code label goes on a line of its own") {
-    CHECK_EQ(formatAssembly("attract: JSR drainkeys"), "attract:\n        JSR    drainkeys");
+    CHECK_EQ(formatAssembly("attract: JSR drainkeys"), "attract:\n\tJSR    drainkeys");
     CHECK_EQ(formatAssembly("gsdone:"), "gsdone:");
   }
 
   TEST_CASE("a label in .ram stays with its directive") {
     CHECK_EQ(formatAssembly(".ram\npalbuffer: .addr($2000)\nx: db 0"),
-             "        .ram\n"
+             "\t.ram\n"
              "palbuffer: .addr($2000)\n"
              "x:      db     0");
   }
@@ -50,13 +65,13 @@ TEST_SUITE("assembly layout") {
     CHECK_EQ(formatAssembly("; header\n    ; indented\nLD A <- 1  ; one\nLD B <- 2   ; two\nNOP ; three\n"),
              "; header\n"
              "    ; indented\n"
-             "        LD     A <- 1           ; one\n"
-             "        LD     B <- 2           ; two\n"
-             "        NOP                     ; three\n");
+             "\tLD     A <- 1           ; one\n"
+             "\tLD     B <- 2           ; two\n"
+             "\tNOP                     ; three\n");
     // A source with a chosen column keeps it.
     CHECK_EQ(formatAssembly("x: LD A <- 1                ; one\nNOP                         ; two"),
              "x:      LD     A <- 1       ; one\n"
-             "        NOP                 ; two");
+             "\tNOP                 ; two");
   }
 
   TEST_CASE("laying out twice changes nothing more") {
