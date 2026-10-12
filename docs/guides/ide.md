@@ -51,6 +51,10 @@ Editor. Run and Step bring the Listing to the front, with the line the
 processor runs next in green. A click on the Editor tab brings the
 document back.
 
+The Listing has the Editor's row of buttons. Run and Step work from
+either tab. The buttons that act on a document are greyed out in the
+Listing.
+
 Speed is the view's own choice of the speed ladder. Microcode picks the
 set the machine runs: the project's `microcode.txt`, naive or optimal.
 Lock the running set keeps it whatever a later build or ROM brings.

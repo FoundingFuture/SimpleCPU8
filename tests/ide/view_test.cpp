@@ -72,6 +72,19 @@ TEST_SUITE("the IDE's views") {
     CHECK_FALSE(viewOfKind(DocKind::Other));
   }
 
+  // The listing shows the editor's buttons with no document open, so it
+  // asks the view which kind of document those buttons belong to.
+  TEST_CASE("each view names the kind of document its editor holds") {
+    CHECK(sc8::kindOfView(View::Basic) == DocKind::Basic);
+    CHECK(sc8::kindOfView(View::C) == DocKind::C);
+    CHECK(sc8::kindOfView(View::Assembly) == DocKind::Assembly);
+    CHECK(sc8::kindOfView(View::Microcode) == DocKind::Microcode);
+    for (int i = 0; i < sc8::VIEW_COUNT; i++) {
+      const auto v = static_cast<View>(i);
+      CHECK(viewOfKind(sc8::kindOfView(v)) == v);
+    }
+  }
+
   // docs/standalone.md, the speed ladder: BASIC runs frame locked, and
   // the microcode view starts where every row is drawn.
   TEST_CASE("each view starts at its own speed") {

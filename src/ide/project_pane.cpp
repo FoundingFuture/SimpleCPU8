@@ -830,12 +830,11 @@ void Ide::editorPane(View view) {
   ImGui::End();
 }
 
-// The active document with the buttons its kind needs. A .bas document
-// has the interpreter beside it: Run in BASIC and the sync state.
-void Ide::editorBody(Doc& doc) {
-  Doc* d = &doc;
-  const DocKind kind = docKindOf(d->name);
-  ImGui::BeginDisabled(example_);
+// Save, the Run menu's items, and what a kind of document adds. The
+// listing shows the same row without a document. Run and Step work
+// there, and the buttons that act on a document are disabled.
+void Ide::viewButtons(DocKind kind, Doc* doc) {
+  ImGui::BeginDisabled(!doc || example_);
   if (ImGui::SmallButton("Save")) saveProject();
   ImGui::EndDisabled();
   // The Run menu's items for this view, a click away from the text.
@@ -845,10 +844,39 @@ void Ide::editorBody(Doc& doc) {
     else viewRun();
   }
   ImGui::SameLine();
+  ImGui::BeginDisabled(!doc);
   if (ImGui::SmallButton("Check")) viewCheck();
+  ImGui::EndDisabled();
   ImGui::SameLine();
   if (ImGui::SmallButton("Step")) viewStep();
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s, F10", stepLabel());
+  ImGui::BeginDisabled(!doc);
+  if (kind == DocKind::Microcode) {
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Apply to machine")) applyProjectMicrocode(false);
+    ImGui::SameLine();
+    if (ImGui::SmallButton(lockedMicrocode_ ? "Unlock" : "Apply and lock")) {
+      if (lockedMicrocode_) toggleMicrocodeLock();
+      else applyProjectMicrocode(true);
+    }
+  } else if (kind == DocKind::Assembly) {
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Format") && doc) {
+      if (layOut(*doc)) doc->dirty = true;
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("mnemonics in one column, operands in the next, long labels on a line of their own");
+    }
+  }
+  ImGui::EndDisabled();
+}
+
+// The active document with the buttons its kind needs. A .bas document
+// has the interpreter beside it: Run in BASIC and the sync state.
+void Ide::editorBody(Doc& doc) {
+  Doc* d = &doc;
+  const DocKind kind = docKindOf(d->name);
+  viewButtons(kind, d);
   if (kind == DocKind::Basic) {
     ImGui::SameLine();
     if (d->readOnly) {
@@ -874,25 +902,11 @@ void Ide::editorBody(Doc& doc) {
                           ImGui::GetIO().ConfigMacOSXBehaviors ? "Cmd" : "Ctrl");
   } else if (kind == DocKind::Microcode) {
     ImGui::SameLine();
-    if (ImGui::SmallButton("Apply to machine")) applyProjectMicrocode(false);
-    ImGui::SameLine();
-    if (ImGui::SmallButton(lockedMicrocode_ ? "Unlock" : "Apply and lock")) {
-      if (lockedMicrocode_) toggleMicrocodeLock();
-      else applyProjectMicrocode(true);
-    }
-    ImGui::SameLine();
     ImGui::TextDisabled("the set the ROM carries. The panes beside it show its rows firing");
   } else if (kind == DocKind::C) {
     ImGui::SameLine();
     ImGui::TextDisabled("Check compiles every .c together. The Assembly tab shows the result");
   } else if (kind == DocKind::Assembly) {
-    ImGui::SameLine();
-    if (ImGui::SmallButton("Format")) {
-      if (layOut(*d)) d->dirty = true;
-    }
-    if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip("mnemonics in one column, operands in the next, long labels on a line of their own");
-    }
     ImGui::SameLine();
     ImGui::TextDisabled(settings_.formatAssembly ? "laid out in columns on every save" : "Format lays it out in columns");
   }

@@ -39,5 +39,8 @@ DocKind docKindOf(const std::string& name);
 
 // The view whose editor holds a kind of document. Nothing for Other.
 std::optional<View> viewOfKind(DocKind kind);
+// The kind of document a view's editor holds. The C view answers C, and
+// holds the headers too.
+DocKind kindOfView(View view);
 
 }  // namespace sc8

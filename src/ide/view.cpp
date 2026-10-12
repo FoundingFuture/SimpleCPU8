@@ -13,13 +13,14 @@ struct ViewRow {
   const char* level;  // the level the view replaced
   const char* speed;
   const char* runTab;  // the pane a run brings forward, or null
+  DocKind kind;        // the documents its editor holds
 };
 
 constexpr ViewRow VIEWS[VIEW_COUNT] = {
-    {"basic", "BASIC", "basic", "f60", nullptr},
-    {"c", "C", "project", "f60", nullptr},
-    {"assembly", "ASSEMBLY", "run", "f60", "Listing"},
-    {"microcode", "MICROCODE", "cpu", "trace", "Listing"},
+    {"basic", "BASIC", "basic", "f60", nullptr, DocKind::Basic},
+    {"c", "C", "project", "f60", nullptr, DocKind::C},
+    {"assembly", "ASSEMBLY", "run", "f60", "Listing", DocKind::Assembly},
+    {"microcode", "MICROCODE", "cpu", "trace", "Listing", DocKind::Microcode},
 };
 
 const ViewRow& row(View view) { return VIEWS[static_cast<int>(view)]; }
@@ -66,5 +67,7 @@ std::optional<View> viewOfKind(DocKind kind) {
   }
   return std::nullopt;
 }
+
+DocKind kindOfView(View view) { return row(view).kind; }
 
 }  // namespace sc8
