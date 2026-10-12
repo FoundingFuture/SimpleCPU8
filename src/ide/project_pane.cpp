@@ -680,7 +680,10 @@ void Ide::buildProject(bool run) {
   if (!built.cartridge) return;
   lastBuildOk_ = true;
   insertBuilt(built, projectTitle_);
-  if (run) setRunning(true);
+  if (run) {
+    setRunning(true);
+    showRunTab();
+  }
 }
 
 project::Built Ide::buildInMemory() {

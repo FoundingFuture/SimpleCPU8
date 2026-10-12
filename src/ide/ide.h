@@ -276,6 +276,11 @@ class Ide {
   // and the error tone once, when Preferences has it on.
   void reportErrors(const std::vector<std::string>& errors);
   void showMessages();
+  // The editor's tab area: the listing shares it in two views, and a run
+  // or a step brings the listing to the front.
+  void showRunTab();
+  std::string editorTab() const;
+  static void bringForward(const std::string& name);
   std::vector<project::Source> sources() const;
   project::Layout layout() const;
 
@@ -625,6 +630,7 @@ class Ide {
   // microcode.txt, else the view of the document a reader starts in.
   void viewForProject();
   std::string focusAfterLayout_;  // a window to bring to the front once
+  std::string frontTab_;          // a tab to bring to the front, after those
   bool done_ = false;
   bool askQuit_ = false;
 

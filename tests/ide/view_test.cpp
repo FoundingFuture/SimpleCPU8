@@ -80,4 +80,14 @@ TEST_SUITE("the IDE's views") {
     CHECK(std::string(sc8::defaultSpeed(View::Assembly)) == "f60");
     CHECK(std::string(sc8::defaultSpeed(View::Microcode)) == "trace");
   }
+
+  // The listing shares the editor's tabs in the two views that have one,
+  // and a run or a step brings it to the front. A step of BASIC or of C
+  // shows its line in the editor.
+  TEST_CASE("a run or a step brings the listing forward where it shares the editor's tabs") {
+    CHECK(std::string(sc8::runTab(View::Assembly)) == "Listing");
+    CHECK(std::string(sc8::runTab(View::Microcode)) == "Listing");
+    CHECK(sc8::runTab(View::Basic) == nullptr);
+    CHECK(sc8::runTab(View::C) == nullptr);
+  }
 }

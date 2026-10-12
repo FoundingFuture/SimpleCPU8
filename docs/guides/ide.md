@@ -46,6 +46,11 @@ of code the view shows.
 | Pause, F5 | pauses | pauses | pauses | pauses |
 | Stop | breaks the program | powers the machine on again | the same | the same |
 
+In the ASSEMBLY and MICROCODE views the Listing is a tab beside the
+Editor. Run and Step bring the Listing to the front, with the line the
+processor runs next in green. A click on the Editor tab brings the
+document back.
+
 Speed is the view's own choice of the speed ladder. Microcode picks the
 set the machine runs: the project's `microcode.txt`, naive or optimal.
 Lock the running set keeps it whatever a later build or ROM brings.

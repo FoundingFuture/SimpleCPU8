@@ -28,6 +28,11 @@ std::optional<View> viewOfLevel(std::string_view level);
 // The speed a view starts at, a value of the speed ladder.
 const char* defaultSpeed(View view);
 
+// The pane a run or a step brings to the front: the listing, in the
+// views where it shares the editor's tab area. Null for a view whose
+// editor shows the line the machine stands on.
+const char* runTab(View view);
+
 // One document of the project is a source, and its kind follows its name.
 enum class DocKind { C, Header, Assembly, Basic, Microcode, Other };
 DocKind docKindOf(const std::string& name);

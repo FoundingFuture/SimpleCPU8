@@ -73,6 +73,7 @@ void Ide::viewRun() {
   }
   if (poweredOff_ || computer_.machine().status != Status::Running) powerOn();
   setRunning(true);
+  showRunTab();
 }
 
 // Check: build without running. The BASIC view stores the program and

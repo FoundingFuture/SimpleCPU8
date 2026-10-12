@@ -608,12 +608,14 @@ void Ide::pace() {
 void Ide::stepInstruction() {
   setRunning(false);
   computer_.machine().instructionStep();
+  showRunTab();
 }
 
 void Ide::stepMicro() {
   setRunning(false);
   if (computer_.microcodeInspectable()) computer_.machine().microStep();
   else note("the optimal set is sealed: it runs whole instructions only");
+  showRunTab();
 }
 
 void Ide::runOneFrame() {
@@ -727,6 +729,8 @@ void Ide::applyLock() {
 
 bool Ide::idle() const {
   if (running_ && !poweredOff_) return false;
+  // A tab on its way to the front gets there a frame after it was asked.
+  if (!frontTab_.empty()) return false;
   if (computer_.apu().audioActive()) return false;
   return !(spriteVisible_ && sprite_.animating());
 }
@@ -1083,7 +1087,7 @@ void Ide::frame() {
   // a layout file from before the pane rebuilds the view once rather than
   // leaving the newcomer floating.
   static const ImGuiID IDS[VIEW_COUNT] = {ImHashStr("sc8-view-basic-6"), ImHashStr("sc8-view-c-6"),
-                                          ImHashStr("sc8-view-assembly-6"), ImHashStr("sc8-view-microcode-6")};
+                                          ImHashStr("sc8-view-assembly-7"), ImHashStr("sc8-view-microcode-7")};
   const ImGuiViewport* vp = ImGui::GetMainViewport();
   const float column = projectColumn();
   const int active = static_cast<int>(view_);
@@ -1119,8 +1123,8 @@ void Ide::frame() {
       static const std::vector<const char*> FRONT[VIEW_COUNT] = {
           {"Manual", "Screen"},
           {"Messages", "Manual", "Screen"},
-          {"Listing", "Messages", "Registers", "Screen"},
-          {"Listing", "Execution", "Side", "CPU"}};
+          {"Messages", "Registers", "Screen"},
+          {"Execution", "Side", "CPU"}};
       for (const char* name : FRONT[active]) focusQueue_.push_back(pane(name));
     }
     if (focusAfterLayout_.empty()) focusAfterLayout_ = pane("Editor");
@@ -1130,6 +1134,9 @@ void Ide::frame() {
   } else if (!focusAfterLayout_.empty()) {
     ImGui::SetWindowFocus(focusAfterLayout_.c_str());
     focusAfterLayout_.clear();
+  } else if (!frontTab_.empty()) {
+    bringForward(frontTab_);
+    frontTab_.clear();
   }
   menuBar();
   shortcuts();
@@ -1191,7 +1198,7 @@ bool Ide::buildLayout(View view, unsigned dockspace, float width, float height) 
   auto dock = [&](const char* base, ImGuiID where) {
     ImGui::DockBuilderDockWindow(paneName(base, view).c_str(), where);
   };
-  ImGuiID mid = dockspace, right, bottom, rightBottom, left, cpu, side;
+  ImGuiID mid = dockspace, right, bottom, rightBottom, cpu, side;
   switch (view) {
     case View::Basic:
       // The editor large in the middle. The screen on the right, with
@@ -1224,18 +1231,17 @@ bool Ide::buildLayout(View view, unsigned dockspace, float width, float height) 
       dock("Manual", rightBottom);
       break;
     case View::Assembly:
-      // The editor in the middle, the listing beside it with breakpoints
-      // in its margin, the messages under the editor. The screen right
-      // with the guide as a tab beside it. Registers, memory, stack and
-      // breakpoints under the screen.
+      // The editor in the middle, the listing as a tab beside it with
+      // breakpoints in its margin, the messages under them. The screen
+      // right with the guide as a tab beside it. Registers, memory, stack
+      // and breakpoints under the screen.
       ImGui::DockBuilderSplitNode(mid, ImGuiDir_Right, 0.32f, &right, &mid);
-      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Right, 0.46f, &left, &mid);
       ImGui::DockBuilderSplitNode(mid, ImGuiDir_Down, 0.22f, &bottom, &mid);
       ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.48f, &rightBottom, &right);
       dock("###Sprite", mid);
       dock("Editor", mid);
+      dock("Listing", mid);
       dock("Messages", bottom);
-      dock("Listing", left);
       dock("Sprite preview", right);
       dock("Manual", right);
       dock("Screen", right);
@@ -1245,18 +1251,17 @@ bool Ide::buildLayout(View view, unsigned dockspace, float width, float height) 
       dock("Registers", rightBottom);
       break;
     case View::Microcode:
-      // The microcode document in the middle, the listing left of it.
-      // The CPU pane right of it, the datapath and the flow in its
+      // The microcode document on the left, the listing as a tab beside
+      // it. The CPU pane right of it, the datapath and the flow in its
       // sections as the CPU level had them. On the far right the rows
       // being executed and the messages on top, and the side pane under
       // them: screen, registers, memory, stack and guide.
       ImGui::DockBuilderSplitNode(mid, ImGuiDir_Right, 0.24f, &side, &mid);
-      ImGui::DockBuilderSplitNode(mid, ImGuiDir_Left, 0.26f, &left, &mid);
       ImGui::DockBuilderSplitNode(mid, ImGuiDir_Right, 0.50f, &cpu, &mid);
       ImGui::DockBuilderSplitNode(side, ImGuiDir_Down, 0.60f, &rightBottom, &side);
-      dock("Listing", left);
       dock("###Sprite", mid);
       dock("Editor", mid);
+      dock("Listing", mid);
       dock("CPU", cpu);
       dock("Sprite preview", side);
       dock("Breakpoints", side);
@@ -1710,10 +1715,45 @@ void Ide::reportErrors(const std::vector<std::string>& errors) {
 }
 
 // Messages may sit behind another tab, the guide's in the BASIC view. It
-// comes to the front for a frame, and the editor keeps the keyboard.
+// comes to the front for a frame. The keyboard stays with the editor, or
+// with the listing when that is the tab in front.
 void Ide::showMessages() {
   focusQueue_.push_back(pane("Messages"));
-  if (focusAfterLayout_.empty()) focusAfterLayout_ = pane("Editor");
+  if (focusAfterLayout_.empty()) focusAfterLayout_ = editorTab();
+}
+
+void Ide::showRunTab() {
+  if (const char* tab = runTab(view_)) frontTab_ = pane(tab);
+}
+
+// The tab in front of the editor's tab area: the listing while it is
+// docked there and selected, else the editor.
+std::string Ide::editorTab() const {
+  if (const char* tab = runTab(view_)) {
+    const ImGuiWindow* listing = ImGui::FindWindowByName(pane(tab).c_str());
+    const ImGuiWindow* editor = ImGui::FindWindowByName(pane("Editor").c_str());
+    if (listing && editor && listing->DockNode && listing->DockNode == editor->DockNode && listing->DockTabIsVisible) {
+      return pane(tab);
+    }
+  }
+  return pane("Editor");
+}
+
+// Bring a docked window's tab to the front. Dear ImGui selects the tab
+// of the focused window, so a node that holds the focus hands it over.
+// Any other node changes its tab alone, and the Screen keeps its keys.
+void Ide::bringForward(const std::string& name) {
+  ImGuiWindow* window = ImGui::FindWindowByName(name.c_str());
+  if (!window || !window->DockNode || !window->DockNode->TabBar || window->DockTabIsVisible) return;
+  ImGuiDockNode* node = window->DockNode;
+  const ImGuiWindow* nav = GImGui->NavWindow;
+  if (nav && nav->RootWindow->DockNode == node) {
+    ImGui::SetWindowFocus(name.c_str());
+  } else {
+    // NextSelectedTabId would focus the window as a click on its tab does.
+    node->TabBar->SelectedTabId = window->TabId;
+    node->SelectedTabId = window->TabId;
+  }
 }
 
 void Ide::messagesPane(const char* name) {

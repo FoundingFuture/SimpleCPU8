@@ -12,13 +12,14 @@ struct ViewRow {
   const char* label;
   const char* level;  // the level the view replaced
   const char* speed;
+  const char* runTab;  // the pane a run brings forward, or null
 };
 
 constexpr ViewRow VIEWS[VIEW_COUNT] = {
-    {"basic", "BASIC", "basic", "f60"},
-    {"c", "C", "project", "f60"},
-    {"assembly", "ASSEMBLY", "run", "f60"},
-    {"microcode", "MICROCODE", "cpu", "trace"},
+    {"basic", "BASIC", "basic", "f60", nullptr},
+    {"c", "C", "project", "f60", nullptr},
+    {"assembly", "ASSEMBLY", "run", "f60", "Listing"},
+    {"microcode", "MICROCODE", "cpu", "trace", "Listing"},
 };
 
 const ViewRow& row(View view) { return VIEWS[static_cast<int>(view)]; }
@@ -28,6 +29,7 @@ const ViewRow& row(View view) { return VIEWS[static_cast<int>(view)]; }
 const char* viewKey(View view) { return row(view).key; }
 const char* viewLabel(View view) { return row(view).label; }
 const char* defaultSpeed(View view) { return row(view).speed; }
+const char* runTab(View view) { return row(view).runTab; }
 
 std::optional<View> viewNamed(std::string_view key) {
   for (int i = 0; i < VIEW_COUNT; i++) {

@@ -391,7 +391,9 @@ void Ide::listingPane(const char* name) {
   ImGui::SameLine(0.0f, 20.0f);
   ImGui::Checkbox("follow PC", &followPc_);
   ImGui::Separator();
-  ImGui::BeginChild("lines");
+  // Behind the editor's tab the lines are not laid out, so the scroll to
+  // the PC waits for the frame that shows them.
+  const bool shown = ImGui::BeginChild("lines");
   const float lineH = ImGui::GetTextLineHeightWithSpacing();
   const int pcLine = static_cast<int>(m.pc);
   for (size_t i = 0; i < listing_.size(); i++) {
@@ -456,7 +458,7 @@ void Ide::listingPane(const char* name) {
     }
     ImGui::PopID();
   }
-  shownPc_ = m.pc;
+  if (shown) shownPc_ = m.pc;
   ImGui::EndChild();
   ImGui::End();
 }
