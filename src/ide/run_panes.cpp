@@ -384,6 +384,9 @@ void Ide::breakpointsPane(const char* pane) {
 // nothing else of it.
 void Ide::listingPane(const char* name) {
   ImGui::Begin(name);
+  // Where the listing shares the editor's tab area it has the editor's
+  // buttons, so a run or a step goes on from either tab.
+  if (runTab(view_)) viewButtons(kindOfView(view_), nullptr);
   const Machine& m = computer_.machine();
   ImGui::TextDisabled("microcode: %s", computer_.microcodeInspectable() && computer_.microcodeName() != "@naive"
                                            ? "your own set"

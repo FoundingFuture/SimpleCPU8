@@ -492,6 +492,8 @@ class Ide {
   // kind, and under the tabs the active document with its buttons.
   void editorPane(View view);
   void editorBody(Doc& doc);
+  // The buttons over a view's text. The listing passes no document.
+  void viewButtons(DocKind kind, Doc* doc);
   void assemblyPane(const char* name);
   void messagesPane(const char* name);
   void manualPane(const char* name);
