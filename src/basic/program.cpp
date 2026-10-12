@@ -44,12 +44,96 @@ const std::vector<std::string>& keywordOrder() {
   return words;
 }
 
+bool isLetter(char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
 bool isNameStart(char c) { return std::isalpha(static_cast<unsigned char>(c)) != 0 || c == '_'; }
 bool isDigit(char c) { return std::isdigit(static_cast<unsigned char>(c)) != 0; }
 bool isNameChar(char c) { return isNameStart(c) || isDigit(c); }
 bool isHexDigit(char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; }
 
+std::string upperOf(std::string_view text) {
+  std::string out(text);
+  for (char& c : out) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  return out;
+}
+
+// The words whose line number is a jump target, and the words after
+// which the rest of the line is not BASIC.
+bool takesTarget(std::string_view word) {
+  return word == "GOTO" || word == "GOSUB" || word == "THEN" || word == "RESTORE";
+}
+bool endsBasic(std::string_view word) { return word == "REM" || word == "INCLUDE" || word == "FILE"; }
+
+// crunch_target in edit.c reads a target this way. `at` stands after
+// GOTO, GOSUB, THEN or RESTORE.
+struct Target {
+  bool found = false;
+  bool named = false;
+  size_t name = 0;    // where the file's name starts, or the number
+  size_t colon = 0;   // the colon after the name
+  size_t end = 0;     // past the digits
+  uint16_t line = 0;
+};
+
+Target targetAt(std::string_view t, size_t at, bool then) {
+  auto ch = [&](size_t k) { return k < t.size() ? t[k] : '\0'; };
+  Target g;
+  size_t q = at;
+  while (ch(q) == ' ') q++;
+  g.name = q;
+  if (isLetter(ch(q))) {
+    while (isLetter(ch(q)) || isDigit(ch(q))) q++;
+    if (ch(q) != ':' || !isDigit(ch(q + 1)) || q - g.name > FILE_NAME - 1) return g;
+    g.named = true;
+    g.colon = q;
+    q++;
+  }
+  if (!isDigit(ch(q))) return g;
+  size_t e = q;
+  while (isDigit(ch(e))) {
+    g.line = static_cast<uint16_t>(g.line * 10 + (ch(e) - '0'));
+    e++;
+  }
+  if (!g.named && !then) {
+    size_t r = e;
+    while (ch(r) == ' ') r++;
+    if (r < t.size() && ch(r) != ':') return g;
+  }
+  g.end = e;
+  g.found = true;
+  return g;
+}
+
 }  // namespace
+
+int FileTable::find(std::string_view name) const {
+  const std::string want = upperOf(name);
+  for (size_t i = 0; i < names.size(); i++) {
+    if (names[i] == want) return static_cast<int>(i);
+  }
+  return -1;
+}
+
+int FileTable::add(std::string_view name) {
+  const int have = find(name);
+  if (have >= 0) return have;
+  if (names.size() >= FILE_MAX || name.empty() || name.size() > FILE_NAME - 1) return -1;
+  names.push_back(upperOf(name));
+  return static_cast<int>(names.size()) - 1;
+}
+
+bool isFileName(std::string_view name) {
+  if (name.empty() || name.size() > FILE_NAME - 1) return false;
+  return std::all_of(name.begin(), name.end(), [](char c) { return isLetter(c) || (c >= '0' && c <= '9'); });
+}
+
+// file_of in store.c is the machine's copy of this rule.
+std::string fileNameOf(std::string_view path) {
+  const size_t slash = path.find_last_of("/\\");
+  std::string_view name = slash == std::string_view::npos ? path : path.substr(slash + 1);
+  name = name.substr(0, name.find('.'));
+  if (name.size() > FILE_NAME - 1) name = name.substr(0, FILE_NAME - 1);
+  return upperOf(name);
+}
 
 // The walk is lexBasic's in src/ide/highlight.cpp. A number runs over
 // name characters the way the highlighter's does, so `1to` stays as typed.
@@ -77,9 +161,17 @@ std::string canonicalLine(std::string_view body) {
       if (basicKeywords().count(w)) {
         out += w;
         i = end;
-        if (w == "REM") {
+        if (endsBasic(w)) {
           out += body.substr(i);
           i = body.size();
+        } else if (takesTarget(w)) {
+          // A file's name before a target's colon, as LIST prints it.
+          const Target g = targetAt(body, i, w == "THEN");
+          if (g.found && g.named) {
+            out += body.substr(i, g.name - i);
+            out += upperOf(body.substr(g.name, g.colon - g.name));
+            i = g.colon;
+          }
         }
         continue;
       }
@@ -139,9 +231,10 @@ uint16_t numberValue(std::string_view t) {
   return v;
 }
 
-// One walk of crunch_pass in edit.c. The first `marks` numbers get their
-// value behind KW_LITERAL. `numbers` counts the numbers met.
-std::string crunchPass(std::string_view body, size_t marks, size_t& numbers) {
+// One walk of crunch_pass in edit.c. The first `marks` numbers and jump
+// targets get their value behind KW_LITERAL or KW_TARGET. `numbers`
+// counts the two together.
+std::string crunchPass(std::string_view body, size_t marks, size_t& numbers, FileTable& files, int own) {
   numbers = 0;
   if (isDataLine(body)) return canonicalLine(body);
   std::string out;
@@ -173,9 +266,30 @@ std::string crunchPass(std::string_view body, size_t marks, size_t& numbers) {
       if (const uint8_t k = keywordByte(w)) {
         out += static_cast<char>(k);
         i = end;
-        if (w == "REM") {
+        if (endsBasic(w)) {
           out += body.substr(i);
           i = body.size();
+        } else if (takesTarget(w)) {
+          const Target g = targetAt(body, i, w == "THEN");
+          if (g.found) {
+            numbers++;
+            // A full table leaves the target as text, as edit.c does.
+            int file = own;
+            if (numbers <= marks && g.named) {
+              const std::string_view name = body.substr(g.name, g.colon - g.name);
+              file = files.find(name) >= 0 || files.names.size() < FILE_MAX ? files.add(name) : -1;
+            }
+            if (numbers > marks || file < 0) {
+              out += body.substr(i, g.end - i);
+            } else {
+              out.append(g.name - i, ' ');
+              out += static_cast<char>(KW_TARGET);
+              out += static_cast<char>(file);
+              out += static_cast<char>(g.line >> 8);
+              out += static_cast<char>(g.line & 255);
+            }
+            i = g.end;
+          }
         }
         continue;
       }
@@ -208,7 +322,7 @@ bool readsHighByte(std::string_view body) {
       if (end < body.size() && body[end] == '$') end++;
       std::string w(body.substr(i, end - i));
       for (char& ch : w) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
-      if (w == "REM") return false;
+      if (endsBasic(w)) return false;
     } else if (!data && c == '!') {
       return false;
     } else if (static_cast<uint8_t>(c) >= KW_FIRST) {
@@ -222,19 +336,25 @@ bool readsHighByte(std::string_view body) {
 }  // namespace
 
 // crunch in edit.c is the machine's copy of this rule. A number's value
-// costs 3 bytes, and a stored line holds 250. So the first numbers get
-// their value while the line fits, and the rest stay digits.
-std::string crunchLine(std::string_view body) {
+// costs 3 bytes, a target at most 3 more than its digits, and a stored
+// line holds 250. So the first numbers and targets get their marker
+// while the line fits, and the rest stay text.
+std::string crunchLine(std::string_view body, FileTable& files, int own) {
   size_t numbers = 0;
-  std::string out = crunchPass(body, 0, numbers);
+  std::string out = crunchPass(body, 0, numbers, files, own);
   size_t marks = numbers;
   if (out.size() + 3 * marks > 250) marks = (250 - out.size()) / 3;
   if (marks == 0) return out;
-  return crunchPass(body, marks, numbers);
+  return crunchPass(body, marks, numbers, files, own);
+}
+
+std::string crunchLine(std::string_view body) {
+  FileTable files{{"MAIN"}};
+  return crunchLine(body, files, 0);
 }
 
 // ed_expand in edit.c is the machine's copy of this walk.
-std::string expandLine(std::string_view stored) {
+std::string expandLine(std::string_view stored, const FileTable& files, int own) {
   if (isDataLine(stored)) return std::string(stored);
   std::string out;
   size_t i = 0;
@@ -245,9 +365,19 @@ std::string expandLine(std::string_view stored) {
       i += 2;
       continue;
     }
+    // A jump target: the file's name when it is another file, the line.
+    if (c == KW_TARGET) {
+      if (i + 3 > stored.size()) break;
+      const auto file = static_cast<size_t>(static_cast<uint8_t>(stored[i]));
+      const int line = (static_cast<uint8_t>(stored[i + 1]) << 8) | static_cast<uint8_t>(stored[i + 2]);
+      if (static_cast<int>(file) != own) out += (file < files.names.size() ? files.names[file] : "?") + ":";
+      out += std::to_string(line);
+      i += 3;
+      continue;
+    }
     if (c >= KW_FIRST && c < KW_FIRST + keywordOrder().size()) {
       out += keywordOrder()[c - KW_FIRST];
-      if (c == KW_REM) c = '!';
+      if (c == KW_REM || c == KW_INCLUDE || c == KW_FILE) c = '!';
     } else {
       out += static_cast<char>(c);
     }
@@ -260,6 +390,11 @@ std::string expandLine(std::string_view stored) {
     }
   }
   return out;
+}
+
+std::string expandLine(std::string_view stored) {
+  const FileTable files{{"MAIN"}};
+  return expandLine(stored, files, 0);
 }
 
 std::string canonicalText(std::string_view text, int skip) {
@@ -336,7 +471,7 @@ std::string refusal(std::string_view text) {
          "goes to the computer once the line is changed.";
 }
 
-std::vector<uint8_t> encodeProgram(const std::string& text) {
+std::vector<uint8_t> encodeLines(const std::string& text, FileTable& files, int own, size_t room) {
   // The map keeps the lines sorted and makes a repeated number a
   // replacement, which is what the interpreter does on entry.
   std::map<int, std::string> lines;
@@ -365,68 +500,126 @@ std::vector<uint8_t> encodeProgram(const std::string& text) {
   }
   std::vector<uint8_t> out;
   for (const auto& [n, canonical] : lines) {
-    const std::string body = crunchLine(canonical);
-    const size_t rec = body.size() + 4;
-    if (out.size() + rec + 3 >= PROGRAM_MAX) break;
+    const std::string body = crunchLine(canonical, files, own);
+    const size_t rec = body.size() + RECORD_TEXT + 1;
+    if (out.size() + rec >= room) break;
+    out.push_back(static_cast<uint8_t>(own));
     out.push_back(static_cast<uint8_t>(n >> 8));
     out.push_back(static_cast<uint8_t>(n & 255));
     out.push_back(static_cast<uint8_t>(rec));
     out.insert(out.end(), body.begin(), body.end());
     out.push_back(0);
   }
-  out.push_back(0);
-  out.push_back(0);
-  out.push_back(3);
   return out;
+}
+
+FileTable Store::table() const {
+  FileTable t;
+  for (const StoredFile& f : files) t.names.push_back(f.name);
+  return t;
+}
+
+void Store::adopt(const FileTable& names) {
+  for (size_t i = files.size(); i < names.names.size() && i < FILE_MAX; i++) files.push_back({names.names[i], false, {}});
+}
+
+Store readStore(std::span<const uint8_t> bytes) {
+  Store store;
+  if (bytes.size() < EMPTY_PROGRAM || bytes[0] == 0 || bytes[0] > FILE_MAX) return store;
+  for (size_t f = 0; f < bytes[0]; f++) {
+    const size_t entry = 2 + f * FILE_ENTRY;
+    StoredFile file;
+    for (size_t i = 0; i < FILE_NAME - 1 && bytes[entry + i]; i++) file.name += static_cast<char>(bytes[entry + i]);
+    size_t p = static_cast<size_t>((bytes[entry + FILE_NAME] << 8) | bytes[entry + FILE_NAME + 1]);
+    file.loaded = p != 0;
+    // The block's records up to the one numbered zero.
+    while (file.loaded && p + END_RECORD <= bytes.size()) {
+      const size_t rec = bytes[p + 3];
+      if ((bytes[p + 1] == 0 && bytes[p + 2] == 0) || rec < RECORD_TEXT + 1 || p + rec > bytes.size()) break;
+      file.lines.insert(file.lines.end(), bytes.begin() + static_cast<std::ptrdiff_t>(p),
+                        bytes.begin() + static_cast<std::ptrdiff_t>(p + rec));
+      p += rec;
+    }
+    store.files.push_back(std::move(file));
+  }
+  return store;
+}
+
+std::vector<uint8_t> writeStore(const Store& store) {
+  std::vector<uint8_t> out(TABLE_SIZE, 0);
+  const size_t count = std::min(store.files.size(), FILE_MAX);
+  out[0] = static_cast<uint8_t>(count);
+  for (size_t f = 0; f < count; f++) {
+    const StoredFile& file = store.files[f];
+    const size_t entry = 2 + f * FILE_ENTRY;
+    for (size_t i = 0; i < file.name.size() && i < FILE_NAME - 1; i++) out[entry + i] = static_cast<uint8_t>(file.name[i]);
+    if (!file.loaded) continue;
+    const size_t start = out.size();
+    out[entry + FILE_NAME] = static_cast<uint8_t>(start >> 8);
+    out[entry + FILE_NAME + 1] = static_cast<uint8_t>(start & 255);
+    out.insert(out.end(), file.lines.begin(), file.lines.end());
+    out.insert(out.end(), {static_cast<uint8_t>(f), 0, 0, static_cast<uint8_t>(END_RECORD)});
+  }
+  return out;
+}
+
+std::vector<uint8_t> encodeProgram(const std::string& text) {
+  FileTable files{{"MAIN"}};
+  Store store;
+  store.files.push_back({"MAIN", true, encodeLines(text, files, 0)});
+  store.adopt(files);
+  return writeStore(store);
 }
 
 namespace {
 
-// The stored text of the record at p, rec bytes long, without its zero.
-// A number's two value bytes are taken with its marker, since either can
-// be 0.
-std::string storedText(std::span<const uint8_t> bytes, size_t p, size_t rec) {
-  std::string t;
-  for (size_t i = p + 3; i < p + rec - 1 && bytes[i]; i++) {
-    t += static_cast<char>(bytes[i]);
-    if (bytes[i] == KW_LITERAL) {
-      for (size_t k = 1; k <= 2 && i + 1 < p + rec - 1; k++) t += static_cast<char>(bytes[++i]);
-    }
-  }
-  return t;
+// The stored text of a record: what lies between its four byte head and
+// its closing zero. A value byte inside it may be zero too, so the
+// record's length says where it ends.
+std::string storedText(std::span<const uint8_t> records, size_t p, size_t rec) {
+  return std::string(records.begin() + static_cast<std::ptrdiff_t>(p + RECORD_TEXT),
+                     records.begin() + static_cast<std::ptrdiff_t>(p + rec - 1));
+}
+
+// The main file of a store, or nothing when the store does not read.
+StoredFile mainOf(std::span<const uint8_t> bytes, FileTable& files) {
+  Store store = readStore(bytes);
+  files = store.table();
+  if (files.names.empty()) files.names.push_back("MAIN");
+  return store.files.empty() ? StoredFile{} : std::move(store.files.front());
 }
 
 }  // namespace
 
-std::string decodeProgram(std::span<const uint8_t> bytes) {
-  std::string out;
-  size_t p = 0;
-  while (p + 3 <= bytes.size()) {
-    const int n = (bytes[p] << 8) | bytes[p + 1];
-    if (n == 0) break;
-    const size_t rec = bytes[p + 2];
-    if (rec < 4 || p + rec > bytes.size()) break;
-    out += std::to_string(n);
-    out += ' ';
-    out += expandLine(storedText(bytes, p, rec));
-    out += '\n';
-    p += rec;
-  }
-  return out;
-}
-
-std::map<int, std::string> programLines(std::span<const uint8_t> bytes) {
+std::map<int, std::string> linesOf(std::span<const uint8_t> records, const FileTable& files, int own) {
   std::map<int, std::string> lines;
   size_t p = 0;
-  while (p + 3 <= bytes.size()) {
-    const int n = (bytes[p] << 8) | bytes[p + 1];
-    if (n == 0) break;
-    const size_t rec = bytes[p + 2];
-    if (rec < 4 || p + rec > bytes.size()) break;
-    lines[n] = expandLine(storedText(bytes, p, rec));
+  while (p + RECORD_TEXT < records.size()) {
+    const int n = (records[p + 1] << 8) | records[p + 2];
+    const size_t rec = records[p + 3];
+    if (n == 0 || rec < RECORD_TEXT + 1 || p + rec > records.size()) break;
+    lines[n] = expandLine(storedText(records, p, rec), files, own);
     p += rec;
   }
   return lines;
+}
+
+std::string decodeLines(std::span<const uint8_t> records, const FileTable& files, int own) {
+  std::string out;
+  for (const auto& [n, body] : linesOf(records, files, own)) out += std::to_string(n) + " " + body + "\n";
+  return out;
+}
+
+std::string decodeProgram(std::span<const uint8_t> bytes) {
+  FileTable files;
+  const StoredFile file = mainOf(bytes, files);
+  return decodeLines(file.lines, files, 0);
+}
+
+std::map<int, std::string> programLines(std::span<const uint8_t> bytes) {
+  FileTable files;
+  const StoredFile file = mainOf(bytes, files);
+  return linesOf(file.lines, files, 0);
 }
 
 namespace {
@@ -454,11 +647,11 @@ std::pair<int, std::string> parseLine(const std::string& line) {
 
 }  // namespace
 
-std::vector<uint8_t> mergePrograms(std::span<const uint8_t> base, std::span<const uint8_t> mine,
-                                   std::span<const uint8_t> theirs) {
-  const auto b = programLines(base);
-  const auto m = programLines(mine);
-  const auto t = programLines(theirs);
+std::vector<uint8_t> mergeLines(std::span<const uint8_t> base, std::span<const uint8_t> mine,
+                                std::span<const uint8_t> theirs, FileTable& files, int own) {
+  const auto b = linesOf(base, files, own);
+  const auto m = linesOf(mine, files, own);
+  const auto t = linesOf(theirs, files, own);
   std::map<int, std::string> out;
   auto numbers = [&] {
     std::map<int, bool> all;
@@ -480,11 +673,57 @@ std::vector<uint8_t> mergePrograms(std::span<const uint8_t> base, std::span<cons
     const std::string* pick = same(ml, bl) ? tl : ml;
     if (pick) out[n] = *pick;
   }
-  return encodeProgram(textOf(out));
+  return encodeLines(textOf(out), files, own);
+}
+
+std::vector<uint8_t> mergePrograms(std::span<const uint8_t> base, std::span<const uint8_t> mine,
+                                   std::span<const uint8_t> theirs) {
+  // Each store has its own table. The lines meet as text, which names a
+  // target's file, and the answer gets a table of its own.
+  auto text = [](std::span<const uint8_t> bytes) { return decodeProgram(bytes); };
+  FileTable files{{"MAIN"}};
+  const std::vector<uint8_t> b = encodeLines(text(base), files, 0);
+  const std::vector<uint8_t> m = encodeLines(text(mine), files, 0);
+  const std::vector<uint8_t> t = encodeLines(text(theirs), files, 0);
+  Store store;
+  store.files.push_back({"MAIN", true, mergeLines(b, m, t, files, 0)});
+  store.adopt(files);
+  return writeStore(store);
+}
+
+Synced syncLines(std::span<const uint8_t> base, const std::string& text, std::span<const uint8_t> stored,
+                 FileTable& files, int own) {
+  Synced out;
+  out.text = text;
+  const std::vector<uint8_t> doc = encodeLines(text, files, own);
+  const bool same = std::equal(doc.begin(), doc.end(), stored.begin(), stored.end());
+  const bool docMoved = !std::equal(doc.begin(), doc.end(), base.begin(), base.end());
+  const bool storeMoved = !std::equal(stored.begin(), stored.end(), base.begin(), base.end());
+  if (same) out.lines = doc;
+  else if (!storeMoved) out.lines = doc;
+  else if (!docMoved) out.lines.assign(stored.begin(), stored.end());
+  else out.lines = mergeLines(base, doc, stored, files, own);
+  out.storeChanged = !std::equal(out.lines.begin(), out.lines.end(), stored.begin(), stored.end());
+  if (out.lines != doc) {
+    out.text = patchLines(text, out.lines, files, own);
+    out.textChanged = out.text != text;
+  }
+  return out;
 }
 
 std::string patchText(const std::string& text, std::span<const uint8_t> program) {
-  const auto want = programLines(program);
+  FileTable files;
+  const StoredFile file = mainOf(program, files);
+  return patchLines(text, file.lines, files, 0);
+}
+
+std::string patchLines(const std::string& text, std::span<const uint8_t> records, const FileTable& files, int own) {
+  const auto want = linesOf(records, files, own);
+  // A document's line as LIST would print it once stored.
+  auto listed = [&](const std::string& body) {
+    FileTable names = files;
+    return expandLine(crunchLine(canonicalLine(body), names, own), names, own);
+  };
   std::vector<std::string> rows;
   for (size_t at = 0; at <= text.size();) {
     size_t end = text.find('\n', at);
@@ -510,7 +749,7 @@ std::string patchText(const std::string& text, std::span<const uint8_t> program)
     if (lastRow[n] != r) continue;
     const auto it = want.find(n);
     if (it == want.end()) continue;
-    kept.push_back({n, canonicalLine(body) == it->second ? rows[r] : std::to_string(n) + " " + it->second});
+    kept.push_back({n, listed(body) == it->second ? rows[r] : std::to_string(n) + " " + it->second});
   }
   // The program's lines the document lacks, each before the first
   // numbered row above it.

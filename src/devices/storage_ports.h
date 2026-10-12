@@ -21,6 +21,9 @@ constexpr uint8_t PORT_HI = 0x5f;
 constexpr int SLOT_MAX = 64;
 constexpr int TEXT_MAX = 65535;
 constexpr int NAME_LIMIT = 16;
+// LOAD also takes a path to a program's file, which is longer than a
+// slot's name. A name with a slash or a dot in it is a path.
+constexpr int PATH_LIMIT = 96;
 
 constexpr NamedValue PORTS[] = {
     // The text block. LOAD and CATALOG write it, SAVE reads it.

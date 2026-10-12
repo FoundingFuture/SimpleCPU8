@@ -4,9 +4,13 @@
 /* DATA lines. The program stays text, and one parser reads it for RUN,
  * DATA(n) and READ, so the three cannot disagree about what a line holds.
  * docs/basic-data-design.md is the design.
+ *
+ * The DATA lines of every file in the store are one list, in the order
+ * the files' blocks lie: the main file's first, then each file in the
+ * order it came in.
  */
 
-#define LINE_AT(p) ((prog[(p)] << 8) | prog[(p) + 1])
+#define LINE_AT(p) ((prog[(p) + R_NUM] << 8) | prog[(p) + R_NUM + 1])
 
 #define V_NUM 1
 #define V_STR 2
@@ -37,10 +41,11 @@ static unsigned char dt_fixed;
  */
 static unsigned int rd_line;
 
-/* The line the caller was on, for the message after an error that is not
- * the DATA line's own.
+/* The line the caller was on and the file it is in, for the message
+ * after an error that is not the DATA line's own.
  */
 static int sv_line;
+static unsigned char sv_file;
 
 /* The caller's place in its own line. A walk moves the lexer into DATA
  * lines, and lx_restore reads the caller's token again from its start.
@@ -55,6 +60,7 @@ static void lx_save(void)
     sv_text = lx_text;
     sv_pos = lx_tokpos;
     sv_line = err_line;
+    sv_file = run_file;
 }
 
 /* After an error the lexer stays where it failed and err_line names the
@@ -65,6 +71,7 @@ static void lx_restore(void)
     lx_raw = 0;
     if (err) return;
     err_line = sv_line;
+    run_file = sv_file;
     lx_seek(sv_text, sv_pos);
 }
 
@@ -72,7 +79,7 @@ static void lx_restore(void)
 static unsigned char is_data(unsigned int p)
 {
     lx_raw = 1;
-    lx_start((char *)&prog[p + 3]);
+    lx_start((char *)&prog[p + R_TEXT]);
     return lx_is("DATA");
 }
 
@@ -95,7 +102,9 @@ static unsigned char sep(void)
 static unsigned char open_line(unsigned int p)
 {
     unsigned int digits;
+    /* A mistake in this line is this line's, in this file. */
     err_line = LINE_AT(p);
+    run_file = prog[p];
     line_fixed = 0;
     lx_next();
     if (lx_tok != T_NUM || lx_text[lx_tokpos] != 36) return 1;
@@ -168,8 +177,8 @@ static void walk(unsigned int stop, unsigned char place)
     unsigned char i;
     dt_at = (unsigned int)prog + prog_len;
     dt_fixed = 0;
-    p = 0;
-    while (LINE_AT(p)) {
+    p = ed_first();
+    while (p) {
         if (is_data(p)) {
             if (!open_line(p)) return;
             if (line_fixed) { dt_at = line_addr; dt_fixed = 1; }
@@ -187,22 +196,29 @@ static void walk(unsigned int stop, unsigned char place)
                 if (!sep()) return;
             }
         }
-        p = p + prog[p + 2];
+        p = ed_next(p);
     }
 }
 
 void dt_pack(void)
 {
+    unsigned char file;
     read_at = 0;
     sv_line = 0;
+    file = run_file;
     walk(PROGMAX, 1);
     lx_raw = 0;
+    /* After a mistake run_file names the DATA line's file, for the
+     * message. Otherwise it is the caller's again.
+     */
+    if (!err) run_file = file;
 }
 
+/* DATA(n) names a line of the file the statement is in. */
 int dt_addr(int line)
 {
     unsigned int p;
-    p = ed_find(line);
+    p = ed_find_in(run_file, line);
     if (line == 0 || LINE_AT(p) != line) { err_arg = line; rt_error(E_NOLINE); return 0; }
     lx_save();
     if (is_data(p)) walk(p, 0);
@@ -217,29 +233,31 @@ static unsigned char rd_seek(void)
     unsigned int p;
     unsigned int at;
     at = read_at;
-    p = 0;
+    p = ed_first();
     if (at) {
         /* The line that holds the place. */
-        while (LINE_AT(p) && p + prog[p + 2] <= at) p = p + prog[p + 2];
-        if (LINE_AT(p) && at > p + 3) {
+        while (p && p + prog[p + R_LEN] <= at) p = ed_next(p);
+        if (p && at > p + R_TEXT) {
             rd_line = p;
             err_line = LINE_AT(p);
+            run_file = prog[p];
             lx_raw = 1;
-            lx_seek((char *)&prog[p + 3], at - p - 3);
+            lx_seek((char *)&prog[p + R_TEXT], at - p - R_TEXT);
             if (lx_tok != T_END) return 1;
-            p = p + prog[p + 2];
+            p = ed_next(p);
         }
     }
-    while (LINE_AT(p)) {
+    while (p) {
         if (is_data(p)) {
             if (!open_line(p)) return 0;
             rd_line = p;
-            read_at = p + 3 + lx_tokpos;
+            read_at = p + R_TEXT + lx_tokpos;
             if (lx_tok != T_END) return 1;
         }
-        p = p + prog[p + 2];
+        p = ed_next(p);
     }
     err_line = sv_line;
+    run_file = sv_file;
     rt_error(E_NODATA);
     return 0;
 }
@@ -253,7 +271,7 @@ static unsigned char rd_next(void)
     if (!rd_seek()) return 0;
     if (!value()) return 0;
     if (!sep()) return 0;
-    read_at = rd_line + 3 + lx_tokpos;
+    read_at = rd_line + R_TEXT + lx_tokpos;
     return 1;
 }
 
@@ -263,7 +281,7 @@ int dt_read_int(void)
     v = 0;
     lx_save();
     if (rd_next()) {
-        if (dv_kind == V_STR) { err_line = sv_line; rt_error(E_TYPE); }
+        if (dv_kind == V_STR) { err_line = sv_line; run_file = sv_file; rt_error(E_TYPE); }
         else v = dv_num;
     }
     lx_restore();
@@ -277,7 +295,7 @@ unsigned int dt_read_str(void)
     s = 0;
     lx_save();
     if (rd_next()) {
-        if (dv_kind != V_STR) { err_line = sv_line; rt_error(E_NEEDSTR); }
+        if (dv_kind != V_STR) { err_line = sv_line; run_file = sv_file; rt_error(E_NEEDSTR); }
         else if (dv_len) {
             s = str_new(dv_len);
             if (s) {
@@ -294,10 +312,11 @@ void dt_restore(void)
     read_at = 0;
 }
 
-void dt_restore_line(int line)
+void dt_restore_line(unsigned char f, int line)
 {
     unsigned int p;
-    p = ed_find(line);
+    p = ed_find_in(f, line);
+    if (p == 0) { rt_error(E_NOFILE); rt_found(ed_file_name(f)); return; }
     if (line == 0 || LINE_AT(p) != line) { err_arg = line; rt_error(E_NOLINE); return; }
     lx_save();
     if (is_data(p)) read_at = p;

@@ -19,9 +19,18 @@ std::optional<std::string> envVar(const char* name);
 
 struct Settings {
   std::string projectsDir;  // where New project and Open project start
+  // The folder of BASIC libraries an INCLUDE finds. Empty means the
+  // default, which project::defaultLibraries names from the projects
+  // folder, so the IDE and simplecpu-make spell it once.
+  std::string librariesDir;
   float uiScale = 1.0f;     // every font and spacing times this
   bool formatAssembly = true;  // lay out .asm documents when they are saved
   bool errorSound = true;      // a tone when a build or a microcode set fails
+  // The project column at the left of the window: open as a tree, or
+  // collapsed to a bar. Written when its toggle is used. columnKnown says
+  // the file read had the line.
+  bool columnOpen = true;
+  bool columnKnown = false;
 
   // The folder, created when missing. Empty when no home is known.
   static std::filesystem::path dir();
@@ -33,8 +42,10 @@ struct Settings {
 
   // Read the file if there is one; a missing file leaves the defaults.
   void load();
-  // Write the file. False when it could not be written.
-  bool save() const;
+  // Write the file. False when it could not be written. The two folders
+  // are put in their one spelling first, project::normalFolder's, so what
+  // Preferences stored is what the session reads from then on.
+  bool save();
 
  private:
   // DESIGN: never a bare name. dir() / name with an empty dir() is a

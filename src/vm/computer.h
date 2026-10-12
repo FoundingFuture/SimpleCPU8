@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <set>
@@ -123,6 +124,24 @@ class Computer {
   void setBreakpoints(const std::vector<uint16_t>& pcs);
   bool hitBreakpoint = false;
 
+  // A watch of the host's: called after every instruction, and every run
+  // call stops at the instruction that makes it answer true, with hitWatch
+  // set. The IDE steps a line of C or BASIC with one, and stops at a BASIC
+  // line. The machine knows nothing of it. An empty function is no watch,
+  // and a run without one goes the short way.
+  void setWatch(std::function<bool()> watch) { watch_ = std::move(watch); }
+  bool hitWatch = false;
+
+  // Set when a storage command asked the storage device's host: a LOAD
+  // the host answers, a SAVE it hears. Every run call ends its slice at
+  // that instruction, and the machine still runs.
+  //
+  // DESIGN: the host's answer may cost a look at the disk, and a program
+  // can ask two million times in one frame. One question a slice keeps
+  // the host in charge of its own time. A machine with no host never
+  // sets it, and its run goes the short way.
+  bool hitHost = false;
+
   // Run up to n instructions. Returns the number executed, so the caller
   // can pace batches per host frame.
   uint64_t runBudget(uint64_t n);
@@ -152,6 +171,7 @@ class Computer {
 
  private:
   void newMachine();
+  bool stopHere();
   uint32_t drawSeed();
   void slotsChanged();
 
@@ -177,6 +197,7 @@ class Computer {
   uint32_t seedRuns_ = 0;
   bool traceOn_ = true;
   std::set<uint16_t> breakpoints_;
+  std::function<bool()> watch_;
   std::vector<uint8_t> frame_;
   std::string lastDisplayKey_;
   std::vector<uint8_t> audioBlock_;

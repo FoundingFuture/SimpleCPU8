@@ -9,7 +9,9 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -49,6 +51,15 @@ enum Status : uint8_t {
   STO_BAD_CMD = 4,
 };
 
+// A name with a slash or a dot in it is a path to a program's file, and
+// any other name is a slot's.
+//
+// DESIGN: one rule, here. The device reads it to pick the limit a name
+// is held to, and a host to pick between its own files and the disk. Two
+// copies that drift would send a name down the branch that never checked
+// it. file_of in src/basic/store.c cuts a path at the same characters.
+inline bool isPath(std::string_view name) { return name.find_first_of("/\\.") != std::string_view::npos; }
+
 }  // namespace sc8::storage
 
 namespace sc8 {
@@ -71,6 +82,22 @@ class Storage : public ChainedDevice {
   // an empty list, and every name is STO_NOT_FOUND.
   void attachAssets(const std::vector<RomAsset>* assets) { assets_ = assets; }
 
+  // The host's part in LOAD and SAVE. find answers LOAD before the slots
+  // do: with a project's own file, a library, or the file a path names.
+  // Nothing means the slots decide. saved hears every SAVE after the
+  // slot is written. The IDE is such a host. A machine with none has its
+  // slots only.
+  struct Host {
+    std::function<std::optional<std::string>(const std::string& name)> find;
+    std::function<void(const std::string& name, const std::string& text)> saved;
+  };
+  void setHost(Host host) { host_ = std::move(host); }
+  bool hosted() const { return host_.find || host_.saved; }
+  // Where the device says that a command asked the host: a LOAD its find
+  // answered, a SAVE its saved heard. The virtual computer ends its run
+  // slice on it. Null, and nobody is told.
+  void attachHostFlag(bool* asked) { hostAsked_ = asked; }
+
   // The machine's data RAM, RAM_SIZE bytes, like the ACP takes it.
   void attachRam(uint8_t* ram) { ram_ = ram; }
 
@@ -82,6 +109,8 @@ class Storage : public ChainedDevice {
   BasicSlots* slots_ = nullptr;
   const std::vector<RomAsset>* assets_ = nullptr;
   std::function<void()> onChange_;
+  Host host_;
+  bool* hostAsked_ = nullptr;
 
   uint8_t addrHi_ = 0;
   uint8_t addrLo_ = 0;
@@ -93,10 +122,13 @@ class Storage : public ChainedDevice {
 
   uint8_t byteAt(uint32_t at) const;
   void putByte(uint32_t at, uint8_t v);
-  bool readName(std::string& name) const;
+  // The name from RAM. A path is allowed only where `path` says so.
+  bool readName(std::string& name, bool path = false) const;
+  // The slot of that name: the exact name, else the name in any case.
   BasicSlots::iterator find(const std::string& name);
 
   void run(uint8_t cmd);
+  void askedHost();
   uint8_t load();
   uint8_t save();
   uint8_t remove();

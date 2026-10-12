@@ -1,4 +1,6 @@
 #include "project/project.h"
+#include "devices/storage_ports.h"
+#include "project/breakpoints.h"
 #include "project/text_file.h"
 
 #include <algorithm>
@@ -555,31 +557,8 @@ Layout layoutOf(const fs::path& dir) {
 // the row with a signal conflict, which is its own lesson, so the build
 // goes on. The warning says where to look before that happens.
 static std::vector<std::string> rowWarnings(const std::string& text, const Microcode& set) {
-  // The line of each row: a line ending in a colon opens a section, every
-  // other line with something on it before a # is a row of it.
   std::map<std::pair<std::string, size_t>, int> lineOf;
-  std::string section;
-  size_t row = 0;
-  int lineNo = 0;
-  for (size_t at = 0; at <= text.size();) {
-    size_t nl = text.find('\n', at);
-    if (nl == std::string::npos) nl = text.size();
-    std::string line = text.substr(at, nl - at);
-    at = nl + 1;
-    lineNo++;
-    const size_t hash = line.find('#');
-    if (hash != std::string::npos) line.resize(hash);
-    while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) line.pop_back();
-    size_t first = 0;
-    while (first < line.size() && std::isspace(static_cast<unsigned char>(line[first]))) first++;
-    if (first >= line.size()) continue;
-    if (line.back() == ':') {
-      section = line.substr(first, line.size() - first - 1);
-      row = 0;
-    } else {
-      lineOf[{section, row++}] = lineNo;
-    }
-  }
+  for (const RowStop& r : rowLines(text)) lineOf[{r.section, static_cast<size_t>(r.row)}] = r.line;
   std::vector<std::string> out;
   for (const Microcode::Section& sec : set.sections()) {
     for (size_t r = 0; r < sec.rows.size(); r++) {
@@ -592,6 +571,168 @@ static std::vector<std::string> rowWarnings(const std::string& text, const Micro
                     ". The machine stops with a signal conflict when it runs this row.");
     }
   }
+  return out;
+}
+
+std::vector<std::string> includesOf(const std::string& text) {
+  std::vector<std::string> out;
+  for (size_t at = 0; at < text.size();) {
+    size_t end = text.find('\n', at);
+    if (end == std::string::npos) end = text.size();
+    std::string_view line(text.data() + at, end - at);
+    at = end + 1;
+    // The line's number, then the word, then the name: letters and digits.
+    size_t i = line.find_first_not_of(' ');
+    if (i == std::string_view::npos || !std::isdigit(static_cast<unsigned char>(line[i]))) continue;
+    while (i < line.size() && std::isdigit(static_cast<unsigned char>(line[i]))) i++;
+    while (i < line.size() && line[i] == ' ') i++;
+    static const std::string_view WORD = "INCLUDE";
+    if (line.size() < i + WORD.size()) continue;
+    bool word = true;
+    for (size_t k = 0; k < WORD.size(); k++) word = word && std::toupper(static_cast<unsigned char>(line[i + k])) == WORD[k];
+    i += WORD.size();
+    if (!word || (i < line.size() && std::isalnum(static_cast<unsigned char>(line[i])))) continue;
+    while (i < line.size() && line[i] == ' ') i++;
+    std::string name;
+    while (i < line.size() && std::isalnum(static_cast<unsigned char>(line[i])) && name.size() < 16) {
+      name += static_cast<char>(std::toupper(static_cast<unsigned char>(line[i++])));
+    }
+    if (!name.empty()) out.push_back(name);
+  }
+  return out;
+}
+
+std::optional<std::string> readProgramFile(const fs::path& file) {
+  std::string ext = file.extension().string();
+  for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  std::error_code ec;
+  if (ext != ".bas" || !fs::is_regular_file(file, ec)) return std::nullopt;
+  std::ifstream in(file, std::ios::binary);
+  if (!in) return std::nullopt;
+  // DESIGN: the read itself is bounded, one byte past what a slot holds.
+  // A size asked first could be stale by the time the file is read, and
+  // a program in the machine must not make the host take a large file
+  // into memory.
+  constexpr size_t LIMIT = static_cast<size_t>(storage::TEXT_MAX);
+  std::string text(LIMIT + 1, '\0');
+  in.read(text.data(), static_cast<std::streamsize>(text.size()));
+  const auto got = static_cast<size_t>(in.gcount());
+  if (got > LIMIT) return std::nullopt;
+  text.resize(got);
+  text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+  return text;
+}
+
+namespace {
+
+// True when every part of root's path opens path's, and path goes on.
+bool inside(const fs::path& root, const fs::path& path) {
+  auto r = root.begin();
+  auto p = path.begin();
+  for (; r != root.end() && p != path.end() && *r == *p; ++r, ++p) {}
+  return r == root.end() && p != path.end();
+}
+
+}  // namespace
+
+std::vector<fs::path> loadRoots(const fs::path& projectDir, const fs::path& projectsFolder,
+                                const std::vector<fs::path>& libraries) {
+  std::vector<fs::path> roots;
+  // Each folder in its one spelling. The parent of `game/` as spelled
+  // is `game`, which is not the folder the project sits in.
+  const fs::path dir = normalFolder(projectDir);
+  if (dir.empty()) return roots;
+  roots.push_back(dir);
+  // A relative folder has no parent to name; the absolute form, which
+  // readProgramFileIn takes, has one.
+  const fs::path parent = dir.parent_path();
+  if (!parent.empty() && parent != dir) roots.push_back(parent);
+  if (!projectsFolder.empty()) roots.push_back(normalFolder(projectsFolder));
+  for (const fs::path& folder : libraries) {
+    if (!folder.empty()) roots.push_back(normalFolder(folder));
+  }
+  return roots;
+}
+
+std::optional<std::string> readProgramFileIn(const fs::path& base, const std::string& name,
+                                             const std::vector<fs::path>& roots) {
+  // By spelling first, with no call that reaches the disk or a server.
+  // A slash, a backslash or a colon at the wrong place is a root, a
+  // server or a drive on one system or another, so all are refused on
+  // every system.
+  if (name.empty() || name.front() == '/' || name.front() == '\\' || name.find(':') != std::string::npos) return std::nullopt;
+  const fs::path relative(name);
+  if (relative.has_root_name() || relative.has_root_directory()) return std::nullopt;
+  std::string ext = relative.extension().string();
+  for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (ext != ".bas" || base.empty()) return std::nullopt;
+  std::error_code ec;
+  const fs::path wanted = (fs::absolute(base, ec) / relative).lexically_normal();
+  if (ec) return std::nullopt;
+  bool allowed = false;
+  for (const fs::path& root : roots) {
+    if (root.empty()) continue;
+    // A root with a separator after it has an empty name at its end,
+    // which no file's path goes on from.
+    const fs::path at = normalFolder(fs::absolute(root, ec));
+    allowed = allowed || (!ec && inside(at, wanted));
+  }
+  if (!allowed) return std::nullopt;
+  // Then on the disk: canonical follows every link, and fails for a
+  // missing file. A link inside a root to a file outside is not read.
+  const fs::path real = fs::canonical(wanted, ec);
+  if (ec) return std::nullopt;
+  for (const fs::path& root : roots) {
+    if (root.empty()) continue;
+    const fs::path at = fs::canonical(root, ec);
+    if (!ec && inside(at, real)) return readProgramFile(real);
+  }
+  return std::nullopt;
+}
+
+fs::path defaultLibraries(const fs::path& projectsFolder) {
+  return projectsFolder.empty() ? fs::path() : projectsFolder / LIBRARIES_FOLDER;
+}
+
+fs::path libraryFile(const std::vector<fs::path>& libraries, const std::string& name) {
+  auto upper = [](std::string s) {
+    for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+  };
+  for (const fs::path& folder : libraries) {
+    if (folder.empty()) continue;
+    std::error_code ec;
+    const fs::path home = fs::canonical(folder, ec);
+    if (ec) continue;
+    // The folder is walked in name order, so two files that differ only
+    // in case give the same answer on every system.
+    std::vector<fs::path> found;
+    for (const auto& entry : fs::directory_iterator(folder, ec)) {
+      if (!entry.is_regular_file(ec)) continue;
+      const fs::path& p = entry.path();
+      if (upper(p.extension().string()) != ".BAS" || upper(p.stem().string()) != upper(name)) continue;
+      // DESIGN: the check a file by path gets, in readProgramFileIn. A
+      // libraries folder may come with somebody else's project, and the
+      // build puts a library into the ROM. So the file's real place,
+      // every link followed, is a .bas file inside the folder's own.
+      const fs::path real = fs::canonical(p, ec);
+      if (ec || !inside(home, real) || upper(real.extension().string()) != ".BAS") continue;
+      found.push_back(p);
+    }
+    std::sort(found.begin(), found.end());
+    if (!found.empty()) return found.front();
+  }
+  return {};
+}
+
+MicrocodeCheck checkMicrocode(const std::string& text) {
+  MicrocodeCheck out;
+  const McParsed parsed = parseMicrocode(text);
+  for (const McError& e : parsed.errors) out.errors.push_back(std::to_string(e.line) + ": " + e.message);
+  if (!parsed.errors.empty()) return out;
+  out.sections = parsed.microcode.sections().size();
+  for (const Microcode::Section& sec : parsed.microcode.sections()) out.rows += sec.rows.size();
+  out.conflicts = rowWarnings(text, parsed.microcode);
   return out;
 }
 
@@ -866,6 +1007,42 @@ Built buildSources(const std::vector<Source>& given, const Assets& assets, const
     c.basic.emplace_back(slotNameFor(p->name), resolved);
     b.sources.push_back(p->name);
   }
+  // Every library the INCLUDE chain reaches goes into the ROM after the
+  // project's own files, so the machine that plays it needs no libraries
+  // folder. A name is the project's own file first, then a library.
+  if (!onBase) {
+    auto have = [&](const std::string& name) {
+      return std::any_of(c.basic.begin(), c.basic.end(), [&](const auto& slot) { return slot.first == name; });
+    };
+    // The list grows while it is walked: a library's own INCLUDE lines
+    // are read when the library comes in.
+    for (size_t i = 0; i < c.basic.size(); i++) {
+      const std::string text = c.basic[i].second;
+      int row = 0;
+      for (size_t from = 0; from < text.size();) {
+        size_t end = text.find('\n', from);
+        if (end == std::string::npos) end = text.size();
+        row++;
+        const std::vector<std::string> names = includesOf(text.substr(from, end - from));
+        from = end + 1;
+        if (names.empty() || have(names[0])) continue;
+        const fs::path file = libraryFile(opts.libraries, names[0]);
+        const std::optional<std::string> library = file.empty() ? std::nullopt : readProgramFile(file);
+        if (!library) {
+          const std::string who = i < basFiles.size() ? at(basFiles[i]->name) : "library " + c.basic[i].first;
+          std::string folders;
+          for (const fs::path& folder : opts.libraries) folders += (folders.empty() ? "" : " or ") + folder.string();
+          b.errors.push_back(who + ":" + std::to_string(row) + ": INCLUDE " + names[0] +
+                             ": no file of that name in the project" +
+                             (folders.empty() ? ", and no libraries folder is set"
+                                              : " or in the libraries folder " + folders));
+          continue;
+        }
+        c.basic.emplace_back(names[0], *library);
+        b.notes.push_back("library " + names[0] + " from " + file.string());
+      }
+    }
+  }
   if (!b.errors.empty()) return b;
 #if SC8_HAVE_BASIC
   // DESIGN: BASIC reads each file with its own CHECK, on this cartridge's
@@ -874,9 +1051,9 @@ Built buildSources(const std::vector<Source>& given, const Assets& assets, const
   // booted to find out.
   if (!onBase && (basicProject || mixedProject)) {
     for (size_t i = 0; i < basFiles.size(); i++) {
-      const std::string& text = c.basic[c.basic.size() - basFiles.size() + i].second;
+      const std::string& text = c.basic[i].second;
       const std::string& name = basFiles[i]->name;
-      const basic::Checked checked = basic::checkProgram(c, text);
+      const basic::Checked checked = basic::checkProgram(c, text, c.basic[i].first);
       for (const basic::Issue& issue : checked.issues) {
         const int line = fileLineOf(text, issue.line);
         b.errors.push_back(at(name) + (line > 0 ? ":" + std::to_string(line) : "") + ": " + issue.message);

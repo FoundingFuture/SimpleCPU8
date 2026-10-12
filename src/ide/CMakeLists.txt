@@ -25,11 +25,15 @@ add_executable(simplecpu-ide
   ide.cpp
   edit_panes.cpp
   project_pane.cpp
+  project_column.cpp
+  basic_files.cpp
+  view.cpp
   filedialog.cpp
   highlight.cpp
   basic_assist.cpp
   settings.cpp
   run_panes.cpp
+  run_menu.cpp
   micro_panes.cpp
   manual.cpp
   guide.cpp

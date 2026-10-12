@@ -40,6 +40,7 @@
 
 #include "asm/asm.h"
 #include "core/cartridge.h"
+#include "project/folder.h"
 
 namespace sc8::project {
 
@@ -120,7 +121,32 @@ struct Options {
   std::vector<std::pair<std::string, std::string>> meta;
   std::map<std::string, std::string> defines;
   bool keepAsm = false;  // also write the generated assembly beside the ROM
+  // The libraries folders: .bas files of routines any project may
+  // INCLUDE. A name a project's own files do not settle is looked up in
+  // each in turn, by its file name in any case. None means no libraries.
+  std::vector<std::filesystem::path> libraries;
 };
+
+// The files a BASIC text INCLUDEs, in line order: each name in capitals,
+// without a .BAS after it. Only a line that opens with INCLUDE counts,
+// which is where the interpreter looks for one.
+std::vector<std::string> includesOf(const std::string& text);
+
+// The name of a libraries folder. A folder of projects holds one beside
+// the projects, and it is no project itself. The examples' builder and
+// the IDE's example list pass over it.
+constexpr const char* LIBRARIES_FOLDER = "libraries";
+
+// Where the libraries are when nobody says: the folder libraries in the
+// folder the projects sit in. The IDE asks with its projects folder and
+// with the folder a project is in, simplecpu-make with the latter.
+std::filesystem::path defaultLibraries(const std::filesystem::path& projectsFolder);
+
+// A library's file by its name in any case, with .bas after it in any
+// case, in the first of the folders that has one. An empty path when
+// none has. A link counts only when the file it leads to is a .bas file
+// inside the same libraries folder.
+std::filesystem::path libraryFile(const std::vector<std::filesystem::path>& libraries, const std::string& name);
 
 enum class Kind { C, Basic, Assembly, Microcode };
 
@@ -135,6 +161,47 @@ struct ExampleKind {
 };
 constexpr ExampleKind EXAMPLE_KINDS[] = {
     {"assembly", "Assembly"}, {"basic", "BASIC"}, {"c", "C"}, {"microcode", "Microcode"}};
+
+// A BASIC program's file as text with LF line ends, for a library and
+// for a LOAD by path. The running machine names the file, so only a
+// regular file called .bas, in any case, is read, and none larger than
+// the storage device's TEXT_MAX, which is all a slot holds. Nothing for
+// any other file.
+std::optional<std::string> readProgramFile(const std::filesystem::path& file);
+
+// The folders a LOAD by path may read from: the project's own folder,
+// the folder it sits in, the projects folder the person set, and the
+// libraries folders. The parent is in so that projects beside each
+// other copy from one another, `LOAD "../pong/sound.bas"`, wherever
+// they sit. Eddie's decision. A project with no folder has none. Each
+// folder comes back in its one spelling, normalFolder's, so `game/` and
+// `game/.` give the roots `game` gives.
+std::vector<std::filesystem::path> loadRoots(const std::filesystem::path& projectDir,
+                                             const std::filesystem::path& projectsFolder,
+                                             const std::vector<std::filesystem::path>& libraries);
+
+// A program's file for a path the running machine gave, as
+// LOAD "../graphlib/graphics.bas" does, resolved against `base`.
+//
+// DESIGN: the program that names the path may be somebody else's, so
+// the name is judged by its spelling before the disk is asked anything.
+// It must be relative, with no drive and no server in it, and end in
+// .bas. Joined to `base` it must lie inside one of `roots`. Only then is
+// the file looked up, and it must still lie inside a root once every
+// link in its path is followed. No roots, no file.
+std::optional<std::string> readProgramFileIn(const std::filesystem::path& base, const std::string& name,
+                                             const std::vector<std::filesystem::path>& roots);
+
+// A microcode set's text checked without a build: the parser's errors,
+// then every row through checkRow. Each message opens with its line in
+// the text and a colon. The IDE's CHECK in the MICROCODE view shows them.
+struct MicrocodeCheck {
+  std::vector<std::string> errors;     // the set does not parse
+  std::vector<std::string> conflicts;  // rows that break a row rule
+  size_t sections = 0;
+  size_t rows = 0;
+};
+MicrocodeCheck checkMicrocode(const std::string& text);
 
 // Lay out a new project of a kind at dir, which must not exist yet or be
 // empty: the folders, a README, a .gitignore for build/ and a first

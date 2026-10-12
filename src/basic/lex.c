@@ -16,6 +16,7 @@ unsigned char lx_len;
 unsigned char lx_tokpos;
 unsigned char lx_raw;
 unsigned char lx_kw;
+unsigned char lx_file;
 
 /* The reserved words, and where each starts in the list. lx_init fills
  * kw_at once at power on, so a word's text is one load away.
@@ -163,6 +164,18 @@ void lx_next(void)
         }
         lx_pos = (unsigned int)t - (unsigned int)lx_text;
         lx_tok = T_NUM;
+        lx_len = 0;
+        return;
+    }
+
+    /* A jump target a stored line holds as its file and its line. */
+    if (c == KW_TARGET) {
+        unsigned char *t;
+        t = (unsigned char *)lx_text + lx_pos;
+        lx_file = t[1];
+        lx_num = *(int *)(t + 2);
+        lx_pos = lx_pos + 4;
+        lx_tok = T_TARGET;
         lx_len = 0;
         return;
     }

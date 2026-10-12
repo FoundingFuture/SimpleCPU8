@@ -10,9 +10,11 @@ namespace sc8::basic {
 
 namespace {
 
-// The slot the program goes into. LOAD takes it from there by the path
-// AUTORUN takes, so a line BASIC refuses to store is refused here too.
+// The slot a program with no name of its own goes into, and AUTORUN.
+// LOAD takes it from there by the path AUTORUN takes, so a line BASIC
+// refuses to store is refused here too.
 constexpr const char* SLOT = "BUILDCHECK";
+constexpr const char* AUTORUN = "AUTORUN";
 
 // PERF DECISION: a check that has not finished after this many cycles
 // fails the build with a message. CHECK reads each line once, so only a
@@ -97,10 +99,11 @@ class Runner {
 
 }  // namespace
 
-Checked checkProgram(const Cartridge& interpreter, const std::string& text) {
+Checked checkProgram(const Cartridge& interpreter, const std::string& text, const std::string& name) {
+  const std::string slot = name.empty() || name == AUTORUN ? SLOT : name;
   Cartridge cart = interpreter;
-  cart.basic.clear();
-  cart.basic.emplace_back(SLOT, text);
+  std::erase_if(cart.basic, [&](const auto& s) { return s.first == AUTORUN || s.first == slot; });
+  cart.basic.emplace_back(slot, text);
   // A Session holds a closure over itself, so it lives where it is built.
   auto s = std::make_unique<Session>(cart);
   s->load();
@@ -108,7 +111,7 @@ Checked checkProgram(const Cartridge& interpreter, const std::string& text) {
   Checked out;
   Runner r(*s);
   r.untilPrompt();
-  r.command(std::string("!LOAD \"") + SLOT + "\"");
+  r.command("!LOAD \"" + slot + "\"");
   if (!r.failed() && r.error() != 0) {
     // LOAD stops at the first line it cannot store, and the rest of the
     // program never reaches memory to be checked.

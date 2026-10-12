@@ -19,6 +19,7 @@ Computer::Computer()
   apu_.setMasterGain(MASTER_GAIN);
   storage_.attach(&cart_.basic, [this] { slotsChanged(); });
   storage_.attachAssets(&cart_.assets);
+  storage_.attachHostFlag(&hitHost);
   frame_.assign(static_cast<size_t>(SCREEN_W * SCREEN_H * 4), 0);
   newMachine();
 }
@@ -144,20 +145,27 @@ void Computer::setFastFrame(bool on, std::optional<double> gapMs) {
 
 void Computer::setBreakpoints(const std::vector<uint16_t>& pcs) { breakpoints_ = std::set<uint16_t>(pcs.begin(), pcs.end()); }
 
+// At an instruction boundary: a breakpoint on the PC, the host's watch,
+// or a storage command that asked the host.
+bool Computer::stopHere() {
+  if (breakpoints_.count(machine_->pc)) hitBreakpoint = true;
+  if (watch_ && watch_()) hitWatch = true;
+  return hitBreakpoint || hitWatch || hitHost;
+}
+
 uint64_t Computer::runBudget(uint64_t n) {
   Machine& m = *machine_;
   hitBreakpoint = false;
+  hitWatch = false;
+  hitHost = false;
   const uint64_t start = m.instructions;
-  if (breakpoints_.empty()) {
+  if (breakpoints_.empty() && !watch_ && !storage_.hosted()) {
     m.run(n);
     return m.instructions - start;
   }
   for (uint64_t i = 0; i < n; i++) {
     if (!m.instructionStep()) break;
-    if (breakpoints_.count(m.pc)) {
-      hitBreakpoint = true;
-      break;
-    }
+    if (stopHere()) break;
   }
   return m.instructions - start;
 }
@@ -165,6 +173,8 @@ uint64_t Computer::runBudget(uint64_t n) {
 uint64_t Computer::runMicroBudget(uint64_t n) {
   Machine& m = *machine_;
   hitBreakpoint = false;
+  hitWatch = false;
+  hitHost = false;
   uint64_t steps = 0;
   uint64_t prevInstr = m.instructions;
   for (uint64_t i = 0; i < n; i++) {
@@ -172,10 +182,7 @@ uint64_t Computer::runMicroBudget(uint64_t n) {
     steps++;
     if (m.instructions != prevInstr) {
       prevInstr = m.instructions;
-      if (breakpoints_.count(m.pc)) {
-        hitBreakpoint = true;
-        break;
-      }
+      if (stopHere()) break;
     }
   }
   return steps;
@@ -184,14 +191,13 @@ uint64_t Computer::runMicroBudget(uint64_t n) {
 uint64_t Computer::runToNextFrame(uint64_t maxInstr) {
   Machine& m = *machine_;
   hitBreakpoint = false;
+  hitWatch = false;
+  hitHost = false;
   const uint64_t start = m.instructions;
   const int64_t f0 = gpu_.frame();
   for (uint64_t i = 0; i < maxInstr; i++) {
     if (!m.instructionStep()) break;
-    if (breakpoints_.count(m.pc)) {
-      hitBreakpoint = true;
-      break;
-    }
+    if (stopHere()) break;
     if (gpu_.frame() != f0) break;
   }
   return m.instructions - start;
@@ -199,12 +205,12 @@ uint64_t Computer::runToNextFrame(uint64_t maxInstr) {
 
 bool Computer::runFrame() {
   runToNextFrame();
-  return machine_->status == Status::Running && !hitBreakpoint;
+  return machine_->status == Status::Running && !hitBreakpoint && !hitWatch;
 }
 
 bool Computer::runInstructions(uint64_t n) {
   runBudget(n);
-  return machine_->status == Status::Running && !hitBreakpoint;
+  return machine_->status == Status::Running && !hitBreakpoint && !hitWatch;
 }
 
 void Computer::pumpAudio(Audio& audio) {

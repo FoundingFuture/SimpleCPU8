@@ -1,10 +1,8 @@
 // The IDE: one Computer, one project, and the panes that look at both,
-// arranged in levels. A level is a saved dock layout. BASIC holds the
-// editor, the screen and the manual only. Project holds the files, the
-// editor, the screen, the messages and the manual. Run holds the screen
-// and the debugger. CPU holds the datapath, the flow and the microcode
-// rows, with a side pane for the screen, the manual and the state.
-// Switching level swaps the layout.
+// arranged in four views, one per language (ide/view.h). A view is a
+// saved dock layout around the editor of its language, and every view
+// runs the machine. The project column sits left of the views, outside
+// them, and stays when the view changes.
 //
 // There is always a project. It is a folder of sources (.c, .h, .asm,
 // .bas, microcode.txt) and assets, or an opened ROM (its slots and its
@@ -13,10 +11,13 @@
 // project into a ROM and puts it in the machine: C first, then the
 // assembler over everything, then the ROM. A project with BASIC boots
 // into the interpreter.
-// docs/standalone.md, section "IDE levels", is the design.
+// docs/standalone.md, section "IDE levels", describes the levels the
+// views replaced.
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -25,11 +26,14 @@
 #include <vector>
 
 #include "asm/asm.h"
+#include "basic/program.h"
 #include "ide/basic_assist.h"
 #include "ide/filedialog.h"
 #include "ide/guide.h"
 #include "ide/settings.h"
 #include "ide/sprite_editor.h"
+#include "ide/view.h"
+#include "project/breakpoints.h"
 #include "project/project.h"
 #include "vm/audio.h"
 #include "vm/computer.h"
@@ -37,13 +41,6 @@
 #include "vm/keys.h"
 
 namespace sc8 {
-
-// BASIC is the plain level: the editor, the screen and the manual, for a
-// person writing BASIC who needs nothing else in view. Project adds the
-// files, the assembly and the messages. Run adds the debugger. CPU shows
-// the inside of the processor.
-enum class Level { Basic, Project, Run, Cpu };
-constexpr int LEVEL_COUNT = 4;
 
 // The speed ladder from the browser's speed menu: the trace speed, six
 // instruction rates, three frame-locked rates, then MAX.
@@ -67,14 +64,20 @@ struct ListLine {
 };
 
 // One document of the project: a source by its file name, its text and
-// whether the text differs from the disk. Kind follows the extension.
-enum class DocKind { C, Header, Assembly, Basic, Microcode, Other };
-DocKind docKindOf(const std::string& name);
-
+// whether the text differs from the disk. Its kind follows its name
+// (ide/view.h). `open` says its tab shows in its view's editor. A closed
+// document stays in the project, and the project column opens it again.
+// A library is a .bas file of the libraries folder that a program of the
+// project INCLUDEs. It is no source of the project: `path` is its own
+// file, and it is read only until the person chooses Edit library.
 struct Doc {
   std::string name;
   std::string text;
   bool dirty = false;
+  bool open = true;
+  bool library = false;
+  bool readOnly = false;
+  std::string path;
 };
 
 class Ide {
@@ -89,15 +92,22 @@ class Ide {
   // other name.
   bool setFontView(const std::string& name);
 
-  void setLevel(Level level);
-  Level level() const { return level_; }
+  void setView(View view);
+  View view() const { return view_; }
 
   // The command line's --speed and --run: a label from the browser's
   // speed menu, then start running. False for a value the ladder lacks.
+  // The command line's speed holds in every view.
   bool setSpeed(const std::string& value);
   // --run: build the project and run it. A .bas opened from the command
   // line runs in BASIC instead, the quick way.
   void run();
+  // --do: one of the Run menu's items by name, in the view on screen:
+  // run, check, step, pause or stop. False for any other name.
+  bool menuAction(const std::string& name);
+  // --break: a breakpoint on a document's line, written name:line. A .bas
+  // takes its BASIC line number. False when the document is not open.
+  bool addBreak(const std::string& spec);
 
   // Called once per host frame, before rlImGuiBegin. Paces the machine,
   // feeds the keyboard and the audio. Renders the screen through the CRT
@@ -188,7 +198,7 @@ class Ide {
     uintmax_t bytes = 0;
   };
   std::vector<AssetEntry> assetList() const;
-  // The Files pane's list of assets, never read on every frame. A project
+  // The project column's list of assets, never read on every frame. A project
   // opening, an asset the IDE writes or removes, and the window coming
   // back to the front each read the folder again.
   std::vector<AssetEntry> shownAssets_;
@@ -243,8 +253,18 @@ class Ide {
   // project does.
   project::Built buildInMemory();
   bool anyDirty() const;
+  // Make a document the one its view's editor shows, without leaving the
+  // view on screen. openDoc also shows its tab and switches to its view.
   void activate(size_t index);
-  Doc* activeDoc();
+  void openDoc(size_t index);
+  // The document the view on screen edits, and any view's.
+  Doc* activeDoc() { return activeDocOf(view_); }
+  Doc* activeDocOf(View view);
+  Doc* docNamed(const std::string& name);
+  void settleActive();
+  // A new document of the project, opened in its view. False with a note
+  // for a name that is not a source or is taken.
+  bool newDoc(const std::string& name);
   void addDoc(const std::string& name, const std::string& text);
   void buildProject(bool run);
   void insertBuilt(project::Built& built, const std::string& what);
@@ -255,6 +275,12 @@ class Ide {
   // A build's or a microcode set's errors: each on a red line in Messages,
   // and the error tone once, when Preferences has it on.
   void reportErrors(const std::vector<std::string>& errors);
+  void showMessages();
+  // The editor's tab area: the listing shares it in two views, and a run
+  // or a step brings the listing to the front.
+  void showRunTab();
+  std::string editorTab() const;
+  static void bringForward(const std::string& name);
   std::vector<project::Source> sources() const;
   project::Layout layout() const;
 
@@ -285,6 +311,51 @@ class Ide {
   void statusMenu();
   void selectMicrocode(const std::string& name);
   void applyLock();
+
+  // The Run menu (run_menu.cpp). Each item works at the level of the
+  // view on screen: a line of BASIC, a line of C, an instruction, a row.
+  void runMenu();
+  void viewRun();
+  void viewCheck();
+  void viewStep();
+  void viewStop();
+  const char* stepLabel() const;
+  // A document changed since the last build, or the last build failed.
+  bool needsBuild() const;
+  bool lastBuildOk_ = false;
+  // BASIC runs a program now, and is not waiting at its prompt.
+  bool basicMidProgram() const;
+  void checkBasicDoc(Doc& doc);
+  void checkMicrocodeDoc(const Doc& doc);
+  // The Microcode submenu: the project's microcode.txt into the machine,
+  // and the lock that keeps the running set.
+  void applyProjectMicrocode(bool lock);
+  void toggleMicrocodeLock();
+  // A step of BASIC or C: the machine runs flat out until stepUntil_
+  // answers true, asked after every instruction. Pause ends it early.
+  void stepC();
+  void stepBasic();
+  void beginStep(std::function<bool()> until);
+  void refreshWatch();
+  bool watchHit();
+  std::function<bool()> stepUntil_;
+  bool stepDone_ = false;
+  bool stepSawProgram_ = false;  // a BASIC step saw the program running
+  // The last build's source line per address, and which of those lines
+  // are lines of a C document, where a C step may stop.
+  project::PcLines pcLines_;
+  std::vector<char> stepLine_;
+  // The BASIC line a watch saw start with the last instruction, or 0.
+  project::BasicLines basicLines_;
+  int basicStarted_ = 0;
+  // Where the machine stands, in the words of the view's language.
+  std::string whereNote();
+  int currentLine(const Doc& doc);
+  // The current line the editor last scrolled into view, and its document.
+  int shownCurrent_ = 0;
+  std::string shownCurrentDoc_;
+  // Bring the document the machine stands in to the front of its editor.
+  void showWhere();
   // A breakpoint set in the listing's margin. One on the address of an
   // editor breakpoint removes that one.
   void toggleBreakpoint(int instr);
@@ -306,6 +377,28 @@ class Ide {
   std::map<std::string, std::string> builtTexts_;  // each document as the last build read it
   std::vector<int> gutterMarks_;                   // the active document's breakpoint lines
   void toggleSourceBreak(const Doc& doc, int line);
+  // A breakpoint on a row of microcode.txt. Its line lives in
+  // sourceBreaks_ with no address and follows edits as the others do.
+  // rowBreaks_ holds the rows those lines name, as the machine meets them.
+  void toggleRowBreak(const Doc& doc, int line);
+  void rebuildRowBreaks();
+  project::RowBreaks rowBreaks_;
+  std::string rowNote() const;
+  // Breakpoints on BASIC lines, by document and line number. The watch
+  // stops the machine when such a line starts. A line that leaves the
+  // document takes its breakpoint along. project/breakpoints.cpp has
+  // the rule.
+  std::map<std::string, std::set<int>> basicBreaks_;
+  void toggleBasicBreak(const Doc& doc, int row);
+  // The document whose program BASIC runs: the one in step, or the
+  // AUTORUN a built project boots into.
+  std::string runningBasicDoc() const;
+  // What a watch stopped the machine for, for Messages.
+  std::string watchNote_;
+  // A document's line to show, asked for by the Breakpoints pane.
+  void selectLine(const std::string& doc, int line);
+  std::string revealDoc_;
+  int revealLine_ = 0;
   // Move each document's breakpoints with the edits made since they were
   // placed. A line the edits removed loses its breakpoint.
   void followEdits();
@@ -316,36 +409,91 @@ class Ide {
   void forgetSourceBreaks();
   void typeIntoMachine();
 
-  // BASIC: a .bas document and the interpreter's program memory are two
-  // views of one program, kept in step both ways while BASIC waits at
-  // READY. An edit in the document is written into the memory, so LIST
-  // shows it. A line typed on the small screen appears in the document.
-  // When both sides changed since the last exchange, the lines merge by
-  // number and the document wins a line both changed. While a program
-  // runs, nothing moves; the changes go across at the next READY.
+  // BASIC (basic_files.cpp): a .bas document and its file in the
+  // interpreter's store are two views of one program, a tab per file,
+  // kept in step both ways while BASIC waits at READY. An edit in a
+  // document is written into the store, so LIST shows it. A line typed
+  // on the small screen appears in the document. When both sides changed
+  // a file since the last exchange, its lines merge by number and the
+  // document wins a line both changed. While a program runs, nothing
+  // moves. The changes go across at the next READY.
   void bootBasic();
   void runInBasic();
   bool basicAtReady() const;
-  bool pushProgram();
-  void writeProgram(const std::vector<uint8_t>& bytes);
-  Doc* basicPartner();
+  basic::Store machineStore() const;
+  bool writeStore(const basic::Store& store);
+  bool pushMain();
+  // The document Run runs as the main file, and the document a file of
+  // the store is, by its name.
+  Doc* mainBasicDoc();
+  Doc* docOfFile(const std::string& file);
+  bool inStep(const Doc& doc) const;
   void syncBasic();
+  // The IDE as the storage device's host: LOAD, INCLUDE and FILE find
+  // the project's documents, the libraries and files by path, and a SAVE
+  // goes into the project.
+  void hostStorage();
+  void takeSaves();
+  std::vector<std::pair<std::string, std::string>> savedSlots_;
+  // The folders an INCLUDE finds a library in, and the libraries the
+  // project's programs include as read only documents.
+  std::vector<std::filesystem::path> libraryFolders() const;
+  void refreshLibraries();
+  // The list of libraries is brought up to date at the start of the next
+  // frame. A pane holds a document while it draws, and a refresh may
+  // move every document.
+  bool librariesStale_ = true;
+  // The slots a check of a .bas needs: every .bas of the project, then
+  // every library the INCLUDE chain reaches, read from its file.
+  BasicSlots basicSlots();
+  void sortDocs();
   // Replace a document's text. The editor, when it holds the text,
   // reloads it rather than writing its own copy back.
   void setDocText(Doc& doc, std::string text);
 
-  // The levels and their layouts.
-  void buildLayout(Level level, unsigned dockspace);
+  // The views and their layouts.
+  bool buildLayout(View view, unsigned dockspace, float width, float height);
+  // A pane's window name in a view: the base name and the view's key.
+  // A pane two views show is two windows and never moves between them.
+  static std::string paneName(const char* base, View view);
+  std::string pane(const char* base) const { return paneName(base, view_); }
   void menuBar();
+  // The four tab buttons at the left of the menu bar.
+  void viewTabs();
   void shortcuts();
   void quitDialog();
   void settingsDialog();
 
-  // The panes. A pane shared by two levels takes the level's window name.
-  void filesPane(const char* name, bool* open = nullptr);
-  void editorPane(const char* name);
-  void assemblyPane();
-  void messagesPane(const char* name, bool* open = nullptr);
+  // The project column (project_column.cpp): a fixed column at the left
+  // of the window, under the menu bar, drawn before the view's dockspace.
+  // It is not a docked pane, so no view owns it and no layout loses it.
+  // Open, it is a tree of the project. Collapsed, it is a narrow bar.
+  // Draws it and answers its width.
+  float projectColumn();
+  void columnTree();
+  void columnBar();
+  void toggleColumn();
+  void newFileDialog();
+  // Show the assembly the last build made: the C view's Assembly tab for
+  // a project with C, the ASSEMBLY view's listing otherwise.
+  void showAssembly();
+  // The column's width while open, in pixels at UI size 1. Save layout
+  // keeps it with the open state.
+  float columnWidth_ = COLUMN_WIDTH;
+  static constexpr float COLUMN_WIDTH = 230.0f;
+  static constexpr float COLUMN_MIN = 140.0f;
+  static constexpr float COLUMN_MAX = 640.0f;
+  // settings.txt had a column line, so the layout file's does not apply.
+  bool columnFromSettings_ = false;
+  bool askNewFile_ = false;
+
+  // The panes. A pane two views show takes a window name per view.
+  // editorPane is a view's editor: one tab per open document of its
+  // kind, and under the tabs the active document with its buttons.
+  void editorPane(View view);
+  void editorBody(Doc& doc);
+  void assemblyPane(const char* name);
+  void messagesPane(const char* name);
   void manualPane(const char* name);
   void manualBody();
   void screenPane(const char* name);
@@ -358,7 +506,7 @@ class Ide {
   void stackBody();
   void datapathBody();
   void flowBody();
-  // The CPU level's one view: the run controls on top, then the datapath,
+  // The MICROCODE view's CPU pane: the run controls on top, then the datapath,
   // the flow, the registers, the memory and the stack as sections that
   // open and close. The side pane beside it holds the screen, the
   // registers, the memory, the stack and the manual the same way.
@@ -407,7 +555,7 @@ class Ide {
   void runControls();
   void memoryPane(const char* name);
   void stackPane(const char* name);
-  void breakpointsPane();
+  void breakpointsPane(const char* pane);
   void listingPane(const char* name);
   void datapathPane();
   void flowPane();
@@ -452,9 +600,12 @@ class Ide {
   // Refuse a write into an example, with a note naming what was refused.
   bool refuseExample(const std::string& what);
   std::string romPath_;  // the ROM file opened, for a burn to the same place
+  std::string builtRom_;  // the ROM file the last build wrote, or empty
   std::vector<Doc> docs_;
-  size_t active_ = 0;
-  bool focusFiles_ = false;
+  // Each view's active document by name, and a tab its editor selects at
+  // the next frame.
+  std::string activeName_[VIEW_COUNT];
+  std::string selectTab_[VIEW_COUNT];
   std::string newDocName_;
   bool openedBasic_ = false;   // the command line opened a .bas
   std::string builtAssembly_;  // what the assembler saw at the last build
@@ -467,22 +618,30 @@ class Ide {
   };
   std::vector<Message> messages_;
 
-  Level level_ = Level::Project;
-  bool layoutBuilt_[LEVEL_COUNT] = {false, false, false, false};
-  // The BASIC level keeps the files and the messages out of sight until
-  // the Level menu shows them.
-  bool basicShowsFiles_ = false;
-  bool basicShowsMessages_ = false;
-  // After a project opens: the BASIC level for a project of .bas files
-  // only, the Project level for anything else.
-  void levelForProject();
+  View view_ = View::Assembly;
+  bool layoutBuilt_[VIEW_COUNT] = {false, false, false, false};
+  // A view shown for the first time opens its own guide. After that the
+  // view keeps the guide its reader picked.
+  bool viewShown_[VIEW_COUNT] = {false, false, false, false};
+  // Windows to focus, one a frame, before focusAfterLayout_: the tabs a
+  // fresh layout shows in front.
+  std::vector<std::string> focusQueue_;
+  // After a project opens: the MICROCODE view for a project with a
+  // microcode.txt, else the view of the document a reader starts in.
+  void viewForProject();
   std::string focusAfterLayout_;  // a window to bring to the front once
+  std::string frontTab_;          // a tab to bring to the front, after those
   bool done_ = false;
   bool askQuit_ = false;
 
   bool running_ = false;
   bool freshRun_ = false;  // the next paced frame is a run's first
-  int speed_ = 8;  // index into the ladder, f60 by default
+  // Each view's speed, an index into the ladder. view.h has the defaults.
+  int speed_[VIEW_COUNT] = {0, 0, 0, 0};
+  // The speed the view on screen runs at. The trace speed needs readable
+  // rows, so under the sealed set it answers the slowest instruction rate.
+  int speedIndex() const;
+  void pickSpeed(int index);
   double owed_ = 0.0;
   double tick_ = 0.0;
   bool fastFrameLatch_ = false;
@@ -500,26 +659,26 @@ class Ide {
   bool stackFollow_ = true;
   std::vector<std::string> watched_;
 
-  // The microcode pane. lockedMicrocode_ holds a set the machine keeps
+  // The Execution pane. lockedMicrocode_ holds a set the machine keeps
   // whatever a project or ROM brings.
   int selectedSection_ = 0;
-  std::string customText_;
-  std::vector<std::string> mcErrors_;
-  bool mcEditing_ = false;
   std::optional<std::string> lockedMicrocode_;
 
   // The manual pane.
   std::string manualFilter_;
   std::string manualPage_ = "LD";
 
-  // BASIC sync state. syncDoc_ names the document in step with the
-  // machine, syncBase_ the program both agreed on at the last exchange.
-  std::string syncDoc_;
+  // BASIC sync state: by file name, the records the document and the
+  // store agreed on at the last exchange. A file with an entry is in
+  // step. shownEdit_ is the current file the IDE last saw, and
+  // lastBasicTab_ the tab it last saw in the BASIC view's editor.
+  std::map<std::string, std::vector<uint8_t>> syncBases_;
+  int shownEdit_ = -1;
+  std::string lastBasicTab_;
   // The editor's line numbering for .bas documents, and the document it
   // last watched.
   BasicAssist basicAssist_;
   std::string assistDoc_;
-  std::vector<uint8_t> syncBase_;
   bool basicBooted_ = false;  // the machine runs the interpreter
   // Commands still go through the keyboard: RUN after a push, for one.
   std::string typing_;
@@ -537,8 +696,9 @@ class Ide {
   // every section of the set.
   bool mcBrowse_ = false;
 
-  // The Manual pane's guide tab: which guide, its filter and its scroll.
-  GuideView guideView_;
+  // The Manual pane's guide tab, per view: which guide, its filter and
+  // its scroll.
+  GuideView guideView_[VIEW_COUNT];
   int manualTab_ = -1;  // a tab to select next frame, -1 for none
 };
 

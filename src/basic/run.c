@@ -5,7 +5,9 @@ int vars[NVARS];
 unsigned char loop_back;
 unsigned char checking;
 
+/* A GOSUB remembers the line to come back to and the file it is in. */
 static unsigned int gosub[GOSUBMAX];
+static unsigned char gosub_file[GOSUBMAX];
 static unsigned char ngosub;
 
 /* A FOR remembers the line it is on and where its body starts within that
@@ -32,11 +34,13 @@ static char line_buf[LINEMAX];
  * record a jump found once stays its target until the program stops.
  * docs/design/basic-speed.md, proposal 1.
  *
- * A slot holds a site and a target. The site is the offset in prog where
- * the jump's line number starts, the target the offset line_at found. A
- * site picks its slot by the XOR of its two bytes. Two sites that share a
+ * A slot holds a site and a target. The site is the offset in prog of
+ * the jump's KW_TARGET marker, the target the offset line_at found. The
+ * marker's next byte is the target's file, so a site names a file and a
+ * line, and the offset is its own across every file in the store. A site
+ * picks its slot by the XOR of its two bytes. Two sites that share a
  * slot take turns in it and stay correct, since the site is compared on
- * every read. A line's text starts at offset 3, so no site is 0, and 0
+ * every read. The file table sits at offset 0, so no site is 0, and 0
  * marks an empty slot.
  *
  * DESIGN: the cache lives only while rt_run runs, and rt_run empties it on
@@ -53,10 +57,11 @@ static unsigned char jc_on;
 static unsigned char jc_slot;
 static unsigned int jc_at;
 static unsigned int jc_found;
+static unsigned char jc_file;
 
-/* The site of the number after the lexer's token, into jc_at and jc_slot.
- * 1 when the slot holds its target, which jc_found then holds, and the
- * digits are never read. jc_at is 0 when there is no site to keep.
+/* The site of the target after the lexer's token, into jc_at and jc_slot.
+ * 1 when the slot holds its target, which jc_found and jc_file then hold,
+ * and the target is never read. jc_at is 0 when there is no site to keep.
  */
 static unsigned char jc_hit(void)
 {
@@ -68,14 +73,13 @@ static unsigned char jc_hit(void)
      */
     t = (unsigned char *)lx_text + lx_pos;
     while (*t == 32) t = t + 1;
-    /* THEN B = 1 has no number to look up. A stored number starts with
-     * its marker, and one kept as digits with a digit or a $.
-     */
-    if (*t != KW_LITERAL && (*t < 48 || *t > 57) && *t != 36) return 0;
+    /* THEN B = 1 and GOTO 10 * N have no stored target to look up. */
+    if (*t != KW_TARGET) return 0;
     jc_at = (unsigned int)t - (unsigned int)prog;
     jc_slot = jc_at ^ (jc_at >> 8);
     if (jc_site[jc_slot] != jc_at) return 0;
     jc_found = jc_target[jc_slot];
+    jc_file = t[1];
     return 1;
 }
 
@@ -151,7 +155,7 @@ static void note_found(void)
         rt_found_at(2, "STRING");
         return;
     }
-    if (lx_tok == T_NUM) {
+    if (lx_tok == T_NUM || lx_tok == T_TARGET) {
         n = lx_num;
         d = 0;
         do { digits[d] = 48 + (n % 10); n = n / 10; d = d + 1; } while (n);
@@ -280,6 +284,8 @@ static void say_error(void)
     else if (err == E_HEXWIDTH) term_puts("HEX WIDTH IS OUT OF RANGE [1,4]");
     else if (err == E_TEXTSIZE) term_puts("TEXT SIZE IS OUT OF RANGE [4,8]");
     else if (err == E_NOFONT) { term_puts("NO FONT CALLED "); term_puts(err_found); term_puts(" ON THE CARTRIDGE"); }
+    else if (err == E_NOFILE) { term_puts("FILE NOT FOUND: "); term_puts(err_found); }
+    else if (err == E_FILES) term_puts("TOO MANY FILES: 8 AT MOST");
     else if (err == E_ROUTINE) {
         term_puts(err_found);
         term_puts(" IS A ROUTINE NAME, WHICH ONLY A BUILT PROJECT KNOWS: USE ITS NUMBER HERE");
@@ -294,7 +300,16 @@ static void say_error(void)
      * exactly the line a beginner is most likely to be on.
      */
     if (err_line) {
-        term_puts(" IN LINE ");
+        /* A line of the main file by its number, as ever. A line of
+         * another file with the file's name before it.
+         */
+        if (run_file) {
+            term_puts(" IN ");
+            term_puts(ed_file_name(run_file));
+            term_putc(58);
+        } else {
+            term_puts(" IN LINE ");
+        }
         term_putn(err_line);
     }
     /* A syntax error says what it wanted and what it got. */
@@ -314,12 +329,86 @@ static void say_error(void)
 /* GOTO and GOSUB name a line. Finding it is a walk, and the walk stops at
  * the first line that is not below the target because lines are in order.
  */
-static unsigned int line_at(int n)
+static unsigned int line_at(unsigned char f, int n)
 {
     unsigned int p;
-    p = ed_find(n);
-    if (((prog[p] << 8) | prog[p + 1]) != n) { err_arg = n; rt_error(E_NOLINE); return 0; }
+    p = ed_find_in(f, n);
+    /* A line names a file that no INCLUDE brought in. */
+    if (p == 0) { rt_error(E_NOFILE); rt_found(ed_file_name(f)); return 0; }
+    if (((prog[p + R_NUM] << 8) | prog[p + R_NUM + 1]) != n) { err_arg = n; rt_error(E_NOLINE); return 0; }
     return p;
+}
+
+/* The file and the line a jump names. */
+static unsigned char tg_file;
+static int tg_line;
+
+/* True when the lexer stands on a file's name, a colon and a digit, as
+ * typed: GOSUB GRAPHICS:1000 at the prompt, or in a line too long to keep
+ * its targets. No statement reads that way, since none starts with a
+ * number.
+ */
+static unsigned char named_target(void)
+{
+    unsigned char q;
+    unsigned char c;
+    if (lx_tok != T_NAME && lx_tok != T_KEY) return 0;
+    q = lx_tokpos;
+    for (;;) {
+        c = lx_text[q];
+        if (!((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122))) break;
+        q = q + 1;
+    }
+    if (c != 58 || q == lx_tokpos || q - lx_tokpos > FNAME - 1) return 0;
+    c = lx_text[q + 1];
+    return c >= 48 && c <= 57;
+}
+
+/* A target that is written out, into tg_file and tg_line: a stored one,
+ * a typed NAME:line, or after THEN a number. Leaves the lexer past it.
+ * Returns 0 after an error.
+ */
+static unsigned char take_target(void)
+{
+    unsigned char q;
+    unsigned char f;
+    tg_file = run_file;
+    if (lx_tok == T_TARGET) {
+        tg_file = lx_file;
+    } else if (lx_tok != T_NUM) {
+        q = lx_tokpos;
+        while (lx_text[q] != 58) q = q + 1;
+        f = ed_file_find(&lx_text[lx_tokpos], q - lx_tokpos, 0);
+        if (f == 255) {
+            rt_error(E_NOFILE);
+            lx_text[q] = 0;
+            rt_found(&lx_text[lx_tokpos]);
+            lx_text[q] = 58;
+            return 0;
+        }
+        tg_file = f;
+        lx_seek(lx_text, q + 1);
+    }
+    tg_line = lx_num;
+    lx_next();
+    return 1;
+}
+
+/* The target after GOTO, GOSUB or RESTORE. 1 when it is written out,
+ * which is when CHECK looks the line up. GOTO N and GOTO 10 * N are
+ * worked out on every run and name a line of the file they are in.
+ */
+static unsigned char jump_target(void)
+{
+    unsigned char lone;
+    if (lx_tok == T_TARGET || named_target()) {
+        take_target();
+        return 1;
+    }
+    lone = lone_number();
+    tg_file = run_file;
+    tg_line = ex_int();
+    return lone;
 }
 
 static void do_print(void)
@@ -715,56 +804,76 @@ static unsigned char statement(void)
         lx_next();
         if (lx_tok == T_END || IS_PUNCT(58)) { dt_restore(); return 1; }
         {
-            int n;
             unsigned char lone;
-            lone = lone_number();
-            n = ex_int();
+            lone = jump_target();
             if (err || (checking && !lone)) return 1;
-            dt_restore_line(n);
+            dt_restore_line(tg_file, tg_line);
             return 1;
         }
 
+    /* A file a program INCLUDEs is in the store before line 1 runs:
+     * sto_includes saw to it. So a running line has nothing left to do.
+     * INCLUDE typed at the prompt brings the file in now. It must open
+     * its line, because that is where sto_includes looks for it.
+     */
+    case KW_INCLUDE:
+        if (lx_tokpos) { rt_expect("A STATEMENT"); return 1; }
+        if (cur_line == 0 && !checking) sto_include(&lx_text[lx_pos]);
+        lx_tok = T_END;
+        return 1;
+
+    /* LOAD, SAVE, CATALOG and DELETE without the bang go straight to
+     * the storage driver, with the rest of the line as a bang has it.
+     */
+    case KW_LOAD:
+    case KW_SAVE:
+    case KW_CATALOG:
+    case KW_DELETE:
+        if (!checking) sto_bang(&lx_text[lx_tokpos]);
+        lx_tok = T_END;
+        return 1;
+
     case KW_GOTO:
-        if (jc_hit()) { pc = jc_found; return 0; }
+        if (jc_hit()) { pc = jc_found; run_file = jc_file; return 0; }
         lx_next();
         {
             unsigned int p;
             unsigned char lone;
-            lone = lone_number();
+            lone = jump_target();
             if (checking) {
-                int n;
-                n = ex_int();
-                if (lone && !err) line_at(n);
+                if (lone && !err) line_at(tg_file, tg_line);
                 return 1;
             }
-            p = line_at(ex_int());
             if (err) return 0;
-            if (lone) jc_put(p);
+            p = line_at(tg_file, tg_line);
+            if (err) return 0;
+            jc_put(p);
             pc = p;
+            run_file = tg_file;
             return 0;
         }
 
     case KW_GOSUB:
         {
             unsigned int p;
-            unsigned char lone;
             if (jc_hit()) {
                 p = jc_found;
-                lone = 0;
+                tg_file = jc_file;
+                jc_at = 0;
             } else {
+                unsigned char lone;
                 lx_next();
-                lone = lone_number();
+                lone = jump_target();
                 if (checking) {
-                    int n;
-                    n = ex_int();
-                    if (lone && !err) line_at(n);
+                    if (lone && !err) line_at(tg_file, tg_line);
                     return 1;
                 }
-                p = line_at(ex_int());
+                if (err) return 0;
+                p = line_at(tg_file, tg_line);
                 if (err) return 0;
             }
             if (ngosub >= GOSUBMAX) { rt_error(E_GOSUBS); return 0; }
-            if (lone) jc_put(p);
+            jc_put(p);
             /* The return is the NEXT line: a GOSUB is always the last thing
              * on its line, which is what every small BASIC has assumed.
              */
@@ -773,8 +882,10 @@ static unsigned char statement(void)
              * skipped a line and read the wrong record's length to do it.
              */
             gosub[ngosub] = pc;
+            gosub_file[ngosub] = run_file;
             ngosub = ngosub + 1;
             pc = p;
+            run_file = tg_file;
             return 0;
         }
 
@@ -784,6 +895,7 @@ static unsigned char statement(void)
         if (ngosub == 0) { rt_error(E_RETURN); return 0; }
         ngosub = ngosub - 1;
         pc = gosub[ngosub];
+        run_file = gosub_file[ngosub];
         return 0;
 
     case KW_IF:
@@ -798,20 +910,22 @@ static unsigned char statement(void)
                 /* THEN 100 takes the number alone, so its target is kept
                  * whatever follows it.
                  */
-                if (cond != 0 && jc_hit()) { pc = jc_found; return 0; }
+                if (cond != 0 && jc_hit()) { pc = jc_found; run_file = jc_file; return 0; }
                 then = cond != 0;
                 lx_next();
             }
             /* CHECK reads what follows THEN whatever the condition. */
             if (cond == 0 && !checking) { lx_tok = T_END; return 1; }
             /* THEN 100 is a GOTO, which is how BASIC has always read. */
-            if (lx_tok == T_NUM) {
+            if (lx_tok == T_TARGET || lx_tok == T_NUM || named_target()) {
                 unsigned int p;
-                p = line_at(lx_num);
-                if (checking) { lx_next(); return 1; }
+                if (!take_target()) return checking ? 1 : 0;
+                p = line_at(tg_file, tg_line);
+                if (checking) return 1;
                 if (err) return 0;
                 if (then) jc_put(p);
                 pc = p;
+                run_file = tg_file;
                 return 0;
             }
             return statement();
@@ -870,6 +984,8 @@ static unsigned char statement(void)
                 resume_pos = for_pos[t];
                 if (for_line[t] == cur_line) return 3;
                 pc = for_line[t];
+                /* The FOR may sit in another file than this NEXT. */
+                run_file = prog[pc];
                 loop_back = 1;
                 return 2;
             }
@@ -929,7 +1045,10 @@ void rt_run(void)
     err = E_OK;
     err_line = 0;
     running = 1;
-    pc = 0;
+    /* RUN runs the main file, and leaves it the current one. */
+    edit_file = 0;
+    run_file = 0;
+    pc = ed_file_start(0);
     from_for = 0;
     loop_back = 0;
 
@@ -937,19 +1056,27 @@ void rt_run(void)
     memset(jc_site, 0, sizeof(jc_site));
     jc_on = 1;
 
-    /* The DATA lines' bytes go where they belong before line 1 runs. */
-    dt_pack();
+    /* The files the program INCLUDEs come in, then the DATA lines' bytes
+     * go where they belong, both before line 1 runs. A file loaded later
+     * would land on the DATA bytes, which lie after the last file.
+     */
+    sto_includes();
+    if (!err) dt_pack();
     if (err) { say_error(); running = 0; return; }
     err_line = 0;
+    run_file = 0;
+    pc = ed_file_start(0);
 
     while (running) {
         unsigned int here;
         unsigned int n;
         /* PERF DECISION: the line number in one word load, big-endian as
          * it is stored. Two byte reads cost a line numbered below 256 a
-         * second read, 47 cycles, every time it ran.
+         * second read, 47 cycles, every time it ran. A file's block ends
+         * in a record numbered 0, so the line after a file's last ends
+         * the run with no test of which file it is in.
          */
-        n = *(unsigned int *)&prog[pc];
+        n = *(unsigned int *)&prog[pc + R_NUM];
         if (n == 0) break;
         here = pc;
         err_line = n;
@@ -959,14 +1086,14 @@ void rt_run(void)
             say_error();
             return;
         }
-        pc = pc + prog[pc + 2];       /* the default next line */
+        pc = pc + prog[pc + R_LEN];   /* the default next line */
         cur_line = here;
         loop_back = 0;
         if (from_for) {
             from_for = 0;
-            run_line((char *)&prog[here + 3], resume_pos);
+            run_line((char *)&prog[here + R_TEXT], resume_pos);
         } else {
-            run_line((char *)&prog[here + 3], 0);
+            run_line((char *)&prog[here + R_TEXT], 0);
         }
         if (err) { say_error(); return; }
         /* NEXT says so itself rather than being guessed at from pc: a GOTO
@@ -978,8 +1105,9 @@ void rt_run(void)
     err_line = 0;
 }
 
-/* CHECK, and CHECK n to start at line n: every stored line read once, in
- * order, and never run.
+/* CHECK, and CHECK n to start at line n: every line of the current file
+ * read once, in order, and never run. The files it INCLUDEs come in
+ * first, so a line it names in one of them is found.
  *
  * DESIGN: the check is the interpreter reading its own lines with
  * `checking` set, so it says what RUN says in RUN's words. A statement
@@ -1019,21 +1147,24 @@ static void rt_check(unsigned int from)
     /* DATA's bytes are checked where RUN checks them, before line 1. A
      * mistake above the first line asked for was reported already.
      */
-    dt_pack();
-    if (err && err_line < from) err = E_OK;
+    run_file = edit_file;
+    sto_includes();
+    if (!err) dt_pack();
+    if (err && err_line < from && run_file == edit_file) err = E_OK;
+    if (err == E_OK) run_file = edit_file;
 
-    at = 0;
+    at = ed_file_start(edit_file);
     while (err == E_OK) {
-        n = *(unsigned int *)&prog[at];
+        n = *(unsigned int *)&prog[at + R_NUM];
         if (n == 0) break;
-        next = at + prog[at + 2];
+        next = at + prog[at + R_LEN];
         if (n >= from) {
             err_line = n;
             cur_line = at;
             pc = next;
             running = 1;
             heap_top = top;
-            run_line((char *)&prog[at + 3], 0);
+            run_line((char *)&prog[at + R_TEXT], 0);
         }
         at = next;
     }
@@ -1087,7 +1218,20 @@ void rt_line(char *text)
         return;
     }
     if (lx_is("LIST")) { do_list(); if (err) say_error(); return; }
-    if (lx_is("NEW")) { ed_new(); str_init(); term_puts("READY"); term_nl(); return; }
+    /* NEW empties the current file and keeps the others. NEW ALL empties
+     * the store.
+     */
+    if (lx_is("NEW")) {
+        lx_next();
+        if (lx_tok == T_NAME && lx_is("ALL")) ed_reset();
+        else if (lx_tok == T_END) ed_new();
+        else { rt_expect("ALL OR THE END OF THE LINE"); say_error(); return; }
+        str_init();
+        term_puts("READY");
+        term_nl();
+        return;
+    }
+    if (lx_is("FILE")) { sto_file(&lx_text[lx_pos]); if (err) say_error(); return; }
     /* RENUM start, step: 10 and 10 unless given. */
     if (lx_is("RENUM")) {
         unsigned int start;
@@ -1111,6 +1255,10 @@ void rt_line(char *text)
     running = 1;
     pc = 0;
     cur_line = 0;
+    /* A line typed at the prompt runs in the current file: a bare line
+     * number in it names a line of that file.
+     */
+    run_file = edit_file;
     nfor = 0;
     jc_on = 0;
     run_line(&text[i], 0);

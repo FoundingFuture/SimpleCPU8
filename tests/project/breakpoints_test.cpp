@@ -7,8 +7,15 @@
 #include <string>
 #include <vector>
 
+#include "core/machine.h"
+#include "core/microcode.h"
 #include "project/breakpoints.h"
 #include "project/project.h"
+
+#if SC8_HAVE_BASIC
+#include "basic/program.h"
+#include "basic/session.h"
+#endif
 
 using namespace sc8;
 using namespace sc8::project;
@@ -120,6 +127,252 @@ TEST_SUITE("a breakpoint's address") {
     REQUIRE(s);
     CHECK(s->line == 1);
     CHECK(b.assembled.labels.at("tick").value == s->pc);
+  }
+}
+
+TEST_SUITE("the source line of an address") {
+  TEST_CASE("every instruction of a C statement belongs to the statement's line") {
+    const Built b = buildOf({{"main.c", C_SRC}});
+    const PcLines lines(b.lines, b.assembled);
+    const auto s4 = stopOf(b, "main.c", 4);
+    const auto s6 = stopOf(b, "main.c", 6);
+    REQUIRE(s4);
+    REQUIRE(s6);
+    for (int pc = s4->pc; pc < s6->pc; pc++) {
+      const SourceLine* at = lines.at(pc);
+      REQUIRE(at);
+      CHECK(at->file == "main.c");
+      CHECK(at->line == 4);
+    }
+    const SourceLine* six = lines.at(s6->pc);
+    REQUIRE(six);
+    CHECK(six->line == 6);
+  }
+
+  TEST_CASE("an assembly file's instruction belongs to its own line") {
+    const Built b = buildOf({{"main.asm", "start:  LD A <- 1\n; a comment\n        INC A\n        HLT\n"}});
+    const PcLines lines(b.lines, b.assembled);
+    const SourceLine* at = lines.at(1);
+    REQUIRE(at);
+    CHECK(at->file == "main.asm");
+    CHECK(at->line == 3);
+  }
+
+  TEST_CASE("an address past the program belongs to no line") {
+    const Built b = buildOf({{"main.asm", "        HLT\n"}});
+    const PcLines lines(b.lines, b.assembled);
+    CHECK(lines.at(1) == nullptr);
+    CHECK(lines.at(-1) == nullptr);
+    CHECK(PcLines().at(0) == nullptr);
+  }
+}
+
+#if SC8_HAVE_BASIC
+
+namespace {
+
+// The numbers of the lines that start while the machine runs RUN. A
+// watch looks at the RAM after every instruction, as the IDE's does.
+std::vector<int> linesStarted(const std::string& program) {
+  basic::Session s;
+  s.load();
+  s.runBudget(3000000);
+  const std::vector<uint8_t> bytes = basic::encodeProgram(program);
+  basic::storeProgram(s.m->ram, bytes);
+  for (char c : std::string("RUN\r")) s.pushKey(c == '\r' ? 13 : c, false);
+  BasicLines watch;
+  std::vector<int> out;
+  for (int i = 0; i < 3000000 && out.size() < 50; i++) {
+    if (!s.m->instructionStep()) break;
+    if (const int n = watch.started(s.m->ram)) out.push_back(n);
+    if (!out.empty() && basic::atPrompt(s.m->ram)) break;
+  }
+  return out;
+}
+
+}  // namespace
+
+// DESIGN: the host watches the system page. Nothing in the interpreter
+// or the program changes for a step or a breakpoint.
+TEST_SUITE("a BASIC line starting, seen in the system page") {
+  TEST_CASE("each line that runs starts once, in the order it runs") {
+    CHECK(linesStarted("10 A = 1\n20 A = 2\n30 A = 3\n") == std::vector<int>{10, 20, 30});
+  }
+
+  TEST_CASE("a line a GOTO jumps over never starts") {
+    CHECK(linesStarted("10 A = 1\n20 GOTO 40\n30 A = 2\n40 A = 3\n") == std::vector<int>{10, 20, 40});
+  }
+
+  // SYS_PC holds line 20's offset while line 10 runs. The jump moves it
+  // to line 30's, the place line 20 would have moved it to by starting.
+  TEST_CASE("a jump to the line after the next does not start the line between") {
+    CHECK(linesStarted("10 GOTO 30\n20 A = 2\n30 A = 3\n") == std::vector<int>{10, 30});
+  }
+
+  TEST_CASE("a line that jumps to itself starts every time round") {
+    const std::vector<int> loop = linesStarted("10 A = A + 1 : IF A < 3 THEN 10\n20 END\n");
+    CHECK(loop == std::vector<int>{10, 10, 10, 20});
+  }
+
+  TEST_CASE("a GOSUB starts its routine's lines and comes back to the line after") {
+    CHECK(linesStarted("10 GOSUB 100\n20 END\n100 A = 1\n110 RETURN\n") == std::vector<int>{10, 100, 110, 20});
+  }
+
+  // A line carries its file's index, so a breakpoint in a library is
+  // told from one on the same number in the main file.
+  TEST_CASE("a line that starts in an included file says which file it is in") {
+    basic::Session s;
+    s.slots.emplace_back("LIB", "20 A = 2\n30 RETURN\n");
+    s.load();
+    s.runBudget(3000000);
+    basic::FileTable files{{"MAIN"}};
+    basic::Store store;
+    store.files.push_back({"MAIN", true, basic::encodeLines("10 INCLUDE LIB\n20 GOSUB LIB:20\n30 A = 3\n", files, 0)});
+    store.adopt(files);
+    basic::storeProgram(s.m->ram, basic::writeStore(store));
+    for (char c : std::string("RUN\r")) s.pushKey(c == '\r' ? 13 : c, false);
+    BasicLines watch;
+    std::vector<std::pair<int, int>> started;
+    for (int i = 0; i < 6000000 && started.size() < 20; i++) {
+      if (!s.m->instructionStep()) break;
+      if (const int n = watch.started(s.m->ram)) started.emplace_back(watch.file(), n);
+      if (!started.empty() && basic::atPrompt(s.m->ram)) break;
+    }
+    CHECK(started == std::vector<std::pair<int, int>>{{0, 10}, {0, 20}, {1, 20}, {1, 30}, {0, 30}});
+  }
+
+  TEST_CASE("a line typed at the prompt starts no program line") {
+    basic::Session s;
+    s.load();
+    s.runBudget(3000000);
+    basic::storeProgram(s.m->ram, basic::encodeProgram("10 A = 1\n"));
+    BasicLines watch;
+    int started = 0;
+    for (char c : std::string("PRINT 7\rCHECK\r")) {
+      s.pushKey(c == '\r' ? 13 : c, false);
+      for (int i = 0; i < 40000; i++) {
+        s.m->instructionStep();
+        if (watch.started(s.m->ram)) started++;
+      }
+    }
+    CHECK(started == 0);
+  }
+}
+
+#endif
+
+namespace {
+
+const char* SET_TEXT = "fetch:\n  FETCH\n# a comment\nHLT:\n  HALT\n\nJZ:\n  PC_INC\n  PC_LOAD_Z\n";
+
+// A machine on the naive set with a program, for row breakpoints.
+Machine machineOf(const std::string& source) {
+  const Assembled a = assemble(source, nullptr);
+  REQUIRE(a.errors.empty());
+  return Machine(a.cartridge().program, buildNaive());
+}
+
+}  // namespace
+
+TEST_SUITE("a row of a microcode set's text") {
+  TEST_CASE("a row's line names its section and its place in it") {
+    const auto row = rowAt(SET_TEXT, 9);
+    REQUIRE(row);
+    CHECK(row->section == "JZ");
+    CHECK(row->row == 1);
+    CHECK(row->line == 9);
+  }
+
+  TEST_CASE("a line without a row gives the next row in the text") {
+    const auto comment = rowAt(SET_TEXT, 3);
+    REQUIRE(comment);
+    CHECK(comment->section == "HLT");
+    CHECK(comment->row == 0);
+    CHECK(comment->line == 5);
+    const auto header = rowAt(SET_TEXT, 7);
+    REQUIRE(header);
+    CHECK(header->section == "JZ");
+    CHECK(header->row == 0);
+    CHECK(header->line == 8);
+  }
+
+  TEST_CASE("nothing after the last row, and no line before the first") {
+    CHECK_FALSE(rowAt(SET_TEXT, 10));
+    CHECK_FALSE(rowAt(SET_TEXT, 0));
+  }
+}
+
+// The naive set runs one FETCH row, then JZ's two rows: PC_INC and
+// PC_LOAD_Z.
+TEST_SUITE("a row breakpoint against the machine") {
+  TEST_CASE("the machine stops before the row, inside the instruction") {
+    Machine m = machineOf("        LD A <- 1\n        JZ skip\nskip:   HLT\n");
+    RowBreaks breaks;
+    breaks.set({{"JZ", 1, 9}});
+    CHECK_FALSE(breaks.onNext(m));
+    CHECK_FALSE(breaks.advance(m));
+    CHECK(m.instructions == 0);
+    m.instructionStep();
+    REQUIRE(breaks.onNext(m));
+    REQUIRE(breaks.advance(m));
+    const Machine::SequencerPos at = m.sequencer();
+    CHECK_FALSE(at.inFetch);
+    CHECK(at.rowIndex == 1);
+    CHECK(m.instructions == 1);
+    CHECK(breaks.stopped().section == "JZ");
+    CHECK(breaks.stopped().line == 9);
+  }
+
+  TEST_CASE("a row it already stopped at does not stop it twice") {
+    Machine m = machineOf("        JZ skip\nskip:   HLT\n");
+    RowBreaks breaks;
+    breaks.set({{"JZ", 1, 9}});
+    REQUIRE(breaks.advance(m));
+    const uint64_t cycles = m.cycles;
+    CHECK_FALSE(breaks.advance(m));
+    CHECK(m.cycles == cycles);
+  }
+
+  TEST_CASE("two rows of one instruction stop it twice, in order") {
+    Machine m = machineOf("        JZ skip\nskip:   HLT\n");
+    RowBreaks breaks;
+    breaks.set({{"JZ", 0, 8}, {"JZ", 1, 9}});
+    REQUIRE(breaks.advance(m));
+    CHECK(m.sequencer().rowIndex == 0);
+    CHECK_FALSE(m.sequencer().inFetch);
+    REQUIRE(breaks.advance(m));
+    CHECK(m.sequencer().rowIndex == 1);
+    CHECK_FALSE(breaks.advance(m));
+  }
+
+  TEST_CASE("a fetch row stops every instruction") {
+    Machine m = machineOf("        LD A <- 1\n        LD A <- 2\n        HLT\n");
+    RowBreaks breaks;
+    breaks.set({{"fetch", 0, 2}});
+    REQUIRE(breaks.onNext(m));
+    REQUIRE(breaks.advance(m));
+    CHECK(m.instructions == 0);
+    CHECK_FALSE(breaks.advance(m));
+    m.instructionStep();
+    REQUIRE(breaks.advance(m));
+    CHECK(m.instructions == 1);
+    CHECK(m.acc == 1);
+  }
+
+  TEST_CASE("a row the machine's set does not have never stops it") {
+    Machine m = machineOf("        JZ skip\nskip:   HLT\n");
+    RowBreaks breaks;
+    breaks.set({{"JZ", 7, 20}, {"NO SUCH INSTRUCTION", 0, 30}});
+    CHECK_FALSE(breaks.advance(m));
+    CHECK(m.cycles == 0);
+  }
+
+  TEST_CASE("no breakpoint, no stop") {
+    Machine m = machineOf("        HLT\n");
+    RowBreaks breaks;
+    CHECK(breaks.empty());
+    CHECK_FALSE(breaks.onNext(m));
+    CHECK_FALSE(breaks.advance(m));
   }
 }
 

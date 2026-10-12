@@ -12,12 +12,33 @@ constexpr uint32_t RAM_MASK = 0xffff;
 
 // CATALOG prints a name per line and the BAS chunk keys on names. So a name
 // holds no newline, no form feed and no space, and it stays short.
-bool validName(const std::string& name) {
-  if (name.empty() || name.size() > static_cast<size_t>(NAME_LIMIT)) return false;
+bool printable(const std::string& name) {
   return std::all_of(name.begin(), name.end(), [](char c) {
     const auto u = static_cast<unsigned char>(c);
     return u >= 33 && u <= 126;
   });
+}
+
+bool validName(const std::string& name) {
+  return !name.empty() && name.size() <= static_cast<size_t>(NAME_LIMIT) && printable(name);
+}
+
+bool validPath(const std::string& name) {
+  return !name.empty() && name.size() <= static_cast<size_t>(PATH_LIMIT) && printable(name);
+}
+
+// What follows a path's last slash, up to its first dot: the name the
+// file has in BASIC's store. file_of in src/basic/store.c is the same rule.
+std::string stemOf(const std::string& path) {
+  const size_t slash = path.find_last_of("/\\");
+  const std::string file = slash == std::string::npos ? path : path.substr(slash + 1);
+  return file.substr(0, file.find('.'));
+}
+
+char lowerOf(char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; }
+
+bool sameName(const std::string& a, const std::string& b) {
+  return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) { return lowerOf(x) == lowerOf(y); });
 }
 
 }  // namespace
@@ -75,19 +96,21 @@ void Storage::putByte(uint32_t at, uint8_t v) {
 
 // The name from RAM up to its NUL. The scan stops at NAME_LIMIT plus one.
 // An unterminated name then reads as too long, not as the whole of RAM.
-bool Storage::readName(std::string& name) const {
+bool Storage::readName(std::string& name, bool path) const {
   const uint32_t at = static_cast<uint32_t>(nameHi_) << 8 | nameLo_;
   name.clear();
-  for (uint32_t i = 0; i <= static_cast<uint32_t>(NAME_LIMIT); i++) {
+  for (uint32_t i = 0; i <= static_cast<uint32_t>(PATH_LIMIT); i++) {
     const uint8_t c = byteAt(at + i);
-    if (c == 0) return validName(name);
+    if (c == 0) return path && isPath(name) ? validPath(name) : validName(name);
     name.push_back(static_cast<char>(c));
   }
   return false;
 }
 
 BasicSlots::iterator Storage::find(const std::string& name) {
-  return std::find_if(slots_->begin(), slots_->end(), [&](const auto& slot) { return slot.first == name; });
+  const auto exact = std::find_if(slots_->begin(), slots_->end(), [&](const auto& slot) { return slot.first == name; });
+  if (exact != slots_->end()) return exact;
+  return std::find_if(slots_->begin(), slots_->end(), [&](const auto& slot) { return sameName(slot.first, name); });
 }
 
 void Storage::run(uint8_t cmd) {
@@ -102,13 +125,26 @@ void Storage::run(uint8_t cmd) {
   }
 }
 
+void Storage::askedHost() {
+  if (hostAsked_) *hostAsked_ = true;
+}
+
 uint8_t Storage::load() {
   std::string name;
-  if (!readName(name)) return STO_BAD_NAME;
-  if (!slots_) return STO_NOT_FOUND;
-  const auto it = find(name);
-  if (it == slots_->end()) return STO_NOT_FOUND;
-  const std::string& text = it->second;
+  if (!readName(name, true)) return STO_BAD_NAME;
+  // The host first: a project's own file is newer than the slot a build
+  // made of it. Then the slots, where a path is the slot its stem names.
+  std::optional<std::string> found;
+  if (host_.find) {
+    found = host_.find(name);
+    askedHost();
+  }
+  if (!found && slots_) {
+    const auto it = find(isPath(name) ? stemOf(name) : name);
+    if (it != slots_->end()) found = it->second;
+  }
+  if (!found) return STO_NOT_FOUND;
+  const std::string& text = *found;
   // Nothing is written on a short block: half a program is worse than none.
   if (text.size() + 1 > room_) return STO_FULL;
   const uint32_t at = static_cast<uint32_t>(addrHi_) << 8 | addrLo_;
@@ -141,6 +177,10 @@ uint8_t Storage::save() {
   }
   moved_ = static_cast<uint16_t>(text.size());
   if (onChange_) onChange_();
+  if (host_.saved) {
+    host_.saved(name, text);
+    askedHost();
+  }
   return STO_OK;
 }
 

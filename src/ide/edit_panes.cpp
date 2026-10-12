@@ -385,8 +385,9 @@ void inputRefPage() {
 // tab holds the instruction pages and the device references. It keeps
 // its own filter box, the list of pages on the left and the page on the
 // right. Typing a prefix filters the mnemonics, as the browser did.
-// manualTab_ selects a tab from elsewhere, for the guide of an open
-// file. The tabs stay, so the person can always pick another.
+// manualTab_ selects a tab from elsewhere: a view shown for the first
+// time opens its own guide. The tabs stay, so the person can always pick
+// another, and each view keeps the one picked there.
 void Ide::manualPane(const char* name) {
   ImGui::Begin(name);
   manualBody();
@@ -394,17 +395,18 @@ void Ide::manualPane(const char* name) {
 }
 
 void Ide::manualBody() {
+  GuideView& guide = guideView_[static_cast<int>(view_)];
   if (ImGui::BeginTabBar("manualtabs")) {
     static const struct { const char* label; Guide guide; } GUIDE_TABS[] = {
         {"BASIC", Guide::Basic}, {"C", Guide::C}, {"Assembly", Guide::Assembly}, {"Microcode", Guide::Microcode}};
     for (int i = 0; i < GUIDE_COUNT; i++) {
       const ImGuiTabItemFlags flags = manualTab_ == i ? ImGuiTabItemFlags_SetSelected : 0;
       if (ImGui::BeginTabItem(GUIDE_TABS[i].label, nullptr, flags)) {
-        if (guideView_.guide != GUIDE_TABS[i].guide) {
-          guideView_.guide = GUIDE_TABS[i].guide;
-          guideView_.chapter = -1;
+        if (guide.guide != GUIDE_TABS[i].guide) {
+          guide.guide = GUIDE_TABS[i].guide;
+          guide.chapter = -1;
         }
-        drawGuide(guideView_);
+        drawGuide(guide);
         ImGui::EndTabItem();
       }
     }

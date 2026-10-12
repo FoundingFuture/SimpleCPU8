@@ -11,6 +11,7 @@
 
 #include "asm/asm.h"
 #include "core/isa.h"
+#include "project/folder.h"
 #include "project/project.h"
 #include "assets/assets.h"
 #include "assets/font.h"
@@ -229,6 +230,28 @@ TEST_SUITE("project layouts") {
     CHECK(text.find("loop:   OUT    GPU_X_HI, 0") != std::string::npos);
   }
 
+  // The IDE's CHECK in the MICROCODE view: the set parsed and every row
+  // through checkRow, with no build.
+  TEST_CASE("checking a set counts its rows and names a conflict's line") {
+    const project::MicrocodeCheck good = project::checkMicrocode("fetch:\n  FETCH\nHLT:\n  HALT\n");
+    CHECK(good.errors.empty());
+    CHECK(good.conflicts.empty());
+    CHECK(good.sections == 2);
+    CHECK(good.rows == 2);
+    const project::MicrocodeCheck bad =
+        project::checkMicrocode("fetch:\n  FETCH\n# a comment\nHLT:\n  HALT\n  RAM_TO_B, ADDR_D1, ADDR_D2\n");
+    CHECK(bad.errors.empty());
+    REQUIRE(bad.conflicts.size() == 1);
+    CHECK(bad.conflicts[0].find("6: warning: HLT, row 2, breaks rule 8") == 0);
+  }
+
+  TEST_CASE("checking a set that does not parse gives the parser's errors by line") {
+    const project::MicrocodeCheck c = project::checkMicrocode("fetch:\n  NOT_A_SIGNAL\n");
+    REQUIRE_FALSE(c.errors.empty());
+    CHECK(c.errors[0].find("2: ") == 0);
+    CHECK(c.conflicts.empty());
+  }
+
   TEST_CASE("a microcode.txt that does not parse names its line") {
     TempDir t;
     write(t.path / "src" / "main.asm", "HLT\n");
@@ -283,6 +306,291 @@ TEST_SUITE("simplecpu-make new") {
     CHECK(b.cartridge->basic[0].first == "AUTORUN");
     CHECK(b.cartridge->microcode == "@optimal");
     CHECK(b.instructions > 1000);
+  }
+#endif
+
+#if SC8_HAVE_BASIC
+  // A library is a .bas file of routines in the libraries folder. A
+  // project INCLUDEs it, and the ROM carries it, so the machine that
+  // plays the ROM needs no libraries folder.
+  TEST_CASE("the ROM carries every library the INCLUDE chain reaches, after the project's own files") {
+    TempDir t;
+    const fs::path game = t.path / "game";
+    const fs::path libs = t.path / "libraries";
+    write(game / "src" / "autorun.bas", "10 INCLUDE GRAPHICS\n15 INCLUDE LOCAL\n20 GOSUB GRAPHICS:1000\n30 GOSUB LOCAL:10\n");
+    write(game / "src" / "local.bas", "5 INCLUDE GRAPHICS\n10 RETURN\n");
+    write(libs / "graphics.bas", "10 INCLUDE shapes\n1000 GOSUB SHAPES:100\n1010 RETURN\n");
+    write(libs / "Shapes.BAS", "100 RETURN\n");
+    write(libs / "unused.bas", "10 RETURN\n");
+    project::Options opts;
+    opts.libraries = {libs};
+    project::Built b = project::build(project::layoutOf(game), opts);
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    std::vector<std::string> names;
+    for (const auto& slot : b.cartridge->basic) names.push_back(slot.first);
+    CHECK(names == std::vector<std::string>{"AUTORUN", "LOCAL", "GRAPHICS", "SHAPES"});
+    CHECK(b.cartridge->basic[2].second == "10 INCLUDE shapes\n1000 GOSUB SHAPES:100\n1010 RETURN\n");
+  }
+
+  TEST_CASE("a project's own file wins over a library of the same name") {
+    TempDir t;
+    const fs::path game = t.path / "game";
+    write(game / "src" / "autorun.bas", "10 INCLUDE GRAPHICS\n20 GOSUB GRAPHICS:1000\n");
+    write(game / "src" / "graphics.bas", "1000 REM THE PROJECT'S\n1010 RETURN\n");
+    write(t.path / "libraries" / "graphics.bas", "1000 REM THE LIBRARY'S\n1010 RETURN\n");
+    project::Options opts;
+    opts.libraries = {t.path / "libraries"};
+    project::Built b = project::build(project::layoutOf(game), opts);
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    REQUIRE_EQ(b.cartridge->basic.size(), 2u);
+    CHECK(b.cartridge->basic[1].second.find("THE PROJECT'S") != std::string::npos);
+  }
+
+  // A library by name gets the check a file by path gets. A libraries
+  // folder may come with a project somebody else made. A link in it must
+  // not put a file from elsewhere into the ROM.
+  TEST_CASE("a link in a libraries folder to a file outside it is no library") {
+    TempDir t;
+    const fs::path libs = t.path / "libraries";
+    write(libs / "shapes.bas", "100 RETURN\n");
+    write(libs / "notes.txt", "NOT A PROGRAM\n");
+    write(t.path / "outside" / "secret.txt", "PRIVATE\n");
+    write(t.path / "outside" / "other.bas", "10 REM OUTSIDE\n");
+    std::error_code ec;
+    fs::create_symlink(t.path / "outside" / "secret.txt", libs / "keys.bas", ec);
+    // A system that makes no links here has nothing to check.
+    if (ec) return;
+    fs::create_symlink(t.path / "outside" / "other.bas", libs / "other.bas");
+    fs::create_symlink(libs / "notes.txt", libs / "notes.bas");
+    fs::create_symlink(libs / "shapes.bas", libs / "forms.bas");
+    CHECK(project::libraryFile({libs}, "SHAPES") == libs / "shapes.bas");
+    CHECK(project::libraryFile({libs}, "KEYS").empty());
+    CHECK(project::libraryFile({libs}, "OTHER").empty());
+    // Inside the folder, and still not a program's file.
+    CHECK(project::libraryFile({libs}, "NOTES").empty());
+    // A link that stays inside the folder is a second name for a library.
+    CHECK(project::libraryFile({libs}, "FORMS") == libs / "forms.bas");
+    // A libraries folder that is itself a link is the folder it leads to.
+    fs::create_directory_symlink(libs, t.path / "linked");
+    CHECK(project::libraryFile({t.path / "linked"}, "SHAPES") == t.path / "linked" / "shapes.bas");
+    // The next folder is asked when the first has only the link.
+    write(t.path / "more" / "keys.bas", "10 REM KEYS\n");
+    CHECK(project::libraryFile({libs, t.path / "more"}, "KEYS") == t.path / "more" / "keys.bas");
+  }
+
+  TEST_CASE("the ROM takes a plain library and refuses one that is a link to outside") {
+    TempDir t;
+    const fs::path game = t.path / "game";
+    const fs::path libs = t.path / "libraries";
+    write(game / "src" / "autorun.bas", "10 INCLUDE SHAPES\n20 INCLUDE KEYS\n");
+    write(libs / "shapes.bas", "100 RETURN\n");
+    write(t.path / "outside" / "secret.txt", "PRIVATE\n");
+    std::error_code ec;
+    fs::create_symlink(t.path / "outside" / "secret.txt", libs / "keys.bas", ec);
+    if (ec) return;
+    project::Options opts;
+    opts.libraries = {libs};
+    project::Built b = project::build(project::layoutOf(game), opts);
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_EQ(b.errors.size(), 1u);
+    CHECK(b.errors[0].find("autorun.bas:2: INCLUDE KEYS") != std::string::npos);
+    // Without the link the same project builds, with its plain library.
+    write(game / "src" / "autorun.bas", "10 INCLUDE SHAPES\n");
+    b = project::build(project::layoutOf(game), opts);
+    REQUIRE_MESSAGE(b.cartridge, (b.errors.empty() ? std::string() : b.errors[0]));
+    REQUIRE_EQ(b.cartridge->basic.size(), 2u);
+    CHECK(b.cartridge->basic[1].first == "SHAPES");
+    for (const auto& slot : b.cartridge->basic) CHECK(slot.second.find("PRIVATE") == std::string::npos);
+  }
+
+  TEST_CASE("an INCLUDE that names no file is a build error with its line") {
+    TempDir t;
+    write(t.path / "game" / "src" / "autorun.bas", "10 PRINT 1\n20 INCLUDE NOPE\n");
+    project::Options opts;
+    opts.libraries = {t.path / "libraries"};
+    project::Built b = project::build(project::layoutOf(t.path / "game"), opts);
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_FALSE(b.errors.empty());
+    CHECK(b.errors[0].find("autorun.bas:2: INCLUDE NOPE") != std::string::npos);
+    CHECK(b.errors[0].find("libraries") != std::string::npos);
+  }
+
+  // The running machine names the file. A program somebody else wrote
+  // must not get the host to read what is not a BASIC program, or more
+  // than a slot holds.
+  TEST_CASE("a program file is read only when it is a .bas file no larger than a slot's text") {
+    TempDir t;
+    write(t.path / "lib" / "graphics.bas", "10 REM OK\r\n20 RETURN\r\n");
+    write(t.path / "lib" / "Tools.BAS", "10 RETURN\n");
+    write(t.path / "lib" / "secret.txt", "10 REM NOT A PROGRAM\n");
+    write(t.path / "lib" / "noextension", "10 REM NEITHER\n");
+    write(t.path / "lib" / "huge.bas", std::string(70000, 'X'));
+    // The text comes back with LF line ends, as a slot holds it.
+    CHECK(project::readProgramFile(t.path / "lib" / "graphics.bas") == std::string("10 REM OK\n20 RETURN\n"));
+    CHECK(project::readProgramFile(t.path / "lib" / "Tools.BAS") == std::string("10 RETURN\n"));
+    CHECK_FALSE(project::readProgramFile(t.path / "lib" / "secret.txt"));
+    CHECK_FALSE(project::readProgramFile(t.path / "lib" / "noextension"));
+    CHECK_FALSE(project::readProgramFile(t.path / "lib" / "huge.bas"));
+    CHECK_FALSE(project::readProgramFile(t.path / "lib" / "missing.bas"));
+    CHECK_FALSE(project::readProgramFile(t.path / "lib"));
+  }
+
+  // A LOAD by path may reach a file of the project, a sibling project in
+  // the projects folder or a library, and no further: the program that
+  // names the path may be somebody else's.
+  TEST_CASE("a program file by path is read only from inside the folders it may come from") {
+    TempDir t;
+    const fs::path projects = t.path / "projects";
+    write(projects / "game" / "src" / "game.bas", "10 REM GAME\n");
+    write(projects / "graphlib" / "graphics.bas", "10 REM LIB\n");
+    write(t.path / "outside" / "private.bas", "10 REM PRIVATE\n");
+    const std::vector<fs::path> roots = {projects};
+    const fs::path game = projects / "game";
+    CHECK(project::readProgramFileIn(game, "../graphlib/graphics.bas", roots) == std::string("10 REM LIB\n"));
+    CHECK(project::readProgramFileIn(game, "src/game.bas", roots) == std::string("10 REM GAME\n"));
+    // Out of the folder by .. is refused.
+    CHECK_FALSE(project::readProgramFileIn(game, "../../outside/private.bas", roots));
+    // No folder to read from, no file.
+    CHECK_FALSE(project::readProgramFileIn(projects / "graphlib", "graphics.bas", {}));
+    // A name that only starts like the folder's is another folder.
+    write(t.path / "projects-old" / "old.bas", "10 REM OLD\n");
+    CHECK_FALSE(project::readProgramFileIn(game, "../../projects-old/old.bas", roots));
+    // Not a program's file, whatever folder it is in.
+    write(projects / "game" / "notes.txt", "10 REM NOTES\n");
+    CHECK_FALSE(project::readProgramFileIn(game, "notes.txt", roots));
+  }
+
+  // A path with a root is refused by its spelling, before the disk or
+  // the network is asked anything: on Windows a path that names a
+  // server would make the host call that server.
+  TEST_CASE("a path the machine gives must be relative") {
+    TempDir t;
+    const fs::path projects = t.path / "projects";
+    write(projects / "game" / "game.bas", "10 REM GAME\n");
+    const std::vector<fs::path> roots = {projects};
+    const fs::path game = projects / "game";
+    // Even a file inside the folder, named from the root.
+    CHECK_FALSE(project::readProgramFileIn(game, (game / "game.bas").string(), roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "/etc/passwd.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "//server/share/x.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "\\\\server\\share\\x.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "C:/x.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "C:x.bas", roots));
+    CHECK_FALSE(project::readProgramFileIn(game, "", roots));
+    CHECK(project::readProgramFileIn(game, "game.bas", roots) == std::string("10 REM GAME\n"));
+  }
+
+  TEST_CASE("a link inside the folder to a file outside it is not read") {
+    TempDir t;
+    const fs::path projects = t.path / "projects";
+    write(projects / "game" / "src" / "game.bas", "10 REM GAME\n");
+    write(t.path / "outside" / "private.bas", "10 REM PRIVATE\n");
+    std::error_code ec;
+    fs::create_symlink(t.path / "outside" / "private.bas", projects / "game" / "link.bas", ec);
+    // A system that makes no links here has nothing to check.
+    if (!ec) CHECK_FALSE(project::readProgramFileIn(projects / "game", "link.bas", {projects}));
+  }
+
+  // The folder a project sits in is one of them, so projects beside
+  // each other copy from one another wherever they are.
+  TEST_CASE("a path may reach the project, its parent, the projects folder and the libraries") {
+    const fs::path game = fs::path("/home/me/game");
+    const std::vector<fs::path> libraries = {"/home/me/projects/libraries", "/home/me/libraries"};
+    const std::vector<fs::path> set = project::loadRoots(game, "/home/me/projects", libraries);
+    CHECK(set == std::vector<fs::path>{game, "/home/me", "/home/me/projects", "/home/me/projects/libraries", "/home/me/libraries"});
+    const std::vector<fs::path> unset = project::loadRoots(game, {}, {});
+    CHECK(unset == std::vector<fs::path>{game, "/home/me"});
+    // A project with no folder has nowhere to read from.
+    CHECK(project::loadRoots({}, "/home/me/projects", libraries).empty());
+  }
+
+  // A folder comes from a command line, a dialog or a settings file, and
+  // each spells it its own way. The parent of `game/` taken as spelled is
+  // `game`, and a root with a separator after it matched nothing.
+  TEST_CASE("a folder has one spelling: no separator after it, no dot and no dot dot in it") {
+    const fs::path game = "/home/me/game";
+    CHECK(project::normalFolder("/home/me/game/") == game);
+    CHECK(project::normalFolder("/home/me/game/.") == game);
+    CHECK(project::normalFolder("/home/me/pong/../game") == game);
+    CHECK(project::normalFolder("/home/me/game") == game);
+    CHECK(project::normalFolder("/home/me/game/..") == fs::path("/home/me"));
+    CHECK(project::normalFolder("game/") == fs::path("game"));
+    CHECK(project::normalFolder("/") == fs::path("/"));
+    CHECK(project::normalFolder("").empty());
+  }
+
+  TEST_CASE("every spelling of the project's folder gives the same LOAD roots") {
+    const std::vector<fs::path> plain = project::loadRoots("/home/me/game", "/home/me/projects", {"/home/me/libraries"});
+    CHECK(plain == std::vector<fs::path>{"/home/me/game", "/home/me", "/home/me/projects", "/home/me/libraries"});
+    for (const char* spelled : {"/home/me/game/", "/home/me/game/.", "/home/me/pong/../game"}) {
+      CAPTURE(spelled);
+      CHECK(project::loadRoots(spelled, "/home/me/projects/", {"/home/me/libraries/."}) == plain);
+    }
+    // game/.. is the folder game sits in, and the roots are that folder's.
+    CHECK(project::loadRoots("/home/me/game/..", {}, {}) == std::vector<fs::path>{"/home/me", "/home"});
+  }
+
+  TEST_CASE("a LOAD from the project beside this one works from every spelling of the folder") {
+    TempDir t;
+    write(t.path / "game" / "src" / "game.bas", "10 REM GAME\n");
+    write(t.path / "pong" / "sound.bas", "10 REM SOUND\n");
+    for (const char* spelled : {"game", "game/", "game/.", "pong/../game"}) {
+      CAPTURE(spelled);
+      const fs::path dir = fs::path(t.path.string() + "/" + spelled);
+      const std::vector<fs::path> roots = project::loadRoots(dir, {}, {});
+      CHECK(project::readProgramFileIn(dir, "../pong/sound.bas", roots) == std::string("10 REM SOUND\n"));
+      CHECK(project::readProgramFileIn(dir, "src/game.bas", roots) == std::string("10 REM GAME\n"));
+    }
+  }
+
+  TEST_CASE("a projects folder with a separator after it matches what is inside it") {
+    TempDir t;
+    const fs::path projects = t.path / "projects";
+    const fs::path game = t.path / "elsewhere" / "game";
+    write(projects / "pong" / "sound.bas", "10 REM SOUND\n");
+    write(game / "src" / "game.bas", "10 REM GAME\n");
+    write(t.path / "outside" / "x.bas", "10 REM OUTSIDE\n");
+    const fs::path spelled = fs::path(projects.string() + "/");
+    // Given as it is, with no loadRoots between.
+    CHECK(project::readProgramFileIn(projects / "pong", "sound.bas", {spelled}) == std::string("10 REM SOUND\n"));
+    // Through loadRoots, where the projects folder alone reaches the file.
+    const std::vector<fs::path> roots = project::loadRoots(game, spelled, {});
+    CHECK(project::readProgramFileIn(game, "../../projects/pong/sound.bas", roots) == std::string("10 REM SOUND\n"));
+    CHECK_FALSE(project::readProgramFileIn(game, "../../outside/x.bas", roots));
+  }
+
+  // The size is not trusted to stay what it was when it was asked.
+  TEST_CASE("a program file's text is never more than a slot holds") {
+    TempDir t;
+    write(t.path / "edge.bas", std::string(65535, 'X'));
+    write(t.path / "over.bas", std::string(65536, 'X'));
+    const auto edge = project::readProgramFile(t.path / "edge.bas");
+    REQUIRE(edge);
+    CHECK(edge->size() == 65535);
+    CHECK_FALSE(project::readProgramFile(t.path / "over.bas"));
+  }
+
+  TEST_CASE("the default libraries folder is libraries in the projects folder, and nothing without one") {
+    CHECK(project::defaultLibraries("/home/me/projects") == fs::path("/home/me/projects") / "libraries");
+    CHECK(project::defaultLibraries({}).empty());
+  }
+
+  TEST_CASE("the files a program INCLUDEs are read off the lines that open with the word") {
+    CHECK(project::includesOf("10 include graphics\n20 PRINT \"INCLUDE NO\"\n30 REM INCLUDE NEITHER\n40 INCLUDE Tools.bas\n") ==
+          std::vector<std::string>{"GRAPHICS", "TOOLS"});
+    CHECK(project::includesOf("10 A = 1 : INCLUDE LATE\n").empty());
+  }
+
+  TEST_CASE("an included file's mistake is reported when the program that includes it is built") {
+    TempDir t;
+    write(t.path / "game" / "src" / "autorun.bas", "10 INCLUDE GRAPHICS\n20 GOSUB GRAPHICS:999\n");
+    write(t.path / "libraries" / "graphics.bas", "1000 RETURN\n");
+    project::Options opts;
+    opts.libraries = {t.path / "libraries"};
+    project::Built b = project::build(project::layoutOf(t.path / "game"), opts);
+    CHECK_FALSE(b.cartridge);
+    REQUIRE_FALSE(b.errors.empty());
+    CHECK(b.errors[0].find("autorun.bas:2: THERE IS NO LINE 999") != std::string::npos);
   }
 #endif
 
