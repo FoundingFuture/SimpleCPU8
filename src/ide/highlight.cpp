@@ -7,6 +7,7 @@
 
 #include "basic/program.h"
 #include "core/isa.h"
+#include "ide/indent_keys.h"
 #include "ide/panes.h"
 #include "imgui_internal.h"
 
@@ -318,6 +319,14 @@ std::vector<Span> lexLine(Syntax syntax, std::string_view line, LexState& state)
 
 bool codeEditor(const char* id, std::string& text, Syntax syntax, ImVec2 size, ImGuiInputTextFlags flags,
                 ImGuiInputTextCallback callback, void* user, Gutter* gutter) {
+  // A box that takes Tab gets the indentation keys in front of its own
+  // callback. BASIC does not read a tab as a space, so it gets spaces.
+  IndentKeys::Box keys{ImGui::GetID(id), syntax != Syntax::Basic, flags, callback, user};
+  if (flags & ImGuiInputTextFlags_AllowTabInput) {
+    flags |= IndentKeys::FLAGS;
+    callback = IndentKeys::callback;
+    user = &keys;
+  }
   if (syntax == Syntax::Plain && !gutter) return panes::inputMultiline(id, text, size, flags, callback, user);
   if (gutter) {
     gutter->clicked = 0;

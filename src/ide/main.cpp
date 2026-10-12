@@ -46,6 +46,7 @@
 #include <filesystem>
 
 #include "ide/ide.h"
+#include "ide/indent_keys.h"
 #include "ide/settings.h"
 #include "vm/redraw.h"
 
@@ -55,6 +56,7 @@ int main(int argc, char** argv) {
   SetExitKey(KEY_NULL);
   SetTargetFPS(60);
   rlImGuiSetup(true);
+  sc8::IndentKeys::wideTabs();
   ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
   // The layout is kept in the settings folder and written only by Save
   // layout in the Settings menu, never on every change.

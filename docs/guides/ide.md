@@ -105,6 +105,20 @@ The Breakpoints pane is in every view. It lists them all with their
 document and line, beside the ones set in the Listing's margin. A click
 on one shows its line in its view.
 
+## Indentation
+
+Tab moves the caret to the next multiple of 4 columns. In a line's
+indentation it indents the line, and Backspace there steps back 4
+columns. After text, Tab adds spaces and Backspace takes one character.
+
+A tab character is 8 columns wide. The editor stores 8 columns of
+indentation as one tab character, and 12 columns as a tab and 4 spaces.
+It writes a tab nowhere else in a line. A BASIC document is indented
+with spaces alone.
+
+Format writes the same indentation. A mnemonic without a label has a
+tab before it, and a mnemonic after a label has spaces.
+
 ## Idle
 
 A paused IDE draws nothing until a key, a click or a mouse move arrives,

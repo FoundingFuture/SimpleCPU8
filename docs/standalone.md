@@ -383,6 +383,17 @@ indentation. Preferences can lay out every `.asm` document on save, and
 that is on by default. `src/asm/format.cpp` does the layout, and a test
 checks that every example assembles to the same bytes after it.
 
+A tab character is 8 columns wide, `TAB_WIDTH` in `src/asm/tabs.h`. Dear
+ImGui draws a tab at one width wherever it stands, which is right only at
+the start of a line. So a tab goes into a line's indentation and nowhere
+else. Format indents a line without a label with a tab, and pads after a
+label with spaces. In the editor Tab moves to the next multiple of 4
+columns, and 8 columns of indentation are stored as one tab. Backspace
+in the indentation steps back 4. BASIC does not read a tab as a space,
+so a `.bas` document gets spaces. `src/ide/indent.cpp` holds the rule.
+`src/ide/indent_keys.cpp` applies it to the text box, and its `wideTabs`
+leaves the font's own tab glyph out, which is one space wide.
+
 Save is the whole project: every changed document into its folder. A
 project opened from a ROM saves into that ROM. The documents are built
 and the file is written again with the project inside. Save asks first,

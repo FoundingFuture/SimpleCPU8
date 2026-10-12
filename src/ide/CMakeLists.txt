@@ -30,6 +30,8 @@ add_executable(simplecpu-ide
   view.cpp
   filedialog.cpp
   highlight.cpp
+  indent.cpp
+  indent_keys.cpp
   basic_assist.cpp
   settings.cpp
   run_panes.cpp

@@ -13,6 +13,10 @@
 // or further right when the code is longer. A line that is only a
 // comment keeps its indentation.
 //
+// A line's indentation is written as tabs of 8 columns, then spaces, as
+// asm/tabs.h has it. The room after a label and before a comment is
+// spaces.
+//
 // The layout never changes what the assembler reads: the same program,
 // RAM image, data and labels come out, on the same line numbers except
 // where a label moved onto its own line.
