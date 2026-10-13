@@ -200,6 +200,23 @@ std::optional<RowStop> rowAt(std::string_view text, int line) {
   return std::nullopt;
 }
 
+std::optional<int> lineOfRow(const std::vector<RowStop>& rows, std::string_view section, int row) {
+  for (const RowStop& r : rows) {
+    if (r.row == row && r.section == section) return r.line;
+  }
+  return std::nullopt;
+}
+
+std::optional<RowStop> rowBefore(const Machine& m) {
+  const Machine::SequencerPos pos = m.sequencer();
+  if (pos.section < 0) return std::nullopt;
+  const int row = static_cast<int>(pos.rowIndex);
+  if (pos.inFetch) return RowStop{"fetch", row, 0};
+  const OpDef* def = m.lastInstrPc < m.program.size() ? opByCode(m.program[m.lastInstrPc].op) : nullptr;
+  if (!def) return std::nullopt;
+  return RowStop{std::string(def->name), row, 0};
+}
+
 void RowBreaks::set(std::vector<RowStop> rows) {
   rows_ = std::move(rows);
   anyFetch_ = false;

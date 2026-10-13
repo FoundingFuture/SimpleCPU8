@@ -11,8 +11,10 @@
 
 #include "basic/lines.h"
 #include "cc/layout.h"
+#include "core/mcparse.h"
 #include "ide/highlight.h"
 #include "ide/ide.h"
+#include "ide/listing.h"
 #include "ide/panes.h"
 
 namespace sc8 {
@@ -378,48 +380,117 @@ void Ide::breakpointsPane(const char* pane) {
 
 // ---- listing
 
-// The assembled program, read-only, with the PC line highlighted. The
-// gutter toggles a breakpoint, and a RAM label at the start of a line
-// toggles its watch. One line at the top names the microcode set and
-// nothing else of it.
+namespace {
+
+// What a line of a listing starts with: the bar behind the line the
+// machine stands on, then the gutter. A dot there is a breakpoint, and a
+// ring under the mouse says a click sets one. True for a click on a line
+// that takes a breakpoint. The gutter stays the last item, for a tooltip.
+bool lineGutter(bool current, ImU32 bar, bool scroll, bool marked, bool takes) {
+  const float lineH = ImGui::GetTextLineHeightWithSpacing();
+  const ImVec2 rowStart = ImGui::GetCursorScreenPos();
+  if (current) {
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        rowStart, ImVec2(rowStart.x + ImGui::GetContentRegionAvail().x, rowStart.y + lineH), bar);
+    if (scroll) ImGui::SetScrollHereY(0.5f);
+  }
+  const bool clicked = ImGui::InvisibleButton("bp", ImVec2(14.0f, lineH)) && takes;
+  const ImVec2 dot(rowStart.x + 7.0f, rowStart.y + lineH * 0.5f);
+  if (marked) ImGui::GetWindowDrawList()->AddCircleFilled(dot, 4.5f, IM_COL32(230, 70, 60, 255));
+  else if (takes && ImGui::IsItemHovered()) ImGui::GetWindowDrawList()->AddCircle(dot, 4.5f, IM_COL32(230, 70, 60, 160));
+  return clicked;
+}
+
+}  // namespace
+
+// The Listing tab. In the MICROCODE view it holds one of four listings,
+// and a row of choices under the buttons picks it.
 void Ide::listingPane(const char* name) {
   ImGui::Begin(name);
   // Where the listing shares the editor's tab area it has the editor's
   // buttons, so a run or a step goes on from either tab.
   if (runTab(view_)) viewButtons(kindOfView(view_), nullptr);
-  const Machine& m = computer_.machine();
+  switch (view_ == View::Microcode ? chooseListing() : Listing::Assembly) {
+    case Listing::Microcode: rowsListing(); break;
+    case Listing::Assembly: assemblyListing(); break;
+    case Listing::C: sourceListing(Listing::C); break;
+    case Listing::Basic: sourceListing(Listing::Basic); break;
+  }
+  ImGui::End();
+}
+
+Listings Ide::listingsHere() const {
+  Listings have;
+  have.microcode = computer_.microcodeInspectable();
+  for (const Doc& d : docs_) {
+    const DocKind kind = docKindOf(d.name);
+    have.c = have.c || kind == DocKind::C;
+    have.basic = have.basic || kind == DocKind::Basic;
+  }
+  return have;
+}
+
+bool Ide::setListing(const std::string& key) {
+  const std::optional<Listing> listing = listingNamed(key);
+  if (listing) listingChoice_ = *listing;
+  return listing.has_value();
+}
+
+// The row of choices, and the listing it leaves on screen. A choice the
+// program has no listing for is grey and says why.
+Listing Ide::chooseListing() {
+  const Listings have = listingsHere();
+  const Listing shown = listingShown(listingChoice_, have);
+  for (int i = 0; i < LISTING_COUNT; i++) {
+    const Listing l = static_cast<Listing>(i);
+    const bool here = hasListing(have, l);
+    if (i > 0) ImGui::SameLine();
+    ImGui::BeginDisabled(!here);
+    if (ImGui::RadioButton(listingLabel(l), l == shown)) listingChoice_ = l;
+    ImGui::EndDisabled();
+    if (!here && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", listingMissing(l));
+  }
+  return shown;
+}
+
+// The line every listing has over its lines. It names the microcode set
+// and shows nothing else of it. Then comes the switch that keeps the
+// machine's place in view.
+void Ide::listingHead(const char* follow) {
   ImGui::TextDisabled("microcode: %s", computer_.microcodeInspectable() && computer_.microcodeName() != "@naive"
                                            ? "your own set"
                                            : computer_.microcodeName().c_str());
   ImGui::SameLine(0.0f, 20.0f);
-  ImGui::Checkbox("follow PC", &followPc_);
+  ImGui::Checkbox(follow, &followPc_);
+}
+
+// Red where the machine stopped at a breakpoint or crashed, else green.
+unsigned Ide::standingBar() const {
+  const bool stopped = computer_.hitBreakpoint || computer_.machine().status == Status::Crashed;
+  return stopped ? IM_COL32(120, 40, 30, 255) : IM_COL32(30, 80, 45, 255);
+}
+
+// The assembled program, read-only, with the PC line highlighted. The
+// gutter toggles a breakpoint, and a RAM label at the start of a line
+// toggles its watch.
+void Ide::assemblyListing() {
+  const Machine& m = computer_.machine();
+  listingHead("follow PC");
   ImGui::Separator();
   // Behind the editor's tab the lines are not laid out, so the scroll to
   // the PC waits for the frame that shows them.
   const bool shown = ImGui::BeginChild("lines");
-  const float lineH = ImGui::GetTextLineHeightWithSpacing();
   const int pcLine = static_cast<int>(m.pc);
+  const ImU32 bar = standingBar();
   for (size_t i = 0; i < listing_.size(); i++) {
     const ListLine& line = listing_[i];
     ImGui::PushID(static_cast<int>(i));
     const bool isPc = line.instr && *line.instr == pcLine;
     const bool hasBp = line.instr && breaksAt(static_cast<uint16_t>(*line.instr));
-    const ImVec2 rowStart = ImGui::GetCursorScreenPos();
-    if (isPc) {
-      const ImU32 bg = computer_.hitBreakpoint ? IM_COL32(120, 40, 30, 255)
-                       : m.status == Status::Crashed ? IM_COL32(120, 40, 30, 255)
-                                                     : IM_COL32(30, 80, 45, 255);
-      ImGui::GetWindowDrawList()->AddRectFilled(rowStart, ImVec2(rowStart.x + ImGui::GetContentRegionAvail().x, rowStart.y + lineH), bg);
-      if (followPc_ && (running_ || shownPc_ != m.pc)) ImGui::SetScrollHereY(0.5f);
-    }
+    const bool scroll = followPc_ && (running_ || shownPc_ != m.pc);
     // The gutter: a dot for a breakpoint, a click toggles it.
-    if (ImGui::InvisibleButton("bp", ImVec2(14.0f, lineH)) && line.instr) toggleBreakpoint(*line.instr);
+    if (lineGutter(isPc, bar, scroll, hasBp, line.instr.has_value())) toggleBreakpoint(*line.instr);
     if (ImGui::IsItemHovered() && line.instr) ImGui::SetTooltip("breakpoint at $%s", hex(static_cast<unsigned>(*line.instr), 4).c_str());
-    if (hasBp) {
-      ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(rowStart.x + 7.0f, rowStart.y + lineH * 0.5f), 4.5f, IM_COL32(230, 70, 60, 255));
-    } else if (ImGui::IsItemHovered() && line.instr) {
-      ImGui::GetWindowDrawList()->AddCircle(ImVec2(rowStart.x + 7.0f, rowStart.y + lineH * 0.5f), 4.5f, IM_COL32(230, 70, 60, 160));
-    }
     ImGui::SameLine(0.0f, 4.0f);
     ImGui::TextDisabled("%3zu", i + 1);
     ImGui::SameLine(0.0f, 8.0f);
@@ -463,7 +534,174 @@ void Ide::listingPane(const char* name) {
   }
   if (shown) shownPc_ = m.pc;
   ImGui::EndChild();
-  ImGui::End();
+}
+
+// The set the machine runs, written out as text: a line per section and
+// per row. A custom set's name is its text, so the name says when the
+// lines are stale.
+const Ide::RowsText& Ide::rowsText() {
+  const std::string& name = computer_.microcodeName();
+  if (rowsText_.made && rowsText_.of == name) return rowsText_;
+  rowsText_ = {};
+  rowsText_.made = true;
+  rowsText_.of = name;
+  const std::string text = serializeMicrocode(computer_.machine().microcode());
+  rowsText_.rows = project::rowLines(text);
+  for (size_t at = 0; at < text.size();) {
+    size_t nl = text.find('\n', at);
+    if (nl == std::string::npos) nl = text.size();
+    rowsText_.lines.push_back(text.substr(at, nl - at));
+    at = nl + 1;
+  }
+  rowsText_.rowAt.assign(rowsText_.lines.size(), -1);
+  for (size_t r = 0; r < rowsText_.rows.size(); r++) {
+    rowsText_.rowAt[static_cast<size_t>(rowsText_.rows[r].line - 1)] = static_cast<int>(r);
+  }
+  return rowsText_;
+}
+
+// A click in the rows' gutter. A row breakpoint is a line of the
+// project's microcode document, so the row is looked up there.
+void Ide::toggleListedRow(const project::RowStop& row) {
+  const std::string what = "row " + std::to_string(row.row + 1) + " of " + row.section;
+  for (const Doc& d : docs_) {
+    if (docKindOf(d.name) != DocKind::Microcode) continue;
+    const std::optional<int> line = project::lineOfRow(project::rowLines(d.text), row.section, row.row);
+    if (line) toggleRowBreak(d, *line);
+    else note(d.name + " has no " + what + ", so no breakpoint");
+    return;
+  }
+  note("no breakpoint on " + what + ": a row breakpoint is kept in the project's microcode set, and this project "
+       "has none. The editor beside this tab starts one");
+}
+
+// The microcode set's rows. The row that ran last is highlighted, the
+// one the Execution pane and the datapath show. A machine that ran
+// without a record has no such row: a row breakpoint stops it that way.
+// Then the row it stands before is outlined.
+void Ide::rowsListing() {
+  const Machine& m = computer_.machine();
+  const RowsText& set = rowsText();
+  listingHead("follow the row");
+  auto lineOf = [&](const std::string& section, int row) {
+    return project::lineOfRow(set.rows, section, row).value_or(0);
+  };
+  const int live = m.lastMicro ? lineOf(m.lastMicro->op, m.lastMicro->row) : 0;
+  const std::optional<project::RowStop> next = m.lastMicro ? std::nullopt : project::rowBefore(m);
+  const int before = next ? lineOf(next->section, next->row) : 0;
+  if (!m.lastMicro) {
+    ImGui::SameLine(0.0f, 20.0f);
+    ImGui::TextDisabled(!m.trace() ? "rows are not recorded at this speed"
+                        : before   ? "the machine stands before the outlined row"
+                                   : "no row recorded yet: Step runs one");
+  }
+  ImGui::Separator();
+  const ListingSpot spot{Listing::Microcode, "", live ? live : before};
+  // The breakpoints, as lines of this text.
+  std::vector<int> marks;
+  for (const project::RowStop& r : rowMarks_) {
+    if (const std::optional<int> line = project::lineOfRow(set.rows, r.section, r.row)) marks.push_back(*line);
+  }
+  const bool shown = ImGui::BeginChild("rows");
+  const ImU32 bar = standingBar();
+  const bool scroll = followPc_ && (running_ || !(shownSpot_ == spot));
+  std::optional<project::RowStop> clicked;
+  for (size_t i = 0; i < set.lines.size(); i++) {
+    const int lineNo = static_cast<int>(i) + 1;
+    const int row = set.rowAt[i];
+    ImGui::PushID(lineNo);
+    const bool marked = std::find(marks.begin(), marks.end(), lineNo) != marks.end();
+    if (lineNo == before) {
+      const ImVec2 at = ImGui::GetCursorScreenPos();
+      const ImVec2 end(at.x + ImGui::GetContentRegionAvail().x, at.y + ImGui::GetTextLineHeightWithSpacing());
+      ImGui::GetWindowDrawList()->AddRect(at, end, IM_COL32(60, 160, 90, 255));
+      if (scroll) ImGui::SetScrollHereY(0.5f);
+    }
+    if (lineGutter(lineNo == live, bar, scroll, marked, row >= 0)) clicked = set.rows[static_cast<size_t>(row)];
+    if (ImGui::IsItemHovered() && row >= 0) {
+      const project::RowStop& r = set.rows[static_cast<size_t>(row)];
+      ImGui::SetTooltip("breakpoint before row %d of %s", r.row + 1, r.section.c_str());
+    }
+    ImGui::SameLine(0.0f, 4.0f);
+    ImGui::TextDisabled("%4d", lineNo);
+    ImGui::SameLine(0.0f, 8.0f);
+    const std::string& text = set.lines[i];
+    if (row >= 0) ImGui::TextUnformatted(text.c_str());
+    else if (text.empty()) ImGui::TextUnformatted(" ");
+    else ImGui::TextColored(LINK, "%s", text.c_str());
+    ImGui::PopID();
+  }
+  if (shown) shownSpot_ = spot;
+  ImGui::EndChild();
+  if (clicked) toggleListedRow(*clicked);
+}
+
+// A C or a BASIC document as the program's source, read-only. The line
+// the machine stands on is highlighted, while it runs too. The document
+// is the one the machine stands in, and stays when the machine leaves
+// the project's own code.
+void Ide::sourceListing(Listing which) {
+  const bool basic = which == Listing::Basic;
+  const Machine& m = computer_.machine();
+  std::vector<std::string> names;
+  for (const Doc& d : docs_) {
+    const DocKind kind = docKindOf(d.name);
+    if (basic ? kind == DocKind::Basic : kind == DocKind::C || kind == DocKind::Header) names.push_back(d.name);
+  }
+  std::string standing;
+  if (!poweredOff_ && m.status == Status::Running) {
+    if (basic) standing = basicMidProgram() ? runningBasicDoc() : "";
+    else if (const project::SourceLine* at = basicBooted_ ? nullptr : pcLines_.at(m.pc)) standing = at->file;
+  }
+  std::string& last = listingDoc_[basic ? 1 : 0];
+  last = listingDoc(standing, last, names);
+  const Doc* doc = docNamed(last);
+  listingHead("follow the line");
+  ImGui::SameLine(0.0f, 20.0f);
+  ImGui::TextDisabled("%s", last.c_str());
+  ImGui::Separator();
+  if (!doc) return;
+  const int current = standingLine(*doc);
+  const ListingSpot spot{which, last, current};
+  const std::set<int>* basicMarks = nullptr;
+  const SourceBreaks* sourceMarks = nullptr;
+  if (basic) {
+    if (const auto it = basicBreaks_.find(doc->name); it != basicBreaks_.end()) basicMarks = &it->second;
+  } else if (const auto it = sourceBreaks_.find(doc->name); it != sourceBreaks_.end()) {
+    sourceMarks = &it->second;
+  }
+  const bool shown = ImGui::BeginChild("source");
+  const ImU32 bar = standingBar();
+  const bool scroll = followPc_ && (running_ || !(shownSpot_ == spot));
+  const Syntax syntax = syntaxOf(doc->name);
+  const std::string_view text = doc->text;
+  int clicked = 0;
+  int lineNo = 0;
+  for (size_t at = 0; at < text.size() || lineNo == 0;) {
+    size_t nl = text.find('\n', at);
+    if (nl == std::string_view::npos) nl = text.size();
+    const std::string_view line = text.substr(at, nl - at);
+    at = nl + 1;
+    lineNo++;
+    ImGui::PushID(lineNo);
+    // A BASIC breakpoint belongs to the number its line carries.
+    const std::optional<int> number = basic ? basic::lineNumber(line) : std::nullopt;
+    const bool marked = basic ? basicMarks && number && basicMarks->count(*number)
+                              : sourceMarks && sourceMarks->lines.count(lineNo);
+    if (lineGutter(lineNo == current, bar, scroll, marked, !basic || number.has_value())) clicked = lineNo;
+    ImGui::SameLine(0.0f, 4.0f);
+    // A BASIC line carries its own number, so the column has none.
+    if (!basic) {
+      ImGui::TextDisabled("%4d", lineNo);
+      ImGui::SameLine(0.0f, 8.0f);
+    }
+    codeLine(syntax, line);
+    ImGui::PopID();
+  }
+  if (shown) shownSpot_ = spot;
+  ImGui::EndChild();
+  if (clicked && basic) toggleBasicBreak(*doc, clicked);
+  else if (clicked) toggleSourceBreak(*doc, clicked);
 }
 
 }  // namespace sc8

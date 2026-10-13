@@ -30,6 +30,7 @@
 #include "ide/basic_assist.h"
 #include "ide/filedialog.h"
 #include "ide/guide.h"
+#include "ide/listing.h"
 #include "ide/settings.h"
 #include "ide/sprite_editor.h"
 #include "ide/view.h"
@@ -91,6 +92,9 @@ class Ide {
   // The command line's --font-view: single, strip or block. False for any
   // other name.
   bool setFontView(const std::string& name);
+  // The command line's --listing, the MICROCODE view's choice: microcode,
+  // assembly, c or basic. False for any other name.
+  bool setListing(const std::string& key);
 
   void setView(View view);
   View view() const { return view_; }
@@ -351,6 +355,7 @@ class Ide {
   // Where the machine stands, in the words of the view's language.
   std::string whereNote();
   int currentLine(const Doc& doc);
+  int standingLine(const Doc& doc);
   // The current line the editor last scrolled into view, and its document.
   int shownCurrent_ = 0;
   std::string shownCurrentDoc_;
@@ -383,6 +388,7 @@ class Ide {
   void toggleRowBreak(const Doc& doc, int line);
   void rebuildRowBreaks();
   project::RowBreaks rowBreaks_;
+  std::vector<project::RowStop> rowMarks_;  // the same rows, for the listing's dots
   std::string rowNote() const;
   // Breakpoints on BASIC lines, by document and line number. The watch
   // stops the machine when such a line starts. A line that leaves the
@@ -559,6 +565,38 @@ class Ide {
   void stackPane(const char* name);
   void breakpointsPane(const char* pane);
   void listingPane(const char* name);
+  // The MICROCODE view's Listing tab shows one listing of four. The
+  // choice is kept, and a listing the program lacks gives way while it
+  // is missing (ide/listing.h).
+  Listing listingChoice_ = Listing::Microcode;
+  Listings listingsHere() const;
+  Listing chooseListing();
+  void listingHead(const char* follow);
+  unsigned standingBar() const;
+  void assemblyListing();
+  void rowsListing();
+  void sourceListing(Listing which);
+  // The running set as text, a line per section and per row.
+  struct RowsText {
+    bool made = false;
+    std::string of;  // the set's name when the lines were made
+    std::vector<std::string> lines;
+    std::vector<project::RowStop> rows;
+    std::vector<int> rowAt;  // per line, a place in rows or -1
+  };
+  RowsText rowsText_;
+  const RowsText& rowsText();
+  void toggleListedRow(const project::RowStop& row);
+  // The document the C listing and the BASIC listing showed last.
+  std::string listingDoc_[2];
+  // The place a listing last scrolled to. The assembly keeps shownPc_.
+  struct ListingSpot {
+    Listing listing = Listing::Assembly;
+    std::string doc;
+    int line = -1;
+    bool operator==(const ListingSpot&) const = default;
+  };
+  ListingSpot shownSpot_;
   void datapathPane();
   void flowPane();
   void microcodePane();

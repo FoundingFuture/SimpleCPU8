@@ -18,7 +18,9 @@ keeps its own pane layout, its own guide and its own speed.
 
 `simplecpu-ide --view c` starts in a view: `basic`, `c`, `assembly` or
 `microcode`. `--level` still takes the names of the four levels the
-views replaced: `basic`, `project`, `run` and `cpu`.
+views replaced: `basic`, `project`, `run` and `cpu`. `--listing c`
+picks the listing the MICROCODE view shows: `microcode`, `assembly`, `c`
+or `basic`.
 
 ## The project column
 
@@ -54,6 +56,48 @@ document back.
 The Listing has the Editor's row of buttons. Run and Step work from
 either tab. The buttons that act on a document are greyed out in the
 Listing.
+
+## The listings of the MICROCODE view
+
+In the MICROCODE view a row of choices under the Listing's buttons picks
+what the tab lists.
+
+| Choice | Lists | Marks |
+|---|---|---|
+| Microcode | the set the machine runs, a line per section and per row | the row that ran last |
+| Assembly | the assembled program | the instruction at `PC` |
+| C | the C document the machine stands in | the line `PC` belongs to |
+| BASIC | the running `.bas` file | the line being executed |
+
+The marked line is green, and red where the machine stopped at a
+breakpoint or crashed. The follow switch keeps it in view. The CPU pane
+and the Execution pane stay beside the tab. So the rows stay in sight
+while the Listing shows a line of C or BASIC.
+
+Step runs one row whichever listing is chosen. A line of C or BASIC
+stays marked while its rows go by.
+
+A choice the program has no listing for is grey, and its tooltip says
+why. The optimal set is sealed, so it has no Microcode listing. C and
+BASIC need a document of that language in the project. A missing choice
+gives way to Microcode, or to Assembly under the sealed set.
+
+The Microcode listing shows the set as the machine holds it. It has no
+comments, and it does not change when `microcode.txt` is edited. Apply
+to machine loads the edited set and the listing follows.
+
+The row that ran last is known only while the machine records its rows.
+It records them during a step and at the trace speeds. A machine that a
+row breakpoint stopped has no such row yet. The row it stands before is
+outlined then, and the next Step runs it.
+
+The C listing keeps its document while the machine runs a library or
+the startup code, with no line marked.
+
+A click in a listing's margin sets or clears a breakpoint, as a click
+on a line's number does in the editor. In the Microcode listing it sets
+a row breakpoint. That breakpoint is a line of the project's
+`microcode.txt`, so a project without that document takes none.
 
 Speed is the view's own choice of the speed ladder. Microcode picks the
 set the machine runs: the project's `microcode.txt`, naive or optimal.
