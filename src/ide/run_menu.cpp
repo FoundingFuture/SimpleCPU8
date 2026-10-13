@@ -277,9 +277,12 @@ std::string Ide::whereNote() {
 // The line of a document the machine stands on, counted from 1 in the
 // document's text, or 0 when it stands on none of its lines. The editor
 // marks it while the machine is paused.
-int Ide::currentLine(const Doc& doc) {
+int Ide::currentLine(const Doc& doc) { return running_ ? 0 : standingLine(doc); }
+
+// The same line while the machine runs too, for a listing that follows it.
+int Ide::standingLine(const Doc& doc) {
   const Machine& m = computer_.machine();
-  if (running_ || poweredOff_ || m.status != Status::Running) return 0;
+  if (poweredOff_ || m.status != Status::Running) return 0;
   if (docKindOf(doc.name) == DocKind::Basic) {
     if (!basicMidProgram() || doc.name != runningBasicDoc()) return 0;
     const int line = (m.ram[basic::SYS_ERR_LINE] << 8) | m.ram[basic::SYS_ERR_LINE + 1];

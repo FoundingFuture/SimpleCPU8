@@ -100,6 +100,14 @@ std::vector<RowStop> rowLines(std::string_view text);
 // Nothing past the last row.
 std::optional<RowStop> rowAt(std::string_view text, int line);
 
+// The line of a row among rowLines' rows, by its section and its place in
+// it. Nothing for a row the text does not have.
+std::optional<int> lineOfRow(const std::vector<RowStop>& rows, std::string_view section, int row);
+
+// The row the machine runs next, while it stands inside an instruction.
+// Nothing between two instructions. The line is 0: a machine has no text.
+std::optional<RowStop> rowBefore(const Machine& m);
+
 // Breakpoints on rows of microcode. The machine stops inside an
 // instruction, before the row runs. A row of fetch stops every
 // instruction. The sealed set has no rows to stop at. The caller asks

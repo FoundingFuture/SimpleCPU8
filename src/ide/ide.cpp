@@ -918,6 +918,7 @@ void Ide::rebuildRowBreaks() {
       if (sb.lines.count(r.line)) rows.push_back(r);
     }
   }
+  rowMarks_ = rows;
   rowBreaks_.set(std::move(rows));
   refreshWatch();
 }

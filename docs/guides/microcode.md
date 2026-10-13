@@ -628,12 +628,12 @@ the naive text back. Choosing `my own` for the first time starts from a
 copy of the naive set. Swapping a set always restarts the machine,
 because a machine is built from its set.
 
-Breakpoints work here as on the Run level. Click the margin left of a
-line in the Listing and run. The machine stops when `PC` reaches that
-slot, before its fetch, and the Messages pane says `stopped at
-breakpoint, PC 0005`. The Flow and Microcode panes still show the rows
-of the instruction before, all marked done. The next F11 runs the
-fetch.
+Breakpoints work here as on the Run level. Choose Assembly over the
+Listing, click the margin left of a line and run. The machine stops when
+`PC` reaches that slot, before its fetch, and the Messages pane says
+`stopped at breakpoint, PC 0005`. The Flow and Microcode panes still
+show the rows of the instruction before, all marked done. The next F11
+runs the fetch.
 
 One thing to know about projects. The IDE's Project tab lists the
 `.c`, `.h`, `.asm` and `.bas` files of a folder and its Build button

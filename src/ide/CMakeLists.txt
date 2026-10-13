@@ -28,6 +28,7 @@ add_executable(simplecpu-ide
   project_column.cpp
   basic_files.cpp
   view.cpp
+  listing.cpp
   filedialog.cpp
   highlight.cpp
   indent.cpp

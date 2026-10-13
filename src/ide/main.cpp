@@ -10,6 +10,8 @@
 //                                 font mode's view: single, strip or block
 //   simplecpu-ide --view c        start in a view: basic, c, assembly or
 //                                 microcode
+//   simplecpu-ide --listing c     the MICROCODE view's listing: microcode,
+//                                 assembly, c or basic
 //   simplecpu-ide --level run     the same by the name of the level the
 //                                 view replaced, for the screenshot scripts:
 //                                 basic is basic, project is c, run is
@@ -107,6 +109,10 @@ int main(int argc, char** argv) {
         if (!ide.setSpeed(argv[++i])) std::fprintf(stderr, "unknown speed %s\n", argv[i]);
       } else if (a == "--font-view" && i + 1 < argc) {
         if (!ide.setFontView(argv[++i])) std::fprintf(stderr, "unknown font view %s: single, strip or block\n", argv[i]);
+      } else if (a == "--listing" && i + 1 < argc) {
+        if (!ide.setListing(argv[++i])) {
+          std::fprintf(stderr, "unknown listing %s: microcode, assembly, c or basic\n", argv[i]);
+        }
       } else if (a == "--break" && i + 1 < argc) {
         breaks.push_back(argv[++i]);
       } else if (a == "--do" && i + 1 < argc) {

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "core/machine.h"
+#include "core/mcparse.h"
 #include "core/microcode.h"
 #include "project/breakpoints.h"
 #include "project/project.h"
@@ -300,6 +301,45 @@ TEST_SUITE("a row of a microcode set's text") {
     CHECK_FALSE(rowAt(SET_TEXT, 10));
     CHECK_FALSE(rowAt(SET_TEXT, 0));
   }
+
+  TEST_CASE("a row's section and place give its line back") {
+    const std::vector<RowStop> rows = rowLines(SET_TEXT);
+    CHECK(lineOfRow(rows, "fetch", 0) == 2);
+    CHECK(lineOfRow(rows, "HLT", 0) == 5);
+    CHECK(lineOfRow(rows, "JZ", 1) == 9);
+  }
+
+  TEST_CASE("a row the text does not have has no line") {
+    const std::vector<RowStop> rows = rowLines(SET_TEXT);
+    CHECK_FALSE(lineOfRow(rows, "JZ", 2));
+    CHECK_FALSE(lineOfRow(rows, "LD", 0));
+    CHECK_FALSE(lineOfRow(rows, "jz", 0));
+  }
+
+  // The IDE lists the set the machine runs by writing it out, and lights
+  // the row the machine names by its section and its place.
+  TEST_CASE("every row of a set written out as text is found on its own line") {
+    const Microcode set = buildNaive();
+    const std::string text = serializeMicrocode(set);
+    const std::vector<RowStop> rows = rowLines(text);
+    std::vector<std::string> lines;
+    for (size_t at = 0; at <= text.size();) {
+      size_t nl = text.find('\n', at);
+      if (nl == std::string::npos) nl = text.size();
+      lines.push_back(text.substr(at, nl - at));
+      at = nl + 1;
+    }
+    size_t count = 0;
+    for (const Microcode::Section& section : set.sections()) {
+      for (size_t r = 0; r < section.rows.size(); r++) {
+        const std::optional<int> line = lineOfRow(rows, section.name, static_cast<int>(r));
+        REQUIRE_MESSAGE(line, section.name);
+        CHECK(lines[static_cast<size_t>(*line - 1)] == "  " + rowText(section.rows[r]));
+        count++;
+      }
+    }
+    CHECK(rows.size() == count);
+  }
 }
 
 // The naive set runs one FETCH row, then JZ's two rows: PC_INC and
@@ -321,6 +361,53 @@ TEST_SUITE("a row breakpoint against the machine") {
     CHECK(m.instructions == 1);
     CHECK(breaks.stopped().section == "JZ");
     CHECK(breaks.stopped().line == 9);
+  }
+
+  TEST_CASE("the row a stopped machine stands before is named by its section and place") {
+    Machine m = machineOf("        JZ skip\nskip:   HLT\n");
+    RowBreaks breaks;
+    breaks.set({{"JZ", 1, 9}});
+    REQUIRE(breaks.advance(m));
+    const std::optional<RowStop> before = rowBefore(m);
+    REQUIRE(before);
+    CHECK(before->section == "JZ");
+    CHECK(before->row == 1);
+  }
+
+  TEST_CASE("with the fetch behind it the machine stands before the instruction's first row") {
+    Machine m = machineOf("        JZ skip\nskip:   HLT\n");
+    RowBreaks breaks;
+    breaks.set({{"JZ", 0, 8}});
+    REQUIRE(breaks.advance(m));
+    const std::optional<RowStop> own = rowBefore(m);
+    REQUIRE(own);
+    CHECK(own->section == "JZ");
+    CHECK(own->row == 0);
+  }
+
+  // A fetch of two rows: one that moves nothing, then the naive FETCH.
+  TEST_CASE("inside the fetch the machine stands before a row of fetch") {
+    std::string text = serializeMicrocode(buildNaive());
+    const std::string fetch = "fetch:\n";
+    REQUIRE(text.compare(0, fetch.size(), fetch) == 0);
+    text.insert(fetch.size(), "  ALU_PASS_B\n");
+    McParsed set = parseMicrocode(text);
+    REQUIRE(set.errors.empty());
+    const Assembled a = assemble("        JZ skip\nskip:   HLT\n", nullptr);
+    REQUIRE(a.errors.empty());
+    Machine m(a.cartridge().program, std::move(set.microcode));
+    REQUIRE(m.microStep());
+    const std::optional<RowStop> before = rowBefore(m);
+    REQUIRE(before);
+    CHECK(before->section == "fetch");
+    CHECK(before->row == 1);
+  }
+
+  TEST_CASE("between two instructions the machine stands before no row") {
+    Machine m = machineOf("        JZ skip\nskip:   HLT\n");
+    CHECK_FALSE(rowBefore(m));
+    m.instructionStep();
+    CHECK_FALSE(rowBefore(m));
   }
 
   TEST_CASE("a row it already stopped at does not stop it twice") {
