@@ -329,6 +329,11 @@ class Ide {
   bool lastBuildOk_ = false;
   // BASIC runs a program now, and is not waiting at its prompt.
   bool basicMidProgram() const;
+  // Run hands the view's program to BASIC: the BASIC view with one open.
+  bool runsBasic();
+  // A run goes on that Pause would pause. The Run button, the Run menu
+  // and F5 all go by it. view.h's runGoing is the rule.
+  bool runGoing();
   void checkBasicDoc(Doc& doc);
   void checkMicrocodeDoc(const Doc& doc);
   // The Microcode submenu: the project's microcode.txt into the machine,

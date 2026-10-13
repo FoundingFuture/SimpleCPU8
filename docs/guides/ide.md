@@ -48,6 +48,11 @@ of code the view shows.
 | Pause, F5 | pauses | pauses | pauses | pauses |
 | Stop | breaks the program | powers the machine on again | the same | the same |
 
+Run and Pause are one button over the editor, and one key. It says Pause
+while a run goes on. A BASIC program that ends leaves BASIC at READY, and
+the button says Run again. The machine goes on there, so the screen still
+takes what you type.
+
 In the ASSEMBLY and MICROCODE views the Listing is a tab beside the
 Editor. Run and Step bring the Listing to the front, with the line the
 processor runs next in green. A click on the Editor tab brings the

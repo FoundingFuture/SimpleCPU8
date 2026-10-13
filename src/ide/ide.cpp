@@ -1470,7 +1470,7 @@ void Ide::shortcuts() {
   if (ImGui::IsKeyPressed(ImGuiKey_F5)) {
     if (io.KeyShift) powerOn();
     else if (io.KeyCtrl) buildProject(true);
-    else if (running_) setRunning(false);
+    else if (runGoing()) setRunning(false);
     else viewRun();
   }
   if (ImGui::IsKeyPressed(ImGuiKey_F6)) runOneFrame();

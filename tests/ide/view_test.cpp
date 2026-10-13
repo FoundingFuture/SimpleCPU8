@@ -103,4 +103,28 @@ TEST_SUITE("the IDE's views") {
     CHECK(sc8::runTab(View::Basic) == nullptr);
     CHECK(sc8::runTab(View::C) == nullptr);
   }
+
+  // The Run button is Pause while a run goes on. BASIC keeps the machine
+  // going at READY, so there the machine being run is not the answer.
+  TEST_CASE("a machine the IDE runs is a run going on, outside BASIC") {
+    CHECK(sc8::runGoing({.clocked = true}));
+    CHECK_FALSE(sc8::runGoing({.clocked = false}));
+  }
+
+  TEST_CASE("BASIC waiting at READY is no run going on") {
+    CHECK_FALSE(sc8::runGoing({.clocked = true, .basic = true, .atPrompt = true}));
+  }
+
+  TEST_CASE("a BASIC program, a command or the boot is a run going on") {
+    CHECK(sc8::runGoing({.clocked = true, .basic = true, .atPrompt = false}));
+  }
+
+  TEST_CASE("a program on its way to BASIC is a run going on, while READY still shows") {
+    CHECK(sc8::runGoing({.clocked = true, .basic = true, .atPrompt = true, .pending = true}));
+  }
+
+  TEST_CASE("a paused BASIC program is no run going on") {
+    CHECK_FALSE(sc8::runGoing({.clocked = false, .basic = true, .atPrompt = false}));
+    CHECK_FALSE(sc8::runGoing({.clocked = false, .basic = true, .atPrompt = true, .pending = true}));
+  }
 }

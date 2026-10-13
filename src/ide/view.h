@@ -33,6 +33,24 @@ const char* defaultSpeed(View view);
 // editor shows the line the machine stands on.
 const char* runTab(View view);
 
+// What the button that is Run or Pause goes by.
+struct RunState {
+  // The IDE runs the machine.
+  bool clocked = false;
+  // Run hands the view's program to a booted BASIC.
+  bool basic = false;
+  // BASIC waits at READY for a line.
+  bool atPrompt = false;
+  // A program or keys are still on their way to BASIC.
+  bool pending = false;
+};
+
+// A run goes on that Pause would pause, so the button says Pause.
+// DESIGN: BASIC keeps the machine going at READY, to read the keyboard.
+// So there the machine being run does not say a program runs. BASIC's
+// own word that it waits for a line does, once nothing is on its way.
+bool runGoing(const RunState& state);
+
 // One document of the project is a source, and its kind follows its name.
 enum class DocKind { C, Header, Assembly, Basic, Microcode, Other };
 DocKind docKindOf(const std::string& name);

@@ -945,6 +945,9 @@ program in the machine's memory and types `RUN` for you. Check reads the
 program for mistakes without running it. Step runs one line and stops
 before the next, with an arrow beside it.
 
+While the program runs, the Run button says Pause. When the program
+ends, BASIC is back at READY and the button says Run again.
+
 A click in the column before a line sets a breakpoint, shown as a red
 dot. The program stops when it reaches that line, before the line runs.
 Run goes on from there.
