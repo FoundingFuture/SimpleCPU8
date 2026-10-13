@@ -32,6 +32,11 @@ const char* viewLabel(View view) { return row(view).label; }
 const char* defaultSpeed(View view) { return row(view).speed; }
 const char* runTab(View view) { return row(view).runTab; }
 
+bool runGoing(const RunState& state) {
+  if (!state.clocked) return false;
+  return !state.basic || !state.atPrompt || state.pending;
+}
+
 std::optional<View> viewNamed(std::string_view key) {
   for (int i = 0; i < VIEW_COUNT; i++) {
     if (key == VIEWS[i].key) return static_cast<View>(i);

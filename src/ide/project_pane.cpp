@@ -839,8 +839,9 @@ void Ide::viewButtons(DocKind kind, Doc* doc) {
   ImGui::EndDisabled();
   // The Run menu's items for this view, a click away from the text.
   ImGui::SameLine();
-  if (ImGui::SmallButton(running_ ? "Pause" : "Run")) {
-    if (running_) setRunning(false);
+  const bool going = runGoing();
+  if (ImGui::SmallButton(going ? "Pause" : "Run")) {
+    if (going) setRunning(false);
     else viewRun();
   }
   ImGui::SameLine();

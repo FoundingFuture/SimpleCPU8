@@ -49,6 +49,20 @@ bool Ide::basicMidProgram() const {
   return ram[basic::SYS_RUNNING] == 1 && !basic::atPrompt(ram);
 }
 
+bool Ide::runsBasic() { return view_ == View::Basic && activeDocOf(View::Basic); }
+
+bool Ide::runGoing() {
+  const Machine& m = computer_.machine();
+  RunState state;
+  state.clocked = running_;
+  state.basic = runsBasic() && basicBooted_ && !poweredOff_ && m.status == Status::Running;
+  state.atPrompt = basic::atPrompt(m.ram);
+  // The program Run stores, the RUN it types after it, and keys BASIC
+  // has not read yet.
+  state.pending = pushPending_ || typingPos_ < typing_.size() || computer_.input().queued() > 0;
+  return sc8::runGoing(state);
+}
+
 bool Ide::needsBuild() const {
   if (!lastBuildOk_ || builtTexts_.size() != docs_.size()) return true;
   for (const Doc& d : docs_) {
@@ -62,7 +76,7 @@ bool Ide::needsBuild() const {
 // BASIC view hands the interpreter the active program and types RUN. A
 // BASIC program that was paused goes on from where it stopped.
 void Ide::viewRun() {
-  if (view_ == View::Basic && activeDocOf(View::Basic)) {
+  if (runsBasic()) {
     if (basicMidProgram()) setRunning(true);
     else runInBasic();
     return;
@@ -376,7 +390,8 @@ bool Ide::menuAction(const std::string& name) {
 
 void Ide::runMenu() {
   if (!ImGui::BeginMenu("Run")) return;
-  if (ImGui::MenuItem("Run", "F5", false, !running_)) viewRun();
+  const bool going = runGoing();
+  if (ImGui::MenuItem("Run", "F5", false, !going)) viewRun();
   if (ImGui::IsItemHovered()) {
     ImGui::SetTooltip(view_ == View::Basic ? "hand BASIC the program in the editor and RUN it"
                                            : "build the project if a document changed, then run it");
@@ -391,7 +406,7 @@ void Ide::runMenu() {
     ImGui::SetTooltip("%s", WHAT[static_cast<int>(view_)]);
   }
   if (ImGui::MenuItem(stepLabel(), "F10")) viewStep();
-  if (ImGui::MenuItem("Pause", "F5", false, running_)) setRunning(false);
+  if (ImGui::MenuItem("Pause", "F5", false, going)) setRunning(false);
   if (ImGui::MenuItem("Stop")) viewStop();
   if (ImGui::IsItemHovered()) {
     ImGui::SetTooltip(view_ == View::Basic ? "break the BASIC program, as Escape does on the machine"
